@@ -1,0 +1,1 @@
+{"compilerOptions":{"module":"ESNext","moduleResolution":"bundler","declaration":true,"emitDeclarationOnly":false,"target":"ES2021","outDir":"./dist","baseUrl":"./","skipLibCheck":true,"strictNullChecks":true,"noImplicitAny":true},"include":["src/**/*"]}

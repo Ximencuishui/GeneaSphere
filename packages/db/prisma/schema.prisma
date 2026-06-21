@@ -1,0 +1,348 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(uuid()) @map("id")
+  phone         String         @unique @map("phone")
+  password_hash String         @map("password_hash")
+  created_at    DateTime       @default(now()) @map("created_at")
+  updated_at    DateTime       @updatedAt @map("updated_at")
+  clans         ClanMember[]
+  admin_of      Clan[]         @relation("AdminUser")
+  media_uploads MediaArchive[]
+  media_reviews MediaReview[]
+  bio_reviews_author  BioReview[]    @relation("BioAuthor")
+  bio_reviews_reviewer BioReview[]   @relation("BioReviewer")
+  merge_applications  MergeApplication[] @relation("Applicant")
+  application_reviews MergeApplication[] @relation("ApplicationReviewer")
+  audit_logs    AuditLog[]
+  print_orders  PrintOrder[]
+
+  @@map("users")
+}
+
+model Clan {
+  id            BigInt         @id @default(autoincrement()) @map("id")
+  name          String         @map("name")
+  description   String?        @map("description")
+  admin_user_id String         @map("admin_user_id")
+  settings_json Json?          @map("settings_json")
+  created_at    DateTime       @default(now()) @map("created_at")
+  updated_at    DateTime       @updatedAt @map("updated_at")
+  admin_user    User           @relation("AdminUser", fields: [admin_user_id], references: [id], onDelete: Cascade)
+  families      FamilyUnit[]
+  media         MediaArchive[]
+  persons       Person[]
+  members       ClanMember[]
+  privacy_settings PrivacySetting[]
+  xipai         Xipai[]
+  merge_applications MergeApplication[]
+  audit_logs    AuditLog[]
+  data_snapshots DataSnapshot[]
+  print_orders  PrintOrder[]
+
+  @@map("clans")
+}
+
+model Person {
+  id               BigInt            @id @default(autoincrement()) @map("id")
+  clan_id          BigInt            @map("clan_id")
+  full_name        String            @map("full_name")
+  gender           Gender            @map("gender")
+  birth_date       DateTime?         @map("birth_date")
+  death_date       DateTime?         @map("death_date")
+  is_living        Boolean           @default(true) @map("is_living")
+  created_at       DateTime          @default(now()) @map("created_at")
+  updated_at       DateTime          @updatedAt @map("updated_at")
+  children_in      FamilyChild[]     @relation("ChildRelation")
+  husband_in       FamilyUnit[]      @relation("HusbandRelation")
+  wife_in          FamilyUnit[]      @relation("WifeRelation")
+  media_links      MediaPersonLink[]
+  ancestor_links   PersonAncestry[]  @relation("AncestorRelation")
+  descendant_links PersonAncestry[]  @relation("DescendantRelation")
+  clan             Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  bio_reviews      BioReview[]
+  matched_persons  MergeApplication[] @relation("MatchedPerson")
+
+  @@map("persons")
+}
+
+model FamilyUnit {
+  id         BigInt        @id @default(autoincrement()) @map("id")
+  clan_id    BigInt        @map("clan_id")
+  husband_id BigInt?       @map("husband_id")
+  wife_id    BigInt?       @map("wife_id")
+  children   FamilyChild[]
+  clan       Clan          @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  husband    Person?       @relation("HusbandRelation", fields: [husband_id], references: [id])
+  wife       Person?       @relation("WifeRelation", fields: [wife_id], references: [id])
+
+  @@map("family_units")
+}
+
+model FamilyChild {
+  id          BigInt     @id @default(autoincrement()) @map("id")
+  family_id   BigInt     @map("family_id")
+  child_id    BigInt     @map("child_id")
+  birth_order Int        @map("birth_order")
+  child       Person     @relation("ChildRelation", fields: [child_id], references: [id], onDelete: Cascade)
+  family      FamilyUnit @relation(fields: [family_id], references: [id], onDelete: Cascade)
+
+  @@map("family_children")
+}
+
+model PersonAncestry {
+  ancestor_id   BigInt @map("ancestor_id")
+  descendant_id BigInt @map("descendant_id")
+  depth         Int    @map("depth")
+  ancestor      Person @relation("AncestorRelation", fields: [ancestor_id], references: [id], onDelete: Cascade)
+  descendant    Person @relation("DescendantRelation", fields: [descendant_id], references: [id], onDelete: Cascade)
+
+  @@id([ancestor_id, descendant_id])
+  @@map("person_ancestry")
+}
+
+model MediaArchive {
+  id             BigInt            @id @default(autoincrement()) @map("id")
+  clan_id        BigInt            @map("clan_id")
+  uploader_id    String            @map("uploader_id")
+  file_url       String            @map("file_url")
+  taken_year     Int?              @map("taken_year")
+  taken_location String?           @map("taken_location")
+  description    String?           @map("description")
+  created_at     DateTime          @default(now()) @map("created_at")
+  updated_at     DateTime          @updatedAt @map("updated_at")
+  clan           Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  uploader       User              @relation(fields: [uploader_id], references: [id], onDelete: Cascade)
+  person_links   MediaPersonLink[]
+  reviews        MediaReview[]
+
+  @@map("media_archives")
+}
+
+model MediaPersonLink {
+  media_id  BigInt       @map("media_id")
+  person_id BigInt       @map("person_id")
+  media     MediaArchive @relation(fields: [media_id], references: [id], onDelete: Cascade)
+  person    Person       @relation(fields: [person_id], references: [id], onDelete: Cascade)
+
+  @@id([media_id, person_id])
+  @@map("media_person_links")
+}
+
+model SearchPost {
+  id             BigInt   @id @default(autoincrement()) @map("id")
+  origin_place   String   @map("origin_place")
+  xipai_keywords String[] @map("xipai_keywords")
+  contact_info   String   @map("contact_info")
+  created_by     String   @map("created_by")
+  created_at     DateTime @default(now()) @map("created_at")
+  updated_at     DateTime @updatedAt @map("updated_at")
+
+  @@index([origin_place])
+  @@index([xipai_keywords])
+  @@map("search_posts")
+}
+
+// ==================== 角色权限 ====================
+
+model ClanMember {
+  id        BigInt   @id @default(autoincrement()) @map("id")
+  clan_id   BigInt   @map("clan_id")
+  user_id   String   @map("user_id")
+  role      Role     @default(VIEWER) @map("role")
+  joined_at DateTime @default(now()) @map("joined_at")
+  clan      Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([clan_id, user_id])
+  @@map("clan_members")
+}
+
+// ==================== 内容审核 ====================
+
+model MediaReview {
+  id          BigInt       @id @default(autoincrement()) @map("id")
+  media_id    BigInt       @map("media_id")
+  reviewer_id String?      @map("reviewer_id")
+  status      ReviewStatus @default(PENDING) @map("status")
+  reject_reason String?    @map("reject_reason")
+  reviewed_at DateTime?    @map("reviewed_at")
+  created_at  DateTime     @default(now()) @map("created_at")
+  media       MediaArchive @relation(fields: [media_id], references: [id], onDelete: Cascade)
+  reviewer    User?        @relation(fields: [reviewer_id], references: [id], onDelete: SetNull)
+
+  @@map("media_reviews")
+}
+
+model BioReview {
+  id           BigInt       @id @default(autoincrement()) @map("id")
+  person_id    BigInt       @map("person_id")
+  author_id    String       @map("author_id")
+  title        String       @map("title")
+  content      String       @map("content")
+  reviewer_id  String?      @map("reviewer_id")
+  status       ReviewStatus @default(PENDING) @map("status")
+  reject_reason String?     @map("reject_reason")
+  reviewed_at  DateTime?    @map("reviewed_at")
+  created_at   DateTime     @default(now()) @map("created_at")
+  person       Person       @relation(fields: [person_id], references: [id], onDelete: Cascade)
+  author       User         @relation("BioAuthor", fields: [author_id], references: [id], onDelete: Cascade)
+  reviewer     User?        @relation("BioReviewer", fields: [reviewer_id], references: [id], onDelete: SetNull)
+
+  @@map("bio_reviews")
+}
+
+// ==================== 寻亲与归宗 ====================
+
+model MergeApplication {
+  id              BigInt        @id @default(autoincrement()) @map("id")
+  clan_id         BigInt        @map("clan_id")
+  applicant_id    String        @map("applicant_id")
+  origin_place    String        @map("origin_place")
+  xipai_info      String[]     @map("xipai_info")
+  ancestor_name   String?       @map("ancestor_name")
+  migration_history String?     @map("migration_history")
+  matched_person_id BigInt?     @map("matched_person_id")
+  match_score     Int?          @map("match_score")
+  match_details   String?       @map("match_details")
+  status          ApplicationStatus @default(PENDING) @map("status")
+  reject_reason   String?       @map("reject_reason")
+  merge_target_id BigInt?       @map("merge_target_id")
+  reviewed_by     String?       @map("reviewed_by")
+  reviewed_at     DateTime?     @map("reviewed_at")
+  created_at      DateTime      @default(now()) @map("created_at")
+  clan            Clan          @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  applicant       User          @relation("Applicant", fields: [applicant_id], references: [id], onDelete: Cascade)
+  matched_person  Person?       @relation("MatchedPerson", fields: [matched_person_id], references: [id], onDelete: SetNull)
+  reviewer        User?         @relation("ApplicationReviewer", fields: [reviewed_by], references: [id], onDelete: SetNull)
+
+  @@map("merge_applications")
+}
+
+// ==================== 系统设置 ====================
+
+model PrivacySetting {
+  id         BigInt   @id @default(autoincrement()) @map("id")
+  clan_id    BigInt   @unique @map("clan_id")
+  allow_visitor_deceased Boolean @default(false) @map("allow_visitor_deceased")
+  max_generations_visible Int    @default(5) @map("max_generations_visible")
+  hide_living_photos   Boolean   @default(true) @map("hide_living_photos")
+  hide_living_spouses  Boolean   @default(true) @map("hide_living_spouses")
+  enable_relative_verify Boolean  @default(false) @map("enable_relative_verify")
+  verify_questions      String[]  @default([]) @map("verify_questions")
+  verify_max_attempts   Int       @default(3) @map("verify_max_attempts")
+  clan      Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@map("privacy_settings")
+}
+
+model Xipai {
+  id          BigInt   @id @default(autoincrement()) @map("id")
+  clan_id     BigInt   @map("clan_id")
+  generation  Int      @map("generation")
+  character   String   @map("character")
+  note        String?  @map("note")
+  clan        Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@unique([clan_id, generation])
+  @@map("xipai")
+}
+
+// ==================== 操作日志 ====================
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement()) @map("id")
+  clan_id    BigInt?  @map("clan_id")
+  user_id    String   @map("user_id")
+  action     String   @map("action")
+  target_type String?  @map("target_type")
+  target_id  String?  @map("target_id")
+  details    String?  @map("details")
+  ip_address String?  @map("ip_address")
+  created_at DateTime @default(now()) @map("created_at")
+  clan       Clan?    @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, created_at])
+  @@index([user_id])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// ==================== 数据快照与回滚 ====================
+
+model DataSnapshot {
+  id         BigInt   @id @default(autoincrement()) @map("id")
+  clan_id    BigInt   @map("clan_id")
+  data       Json     @map("data")
+  reason     String   @map("reason")
+  created_by String   @map("created_by")
+  created_at DateTime @default(now()) @map("created_at")
+  expires_at DateTime @map("expires_at")
+  clan       Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, created_at])
+  @@map("data_snapshots")
+}
+
+// ==================== 印刷订单 ====================
+
+model PrintOrder {
+  id            BigInt    @id @default(autoincrement()) @map("id")
+  clan_id       BigInt    @map("clan_id")
+  user_id       String    @map("user_id")
+  specification String    @map("specification")
+  quantity      Int       @map("quantity")
+  amount        Float     @map("amount")
+  status        OrderStatus @default(PENDING) @map("status")
+  tracking_no   String?   @map("tracking_no")
+  created_at    DateTime  @default(now()) @map("created_at")
+  updated_at    DateTime  @updatedAt @map("updated_at")
+  clan          Clan      @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("print_orders")
+}
+
+// ==================== Enums ====================
+
+enum Role {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_MANUAL_REVIEW
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PRINTING
+  SHIPPED
+  COMPLETED
+  CANCELLED
+}
+
+enum Gender {
+  male
+  female
+}

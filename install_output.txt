@@ -1,0 +1,68 @@
+Scope: all 4 workspace projects
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +842
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 842, reused 840, downloaded 0, added 0
+Progress: resolved 842, reused 841, downloaded 0, added 0
+Progress: resolved 842, reused 841, downloaded 0, added 0, done
+.../node_modules/@prisma/engines postinstall$ node scripts/postinstall.js
+.../node_modules/unrs-resolver postinstall$ node postinstall.js
+.../esbuild@0.25.12/node_modules/esbuild postinstall$ node install.js
+.../node_modules/unrs-resolver postinstall: node:internal/modules/cjs/loader:1503
+.../node_modules/unrs-resolver postinstall:   throw err;
+.../node_modules/unrs-resolver postinstall:   ^
+.../node_modules/unrs-resolver postinstall: Error: Cannot find module 'napi-postinstall'
+.../node_modules/unrs-resolver postinstall: Require stack:
+.../node_modules/unrs-resolver postinstall: - E:\GeneaSphere\node_modules\.pnpm\unrs-resolver@1.12.2\node_modules\unrs-resolver\postinstall.js
+.../node_modules/unrs-resolver postinstall:     at Module._resolveFilename (node:internal/modules/cjs/loader:1500:15)
+.../node_modules/unrs-resolver postinstall:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+.../node_modules/unrs-resolver postinstall:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+.../node_modules/unrs-resolver postinstall:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1116:12)
+.../node_modules/unrs-resolver postinstall:     at Module._load (node:internal/modules/cjs/loader:1285:25)
+.../node_modules/unrs-resolver postinstall:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+.../node_modules/unrs-resolver postinstall:     at Module.require (node:internal/modules/cjs/loader:1600:12)
+.../node_modules/unrs-resolver postinstall:     at require (node:internal/modules/helpers:153:16)
+.../node_modules/unrs-resolver postinstall:     at Object.<anonymous> (E:\GeneaSphere\node_modules\.pnpm\unrs-resolver@1.12.2\node_modules\unrs-resolver\postinstall.js:1:36)
+.../node_modules/unrs-resolver postinstall:     at Module._compile (node:internal/modules/cjs/loader:1854:14) {
+.../node_modules/unrs-resolver postinstall:   code: 'MODULE_NOT_FOUND',
+.../node_modules/unrs-resolver postinstall:   requireStack: [
+.../node_modules/unrs-resolver postinstall:     'E:\\GeneaSphere\\node_modules\\.pnpm\\unrs-resolver@1.12.2\\node_modules\\unrs-resolver\\postinstall.js'
+.../node_modules/unrs-resolver postinstall:   ]
+.../node_modules/unrs-resolver postinstall: }
+.../node_modules/unrs-resolver postinstall: Node.js v24.16.0
+.../node_modules/@prisma/engines postinstall: node:internal/modules/cjs/loader:1503
+.../node_modules/@prisma/engines postinstall:   throw err;
+.../node_modules/@prisma/engines postinstall:   ^
+.../node_modules/@prisma/engines postinstall: Error: Cannot find module '@prisma/debug'
+.../node_modules/@prisma/engines postinstall: Require stack:
+.../node_modules/@prisma/engines postinstall: - E:\GeneaSphere\node_modules\.pnpm\@prisma+engines@5.22.0\node_modules\@prisma\engines\dist\scripts\postinstall.js
+.../node_modules/@prisma/engines postinstall: - E:\GeneaSphere\node_modules\.pnpm\@prisma+engines@5.22.0\node_modules\@prisma\engines\scripts\postinstall.js
+.../node_modules/@prisma/engines postinstall:     at Module._resolveFilename (node:internal/modules/cjs/loader:1500:15)
+.../node_modules/@prisma/engines postinstall:     at wrapResolveFilename (node:internal/modules/cjs/loader:1071:27)
+.../node_modules/@prisma/engines postinstall:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1095:10)
+.../node_modules/@prisma/engines postinstall:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1116:12)
+.../node_modules/@prisma/engines postinstall:     at Module._load (node:internal/modules/cjs/loader:1285:25)
+.../node_modules/@prisma/engines postinstall:     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+.../node_modules/@prisma/engines postinstall:     at Module.require (node:internal/modules/cjs/loader:1600:12)
+.../node_modules/@prisma/engines postinstall:     at require (node:internal/modules/helpers:153:16)
+.../node_modules/@prisma/engines postinstall:     at Object.<anonymous> (E:\GeneaSphere\node_modules\.pnpm\@prisma+engines@5.22.0\node_modules\@prisma\engines\dist\scripts\postinstall.js:26:29)
+.../node_modules/@prisma/engines postinstall:     at Module._compile (node:internal/modules/cjs/loader:1854:14) {
+.../node_modules/@prisma/engines postinstall:   code: 'MODULE_NOT_FOUND',
+.../node_modules/@prisma/engines postinstall:   requireStack: [
+.../node_modules/@prisma/engines postinstall:     'E:\\GeneaSphere\\node_modules\\.pnpm\\@prisma+engines@5.22.0\\node_modules\\@prisma\\engines\\dist\\scripts\\postinstall.js',
+.../node_modules/@prisma/engines postinstall:     'E:\\GeneaSphere\\node_modules\\.pnpm\\@prisma+engines@5.22.0\\node_modules\\@prisma\\engines\\scripts\\postinstall.js'
+.../node_modules/@prisma/engines postinstall:   ]
+.../node_modules/@prisma/engines postinstall: }
+.../node_modules/@prisma/engines postinstall: Node.js v24.16.0
+.../esbuild@0.25.12/node_modules/esbuild postinstall: [esbuild] Failed to find package "@esbuild/win32-x64" on the file system
+.../esbuild@0.25.12/node_modules/esbuild postinstall: This can happen if you use the "--no-optional" flag. The "optionalDependencies"
+.../esbuild@0.25.12/node_modules/esbuild postinstall: package.json feature is used by esbuild to install the correct binary executable
+.../esbuild@0.25.12/node_modules/esbuild postinstall: for your current platform. This install script will now attempt to work around
+.../esbuild@0.25.12/node_modules/esbuild postinstall: this. If that fails, you need to remove the "--no-optional" flag to use esbuild.
+.../esbuild@0.25.12/node_modules/esbuild postinstall: [esbuild] Trying to install package "@esbuild/win32-x64" using npm
+.../esbuild@0.25.12/node_modules/esbuild postinstall: [esbuild] Failed to install package "@esbuild/win32-x64" using npm: EEXIST: file already exists, mkdir 'E:\GeneaSphere\node_modules\.pnpm\esbuild@0.25.12\node_modules\esbuild\lib\npm-install'
+.../esbuild@0.25.12/node_modules/esbuild postinstall: [esbuild] Trying to download "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.25.12.tgz"
+.../node_modules/unrs-resolver postinstall: Failed
+ ELIFECYCLE  Command failed with exit code 1.
+.../node_modules/@prisma/engines postinstall: Failed

@@ -1,0 +1,1 @@
+﻿Use TypeScript strictly. Prefer composition API in Vue. Use async/await for all async operations. Database columns use snake_case.
