@@ -9,6 +9,10 @@
               <el-icon><Upload /></el-icon>
               上传照片
             </el-button>
+            <el-button @click="$router.push('/user-center/videos/create')">
+              <el-icon><VideoCamera /></el-icon>
+              生成音像墙
+            </el-button>
           </div>
         </div>
       </template>

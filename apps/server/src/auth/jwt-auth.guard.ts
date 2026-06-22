@@ -17,6 +17,11 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     if (isPublic) {
       return true;
     }
+    // 平台后台路由由 PlatformAuthGuard 接管，全局 jwt 守卫不拦截
+    const req = context.switchToHttp().getRequest();
+    if (req?.url?.startsWith('/api/platform')) {
+      return true;
+    }
     return super.canActivate(context);
   }
 }

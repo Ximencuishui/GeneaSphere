@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -14,6 +14,18 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const activeTab = ref('PENDING')
 
+// 批量审核状态
+const selectedReviews = ref<any[]>([])
+const batchOperating = ref(false)
+
+// 预设驳回理由
+const presetRejectReasons = [
+  '内容不实',
+  '语言不当',
+  '重复提交',
+  '其他',
+]
+
 const fetchReviews = async () => {
   loading.value = true
   try {
@@ -27,6 +39,7 @@ const fetchReviews = async () => {
     })
     reviews.value = res.data.data
     total.value = res.data.pagination.total
+    selectedReviews.value = []
   } catch (error) {
     console.error('Failed to fetch bio reviews:', error)
   } finally {
@@ -69,6 +82,104 @@ const handleReject = async (review: any) => {
   }
 }
 
+const handleSelectionChange = (selection: any[]) => {
+  selectedReviews.value = selection
+}
+
+// 批量通过
+const handleBatchApprove = async () => {
+  if (selectedReviews.value.length === 0) {
+    ElMessage.warning('请先勾选要通过的生平')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要批量通过选中的 ${selectedReviews.value.length} 项生平吗？`,
+      '批量通过',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    batchOperating.value = true
+    const reviewIds = selectedReviews.value.map((r) => r.id)
+    const res = await axios.post('/api/admin/reviews/bio/batch-approve', {
+      reviewIds,
+    })
+    ElMessage.success(res.data.message || `成功通过 ${res.data.count} 项`)
+    fetchReviews()
+  } catch (error: any) {
+    if (error !== 'cancel' && error.response?.data?.message) {
+      ElMessage.error(error.response.data.message)
+    }
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+// 批量驳回（自定义理由）
+const handleBatchReject = async () => {
+  if (selectedReviews.value.length === 0) {
+    ElMessage.warning('请先勾选要驳回的生平')
+    return
+  }
+  try {
+    const { value: reason } = await ElMessageBox.prompt(
+      '请输入驳回理由',
+      `批量驳回 ${selectedReviews.value.length} 项生平`,
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPattern: /.+/,
+        inputErrorMessage: '理由不能为空',
+        inputType: 'textarea',
+      }
+    )
+    batchOperating.value = true
+    const reviewIds = selectedReviews.value.map((r) => r.id)
+    const res = await axios.post('/api/admin/reviews/bio/batch-reject', {
+      reviewIds,
+      reason,
+    })
+    ElMessage.success(res.data.message || `成功驳回 ${res.data.count} 项`)
+    fetchReviews()
+  } catch (error: any) {
+    if (error !== 'cancel' && error.response?.data?.message) {
+      ElMessage.error(error.response.data.message)
+    }
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+// 快速使用预设理由进行批量驳回
+const handleBatchRejectWithPreset = async (preset: string) => {
+  if (selectedReviews.value.length === 0) {
+    ElMessage.warning('请先勾选要驳回的生平')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将选中的 ${selectedReviews.value.length} 项生平以预设理由「${preset}」批量驳回？`,
+      '批量驳回',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    batchOperating.value = true
+    const reviewIds = selectedReviews.value.map((r) => r.id)
+    const res = await axios.post('/api/admin/reviews/bio/batch-reject', {
+      reviewIds,
+      reason: preset,
+    })
+    ElMessage.success(res.data.message || `成功驳回 ${res.data.count} 项`)
+    fetchReviews()
+  } catch (error: any) {
+    if (error !== 'cancel' && error.response?.data?.message) {
+      ElMessage.error(error.response.data.message)
+    }
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+const hasSelection = computed(() => selectedReviews.value.length > 0)
+
 onMounted(() => {
   clanId.value = route.query.clanId as string || '1'
   fetchReviews()
@@ -79,7 +190,47 @@ onMounted(() => {
   <div class="bio-review-page">
     <ElCard>
       <template #header>
-        <h2>生平审核</h2>
+        <div class="page-header">
+          <h2>生平审核</h2>
+          <div class="header-actions">
+            <ElButton
+              type="success"
+              :disabled="!hasSelection || batchOperating"
+              :loading="batchOperating"
+              @click="handleBatchApprove"
+            >
+              批量通过 ({{ selectedReviews.length }})
+            </ElButton>
+            <ElDropdown @command="handleBatchRejectWithPreset">
+              <ElButton
+                type="danger"
+                :disabled="!hasSelection || batchOperating"
+                :loading="batchOperating"
+              >
+                批量驳回 ({{ selectedReviews.length }})<ElIcon class="el-icon--right"><ArrowDown /></ElIcon>
+              </ElButton>
+              <template #dropdown>
+                <ElDropdownMenu>
+                  <ElDropdownItem
+                    v-for="preset in presetRejectReasons"
+                    :key="preset"
+                    :command="preset"
+                  >
+                    {{ preset }}
+                  </ElDropdownItem>
+                </ElDropdownMenu>
+              </template>
+            </ElDropdown>
+            <ElButton
+              type="warning"
+              plain
+              :disabled="!hasSelection || batchOperating"
+              @click="handleBatchReject"
+            >
+              自定义理由驳回
+            </ElButton>
+          </div>
+        </div>
       </template>
 
       <ElTabs v-model="activeTab" @tab-change="fetchReviews">
@@ -88,7 +239,16 @@ onMounted(() => {
         <ElTabPane label="已驳回" name="REJECTED" />
       </ElTabs>
 
-      <ElTable :data="reviews" v-loading="loading">
+      <ElTable
+        :data="reviews"
+        v-loading="loading"
+        @selection-change="handleSelectionChange"
+      >
+        <ElTableColumn
+          v-if="activeTab === 'PENDING'"
+          type="selection"
+          width="50"
+        />
         <ElTableColumn prop="title" label="标题" min-width="150" />
         <ElTableColumn prop="person_name" label="关联人物" width="120" />
         <ElTableColumn prop="author_phone" label="作者" width="150" />
@@ -153,6 +313,22 @@ onMounted(() => {
 .bio-review-page {
   max-width: 1400px;
   margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.page-header h2 {
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .content-preview {

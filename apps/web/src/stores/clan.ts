@@ -1,4 +1,5 @@
-import { defineStore, defineStore, ref, computed } from 'pinia';
+import { defineStore } from 'pinia';
+import { ref, computed } from 'vue';
 import { clanApi } from '@/api/clan';
 import type { Clan, CreateClanDto, UpdateClanDto } from '@/types';
 

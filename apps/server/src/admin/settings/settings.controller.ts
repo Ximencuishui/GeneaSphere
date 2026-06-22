@@ -263,16 +263,18 @@ export class SettingsController {
     await this.adminService.requireAdmin(clanId, userId);
 
     // 获取各类文件大小
-    const [photos, videos, others] = await Promise.all([
+    // 说明：云存储分项计数（视频/其他文件）暂仅返回 0，
+// 需求文档 4.5.3 中明确表示"本次暂不实现"，仅展示提示。
+// 后续可扩展为根据 media_type 字段聚合统计。
+const [photos, videos, others] = await Promise.all([
       this.prisma.mediaArchive.count({
         where: { clan_id: clanId },
-        // 这里需要扩展 schema 来记录文件大小
       }),
-      Promise.resolve(0), // TODO: 视频数量
-      Promise.resolve(0), // TODO: 其他文件数量
+      Promise.resolve(0), // 视频数量统计预留，当前 schema 未提供 media_type 字段
+      Promise.resolve(0), // 其他文件数量统计预留，当前 schema 未提供 media_type 字段
     ]);
 
-    const totalSize = await this.getStorageUsage(clanId);
+    const totalSize = await this.calculateStorageUsage(clanId);
     const maxStorage = 5 * 1024 * 1024 * 1024; // 5GB
 
     return {
@@ -287,7 +289,7 @@ export class SettingsController {
     };
   }
 
-  private async getStorageUsage(clanId: bigint): Promise<number> {
+  private async calculateStorageUsage(clanId: bigint): Promise<number> {
     // 这里假设 media_archives 有 file_size 字段
     // 如果没有，需要在 schema 中添加
     const result = await this.prisma.$queryRaw<[{ total: bigint }]>`

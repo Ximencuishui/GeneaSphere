@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup lang='ts'>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
@@ -14,6 +14,15 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const activeTab = ref('PENDING')
+
+const statusLabels: Record<string, { label: string; type: string }> = {
+  PENDING: { label: '待处理', type: 'warning' },
+  APPROVED: { label: '待合并', type: 'success' },
+  REJECTED: { label: '已拒绝', type: 'danger' },
+  NEEDS_MANUAL_REVIEW: { label: '需人工核查', type: 'info' },
+  MERGED: { label: '已合并', type: 'primary' },
+  REVERTED: { label: '已回滚', type: 'warning' },
+}
 
 const fetchApplications = async () => {
   loading.value = true
@@ -35,32 +44,28 @@ const fetchApplications = async () => {
   }
 }
 
+// 初审通过 - 进入待合并状态
 const handleApprove = async (app: any) => {
   try {
-    // 先获取详情进行比对
-    const detail = await axios.get(`/api/admin/merge/applications/${app.id}`)
-    const comparison = detail.data.comparison
-
     await ElMessageBox.confirm(
-      `匹配度：${comparison.total_score}%\n\n建议：${comparison.suggestion}\n\n确定通过此申请？`,
-      '确认归宗合并',
+      '初审通过后，申请将进入"待合并"状态，您可以继续执行归宗合并操作。',
+      '确认初审通过',
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
 
-    // 选择挂载点（简化版，实际应该打开选择器）
-    const mergeTargetId = prompt('请输入挂载点人物 ID：')
-    if (!mergeTargetId) return
-
-    await axios.post(`/api/admin/merge/applications/${app.id}/approve`, {
-      merge_target_id: mergeTargetId,
-    })
-    ElMessage.success('申请已通过，正在执行归宗合并...')
+    await axios.post(`/api/admin/merge/applications/${app.id}/approve`)
+    ElMessage.success('初审通过，请继续执行归宗合并')
     fetchApplications()
   } catch (error: any) {
-    if (error.response?.data?.message) {
+    if (error !== 'cancel' && error.response?.data?.message) {
       ElMessage.error(error.response.data.message)
     }
   }
+}
+
+// 进入合并向导
+const goToMergeWizard = (app: any) => {
+  router.push(`/admin/merge/wizard/${app.id}`)
 }
 
 const handleReject = async (app: any) => {
@@ -71,7 +76,7 @@ const handleReject = async (app: any) => {
       {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
-        inputPattern: /.+/,
+        inputPattern: /.+ /,
         inputErrorMessage: '理由不能为空',
         inputType: 'textarea',
       }
@@ -82,7 +87,7 @@ const handleReject = async (app: any) => {
     ElMessage.success('已拒绝')
     fetchApplications()
   } catch (error: any) {
-    if (error.response?.data?.message) {
+    if (error !== 'cancel' && error.response?.data?.message) {
       ElMessage.error(error.response.data.message)
     }
   }
@@ -95,10 +100,10 @@ const rollbackLoading = ref(false)
 
 const fetchSnapshots = async () => {
   try {
-    const res = await axios.get('/api/admin/merge/snapshots', {
+    const res = await axios.get('/api/admin/merge/merge-snapshots', {
       params: { clanId: clanId.value },
     })
-    snapshots.value = res.data
+    snapshots.value = res.data.data
   } catch (error) {
     console.error('Failed to fetch snapshots:', error)
   }
@@ -107,7 +112,7 @@ const fetchSnapshots = async () => {
 const handleRollback = async (snapshot: any) => {
   try {
     await ElMessageBox.confirm(
-      `确定要回滚此快照吗？快照剩余有效时间 ${snapshot.expires_in_minutes} 分钟。`,
+      `确定要回滚此合并操作吗？快照剩余有效时间 ${snapshot.expiresInMinutes} 分钟。`,
       '确认回滚',
       { confirmButtonText: '确定回滚', cancelButtonText: '取消', type: 'error' }
     )
@@ -160,7 +165,8 @@ onMounted(() => {
 
       <ElTabs v-model="activeTab" @tab-change="fetchApplications">
         <ElTabPane label="待处理" name="PENDING" />
-        <ElTabPane label="已通过" name="APPROVED" />
+        <ElTabPane label="待合并" name="APPROVED" />
+        <ElTabPane label="已合并" name="MERGED" />
         <ElTabPane label="已拒绝" name="REJECTED" />
         <ElTabPane label="需人工核查" name="NEEDS_MANUAL_REVIEW" />
       </ElTabs>
@@ -188,12 +194,10 @@ onMounted(() => {
             <span v-else>-</span>
           </template>
         </ElTableColumn>
-        <ElTableColumn prop="status" label="状态" width="150">
+        <ElTableColumn prop="status" label="状态" width="120">
           <template #default="{ row }">
-            <ElTag
-              :type="row.status === 'APPROVED' ? 'success' : row.status === 'REJECTED' ? 'danger' : 'warning'"
-            >
-              {{ row.status }}
+            <ElTag :type="statusLabels[row.status]?.type || 'info'">
+              {{ statusLabels[row.status]?.label || row.status }}
             </ElTag>
           </template>
         </ElTableColumn>
@@ -202,15 +206,16 @@ onMounted(() => {
             {{ new Date(row.created_at).toLocaleDateString() }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="操作" width="300" fixed="right">
+        <ElTableColumn label="操作" width="380" fixed="right">
           <template #default="{ row }">
+            <!-- 待处理状态 -->
             <ElButton
               v-if="row.status === 'PENDING'"
               type="success"
               size="small"
               @click="handleApprove(row)"
             >
-              通过
+              初审通过
             </ElButton>
             <ElButton
               v-if="row.status === 'PENDING'"
@@ -228,8 +233,18 @@ onMounted(() => {
             >
               需人工核查
             </ElButton>
+            <!-- 待合并状态 -->
             <ElButton
+              v-if="row.status === 'APPROVED'"
               type="primary"
+              size="small"
+              @click="goToMergeWizard(row)"
+            >
+              执行合并
+            </ElButton>
+            <!-- 通用 -->
+            <ElButton
+              type="info"
               size="small"
               @click="router.push('/admin/merge/applications/' + row.id)"
             >

@@ -1,0 +1,18 @@
+{
+  "type": "FeatureCollection",
+  "name": "qing",
+  "crs": { "type": "name", "properties": { "name": "EPSG:4326" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "清朝疆域（示意，含蒙疆藏）" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [73, 42], [78, 46], [85, 50], [95, 53], [110, 53], [120, 52], [128, 50], [134, 47], [135, 42],
+          [128, 38], [122, 32], [115, 25], [108, 22], [100, 22], [92, 25], [85, 30], [78, 36], [73, 42]
+        ]]
+      }
+    }
+  ]
+}

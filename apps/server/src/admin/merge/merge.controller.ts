@@ -3,7 +3,8 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
-import { ApplicationStatus } from '@prisma/client';
+import { ApplicationStatus, Role } from '@prisma/client';
+import { NotificationService } from '../../common/notification.service';
 
 @ApiTags('admin/merge')
 @Controller('api/admin/merge')
@@ -13,6 +14,7 @@ export class MergeController {
   constructor(
     private readonly adminService: AdminService,
     private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -152,10 +154,29 @@ export class MergeController {
     // 创建数据快照（用于回滚）
     const snapshotId = await this.createSnapshot(app.clan_id, userId);
 
-    // 执行合并
-    // TODO: 实际的闭包表重算和人员迁移逻辑
-    // 1. 将申请人分支的人员重新关联到目标节点
-    // 2. 重新计算 PersonAncestry 闭包表
+    // 执行合并：事务中完成闭包表重算与成员角色分配
+    await this.prisma.$transaction(async (tx) => {
+      // 1. 重新计算 PersonAncestry 闭包表（基于 FamilyChild 父子关系）
+      await this.recomputeAncestry(tx, app.clan_id);
+
+      // 2. 将申请人加入本家族，默认为编辑者（合并后“其及支系自动成为本家族成员”）
+      await tx.clanMember.upsert({
+        where: {
+          clan_id_user_id: {
+            clan_id: app.clan_id,
+            user_id: app.applicant_id,
+          },
+        },
+        update: {
+          role: Role.EDITOR,
+        },
+        create: {
+          clan_id: app.clan_id,
+          user_id: app.applicant_id,
+          role: Role.EDITOR,
+        },
+      });
+    });
 
     const updated = await this.prisma.mergeApplication.update({
       where: { id: appId },
@@ -167,13 +188,21 @@ export class MergeController {
       },
     });
 
+    // 通知申请人
+    await this.notificationService.notifyMergeResult({
+      applicantId: app.applicant_id,
+      clanId: app.clan_id,
+      applicationId: appIdStr,
+      approved: true,
+    }).catch((err) => console.error('Notification failed:', err));
+
     await this.adminService.logAction({
       clanId: app.clan_id,
       userId,
       action: 'MERGE_BRANCH',
       targetType: 'MergeApplication',
       targetId: appIdStr,
-      details: `Merged applicant ${app.applicant_id} into person ${body.merge_target_id}. Snapshot: ${snapshotId}`,
+      details: `Merged applicant ${app.applicant_id} into person ${body.merge_target_id}. Snapshot: ${snapshotId}. Applicant assigned EDITOR role.`,
     });
 
     return {
@@ -474,6 +503,15 @@ export class MergeController {
       },
     });
 
+    // 通知申请人
+    await this.notificationService.notifyMergeResult({
+      applicantId: app.applicant_id,
+      clanId: app.clan_id,
+      applicationId: appIdStr,
+      approved: false,
+      reason: body.reason,
+    }).catch((err) => console.error('Notification failed:', err));
+
     await this.adminService.logAction({
       clanId: app.clan_id,
       userId,
@@ -626,5 +664,109 @@ export class MergeController {
     });
 
     return snapshot.id.toString();
+  }
+
+  /**
+   * 重新计算 PersonAncestry 闭包表
+   * 基于 FamilyUnit 中的父子关系遍历所有祖先-后代关系
+   */
+  private async recomputeAncestry(
+    tx: any,
+    clanId: bigint,
+  ): Promise<void> {
+    // 1. 获取本家族所有家庭单元及其子女
+    const families = await tx.familyUnit.findMany({
+      where: { clan_id: clanId },
+      include: {
+        children: {
+          select: { child_id: true },
+        },
+      },
+    });
+
+    // 2. 构建父亲/母亲 -> 子女 的映射
+    const childToParents = new Map<string, bigint[]>();
+    const parentToChildren = new Map<string, bigint[]>();
+
+    for (const family of families) {
+      const childIds = family.children.map((c: any) => BigInt(c.child_id));
+      const parentIds: bigint[] = [];
+      if (family.husband_id) parentIds.push(family.husband_id);
+      if (family.wife_id) parentIds.push(family.wife_id);
+
+      for (const parentId of parentIds) {
+        const key = parentId.toString();
+        const existing = parentToChildren.get(key) || [];
+        parentToChildren.set(key, [...existing, ...childIds]);
+      }
+
+      for (const childId of childIds) {
+        const key = childId.toString();
+        const existing = childToParents.get(key) || [];
+        childToParents.set(key, [...existing, ...parentIds]);
+      }
+    }
+
+    // 3. 删除该家族旧闭包表记录
+    await tx.personAncestry.deleteMany({
+      where: {
+        OR: [
+          { ancestor: { clan_id: clanId } },
+          { descendant: { clan_id: clanId } },
+        ],
+      },
+    });
+
+    // 4. 计算所有祖先-后代闭包关系（深度表示代数差）
+    const ancestryRecords: { ancestor_id: bigint; descendant_id: bigint; depth: number }[] = [];
+    const visited = new Set<string>();
+
+    // 对每个潜在祖先节点，向下 BFS 收集所有后代
+    const allPersonIds = new Set<string>();
+    parentToChildren.forEach((children, parentId) => {
+      allPersonIds.add(parentId);
+      children.forEach((c) => allPersonIds.add(c.toString()));
+    });
+
+    for (const personIdStr of allPersonIds) {
+      const personId = BigInt(personIdStr);
+
+      // BFS 遍历从该节点向下的所有后代
+      const queue: { id: bigint; depth: number }[] = [{ id: personId, depth: 0 }];
+      const localVisited = new Set<string>([personIdStr]);
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (current.depth > 0) {
+          ancestryRecords.push({
+            ancestor_id: personId,
+            descendant_id: current.id,
+            depth: current.depth,
+          });
+        }
+
+        const children = parentToChildren.get(current.id.toString()) || [];
+        for (const childId of children) {
+          const childKey = childId.toString();
+          if (!localVisited.has(childKey)) {
+            localVisited.add(childKey);
+            queue.push({ id: childId, depth: current.depth + 1 });
+          }
+        }
+      }
+    }
+
+    // 5. 批量插入闭包表记录
+    if (ancestryRecords.length > 0) {
+      // 按 500 条一批批量插入以避免超出 SQL 参数限制
+      const batchSize = 500;
+      for (let i = 0; i < ancestryRecords.length; i += batchSize) {
+        const batch = ancestryRecords.slice(i, i + batchSize);
+        await tx.personAncestry.createMany({
+          data: batch,
+          skipDuplicates: true,
+        });
+      }
+    }
   }
 }

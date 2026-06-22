@@ -9,6 +9,7 @@
 5. [媒体模块 (Media)](#媒体模块)
 6. [寻亲模块 (Search)](#寻亲模块)
 7. [打印模块 (Print)](#打印模块)
+8. [讨论模块 (Discussion)](#讨论模块)
 
 ---
 
@@ -389,6 +390,231 @@
 
 ---
 
+## 讨论模块
+
+### 基础信息
+- **基础路径**: `/api/discussion`
+- **认证方式**: JWT Token
+
+### 接口列表
+
+#### 8.1 获取小组列表
+- **接口**: `GET /api/discussion/groups`
+- **描述**: 获取当前用户加入的小组列表
+- **权限**: 需要认证
+- **响应**:
+  ```json
+  {
+    "data": [
+      {
+        "id": "string",
+        "name": "string",
+        "description": "string",
+        "member_count": 0,
+        "topic_count": 0,
+        "unread_topic_count": 0,
+        "last_active_at": "string",
+        "my_role": "CREATOR | ADMIN | MEMBER"
+      }
+    ],
+    "notice": "string"
+  }
+  ```
+
+#### 8.2 创建小组
+- **接口**: `POST /api/discussion/groups`
+- **描述**: 创建新小组，创建者自动成为 CREATOR
+- **权限**: 需要认证
+- **请求体**:
+  ```json
+  {
+    "name": "string",        // 小组名称（必填）
+    "description": "string",  // 小组描述（可选）
+    "is_public": false        // 是否公开（可选，默认 false）
+  }
+  ```
+- **响应**: 创建的小组对象
+
+#### 8.3 获取小组详情
+- **接口**: `GET /api/discussion/groups/:id`
+- **描述**: 获取小组详细信息
+- **权限**: 需要认证（仅成员可访问）
+- **路径参数**:
+  - `id`: 小组 ID
+- **响应**: 小组详情对象
+
+#### 8.4 更新小组
+- **接口**: `PATCH /api/discussion/groups/:id`
+- **描述**: 更新小组信息
+- **权限**: 需要认证（仅 CREATOR、ADMIN）
+- **请求体**:
+  ```json
+  {
+    "name": "string",
+    "description": "string",
+    "cover_url": "string"
+  }
+  ```
+
+#### 8.5 删除小组
+- **接口**: `DELETE /api/discussion/groups/:id`
+- **描述**: 删除小组（软删除）
+- **权限**: 需要认证（仅 CREATOR）
+
+#### 8.6 获取小组成员列表
+- **接口**: `GET /api/discussion/groups/:id/members`
+- **描述**: 获取小组成员列表
+- **权限**: 需要认证（仅成员）
+- **响应**: 成员数组
+
+#### 8.7 邀请成员
+- **接口**: `POST /api/discussion/groups/:id/members`
+- **描述**: 邀请用户加入小组
+- **权限**: 需要认证（仅 CREATOR、ADMIN）
+- **请求体**:
+  ```json
+  {
+    "user_ids": ["string"]  // 用户 ID 数组
+  }
+  ```
+
+#### 8.8 移除成员
+- **接口**: `DELETE /api/discussion/groups/:id/members/:userId`
+- **描述**: 从小组移除成员
+- **权限**: CREATOR 可移除任何人，ADMIN 可移除普通成员，成员可移除自己
+
+#### 8.9 获取话题列表
+- **接口**: `GET /api/discussion/groups/:id/topics`
+- **描述**: 获取小组内的话题列表
+- **权限**: 需要认证（仅成员）
+- **查询参数**:
+  - `page`: 页码（默认 1）
+  - `pageSize`: 每页数量（默认 20）
+  - `keyword`: 搜索关键词（可选）
+- **响应**: 话题分页列表
+
+#### 8.10 创建话题
+- **接口**: `POST /api/discussion/groups/:id/topics`
+- **描述**: 在小组内发起新话题
+- **权限**: 需要认证（仅成员）
+- **请求体**:
+  ```json
+  {
+    "title": "string",   // 话题标题（必填）
+    "content": "string"  // 话题内容（必填）
+  }
+  ```
+
+#### 8.11 获取话题详情
+- **接口**: `GET /api/discussion/topics/:id`
+- **描述**: 获取话题详情及回复列表
+- **权限**: 需要认证（仅成员）
+- **查询参数**:
+  - `page`: 页码（默认 1）
+  - `pageSize`: 每页数量（默认 20）
+- **响应**: 话题详情对象（含回复分页）
+
+#### 8.12 删除话题
+- **接口**: `DELETE /api/discussion/topics/:id`
+- **描述**: 删除话题
+- **权限**: 话题作者或小组 CREATOR/ADMIN
+
+#### 8.13 置顶话题
+- **接口**: `PATCH /api/discussion/topics/:id/pin`
+- **描述**: 置顶/取消置顶话题
+- **权限**: 需要认证（仅 CREATOR、ADMIN）
+- **请求体**:
+  ```json
+  { "is_pinned": true }
+  ```
+
+#### 8.14 发布回复
+- **接口**: `POST /api/discussion/topics/:id/replies`
+- **描述**: 在话题下发布回复
+- **权限**: 需要认证（仅成员）
+- **请求体**:
+  ```json
+  {
+    "content": "string",           // 回复内容（必填）
+    "media_urls": ["string"]       // 图片 URL 数组（可选）
+  }
+  ```
+
+#### 8.15 删除回复
+- **接口**: `DELETE /api/discussion/replies/:id`
+- **描述**: 删除回复
+- **权限**: 回复作者或小组 CREATOR/ADMIN
+
+#### 8.16 获取讨论总结列表
+- **接口**: `GET /api/discussion/groups/:id/summaries`
+- **描述**: 获取小组内的讨论总结列表
+- **权限**: 需要认证（仅成员）
+- **响应**: 总结数组
+
+#### 8.17 生成话题总结
+- **接口**: `POST /api/discussion/topics/:id/summary`
+- **描述**: AI 生成话题级讨论总结
+- **权限**: 需要认证（话题作者或 CREATOR/ADMIN）
+- **响应**:
+  ```json
+  {
+    "id": "string",
+    "title": "string",
+    "summary_type": "topic",
+    "message": "string"
+  }
+  ```
+
+#### 8.18 生成小组总结
+- **接口**: `POST /api/discussion/groups/:id/summary`
+- **描述**: AI 生成小组级讨论总结
+- **权限**: 需要认证（仅 CREATOR）
+- **请求体**:
+  ```json
+  {
+    "time_range_start": "string",  // 时间范围起点（可选）
+    "time_range_end": "string"      // 时间范围终点（可选）
+  }
+  ```
+
+#### 8.19 获取总结详情
+- **接口**: `GET /api/discussion/summaries/:id`
+- **描述**: 获取讨论总结详情
+- **权限**: 需要认证（仅成员）
+- **响应**: 总结详情对象
+
+#### 8.20 编辑总结
+- **接口**: `PUT /api/discussion/summaries/:id`
+- **描述**: 编辑总结内容，保存新版本
+- **权限**: 需要认证（CREATOR/ADMIN 或原生成者）
+- **请求体**:
+  ```json
+  {
+    "content": {
+      "background": "string",
+      "main_points": [],
+      "consensus": [],
+      "disagreements": [],
+      "action_items": [],
+      "attachments": []
+    }
+  }
+  ```
+
+#### 8.21 获取版本历史
+- **接口**: `GET /api/discussion/summaries/:id/versions`
+- **描述**: 获取总结的版本历史
+- **权限**: 需要认证（仅成员）
+
+#### 8.22 导出总结
+- **接口**: `GET /api/discussion/summaries/:id/export`
+- **描述**: 导出总结为 Markdown 或 PDF
+- **权限**: 需要认证（仅成员）
+- **查询参数**:
+  - `format`: 格式（`md` 或 `pdf`）
+
+---
+
 ## 错误码说明
 
 | HTTP 状态码 | 说明 |
@@ -542,6 +768,7 @@ ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v1.0 | 2026-06-20 | 初始版本，包含认证、家族、族谱树、导入、媒体、寻亲、打印模块 |
+| v1.1 | 2026-06-21 | 新增讨论模块，包含小组管理、话题讨论、讨论总结 AI 生成功能 |
 
 ---
 

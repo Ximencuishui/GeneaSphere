@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -19,6 +19,19 @@ const selectedMembers = ref<any[]>([])
 // 筛选条件
 const filterRole = ref('')
 const filterKeyword = ref('')
+
+// 防抖搜索
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+const onSearchInput = () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    fetchMembers()
+  }, 300)
+}
+const onSearchClear = () => {
+  filterKeyword.value = ''
+  fetchMembers()
+}
 
 // 转让 Owner 对话框
 const transferDialogVisible = ref(false)
@@ -214,7 +227,8 @@ onMounted(() => {
             placeholder="搜索成员..."
             class="search-input"
             clearable
-            @input="fetchMembers"
+            @input="onSearchInput"
+            @clear="onSearchClear"
           >
             <template #prefix>
               <ElIcon><Search /></ElIcon>
@@ -293,6 +307,8 @@ onMounted(() => {
           </ElTableColumn>
         </ElTable>
 
+        <ElEmpty v-if="!loading && members.length === 0" description="暂无成员数据" />
+
         <ElPagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -344,6 +360,8 @@ onMounted(() => {
             </template>
           </ElTableColumn>
         </ElTable>
+
+        <ElEmpty v-if="!loading && members.length === 0" description="暂无成员数据" />
 
         <div v-if="selectedMembers.length > 0" style="margin-top: 16px;">
           <span>已选 {{ selectedMembers.length }} 人：</span>

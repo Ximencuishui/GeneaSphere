@@ -9,6 +9,16 @@ export interface TreeNode {
   death_date?: Date;
   is_living: boolean;
   children?: TreeNode[];
+  marriages_history?: any[];
+  avatar_url?: string;
+  thumbnail_url?: string;
+  has_photo: boolean;
+}
+
+export interface ClanTreeResponse {
+  rootNode: TreeNode;
+  mainLineage: string[];
+  totalPersons: number;
 }
 
 @Injectable()
@@ -68,7 +78,7 @@ export class TreeService {
     });
   }
 
-  async getSubTree(rootPersonId: bigint): Promise<TreeNode> {
+  async getSubTree(rootPersonId: bigint, includeHistoricalMarriages = false): Promise<TreeNode> {
     const descendants = await this.prisma.personAncestry.findMany({
       where: { ancestor_id: rootPersonId },
       include: {
@@ -84,7 +94,7 @@ export class TreeService {
       if (!person) {
         throw new Error(`Person with id ${rootPersonId} not found`);
       }
-      return this.toTreeNode(person);
+      return await this.toTreeNode(person);
     }
 
     const nodeMap = new Map<string, TreeNode>();
@@ -92,7 +102,7 @@ export class TreeService {
 
     for (const record of descendants) {
       const person = record.descendant;
-      const node = this.toTreeNode(person);
+      const node = await this.toTreeNode(person);
       nodeMap.set(person.id.toString(), node);
 
       if (record.depth > 0) {
@@ -122,7 +132,172 @@ export class TreeService {
       throw new Error(`Root person with id ${rootPersonId} not found`);
     }
 
+    // 如果需要历史婚姻信息，附加到每个节点
+    if (includeHistoricalMarriages) {
+      for (const [, node] of nodeMap) {
+        const marriages = await this.prisma.marriageHistory.findMany({
+          where: { person_id: BigInt(node.id) },
+          include: { spouse: { select: { id: true, full_name: true } } },
+          orderBy: { start_date: 'desc' },
+        });
+        node.marriages_history = marriages.map((m) => ({
+          spouse_name: m.spouse.full_name,
+          marriage_type: m.marriage_type,
+          is_current: m.is_current,
+          start_date: m.start_date,
+          end_date: m.end_date,
+          end_reason: m.end_reason,
+        }));
+      }
+    }
+
     return rootNode;
+  }
+
+  /**
+   * Get full clan tree data with avatar info and main lineage path
+   */
+  async getClanFullTree(clanId: bigint, userId?: string): Promise<ClanTreeResponse> {
+    // Find the root person(s) of this clan
+    const rootPerson = await this.findClanRootPerson(clanId);
+    if (!rootPerson) {
+      throw new Error(`No root person found for clan ${clanId}`);
+    }
+
+    // Get subtree from root
+    const rootNode = await this.getSubTree(rootPerson.id);
+
+    // Find main lineage: from root to the user's linked person
+    let mainLineage: string[] = [];
+    if (userId) {
+      mainLineage = await this.findMainLineagePath(clanId, rootPerson.id, userId);
+    }
+
+    // Count total persons
+    const totalPersons = await this.prisma.person.count({
+      where: { clan_id: clanId },
+    });
+
+    return {
+      rootNode,
+      mainLineage,
+      totalPersons,
+    };
+  }
+
+  /**
+   * Find the clan root person (the one with no parents, depth 0 self-reference)
+   */
+  private async findClanRootPerson(clanId: bigint): Promise<Person | null> {
+    const persons = await this.prisma.person.findMany({
+      where: { clan_id: clanId },
+      orderBy: { id: 'asc' },
+    });
+
+    for (const person of persons) {
+      const hasParent = await this.prisma.personAncestry.findFirst({
+        where: {
+          descendant_id: person.id,
+          depth: 1,
+        },
+      });
+      if (!hasParent) {
+        return person;
+      }
+    }
+
+    return persons.length > 0 ? persons[0] : null;
+  }
+
+  /**
+   * Find the main lineage path from the clan root to the user-linked person
+   */
+  private async findMainLineagePath(clanId: bigint, rootPersonId: bigint, userId: string): Promise<string[]> {
+    // Find the person linked to this user within this clan
+    const userLink = await this.prisma.personUserLink.findFirst({
+      where: {
+        user_id: userId,
+        person: { clan_id: clanId },
+      },
+      include: { person: true },
+    });
+
+    if (!userLink) {
+      // Fallback: use the last descendant in the root's ancestry tree
+      const lastDescendant = await this.prisma.personAncestry.findFirst({
+        where: { ancestor_id: rootPersonId },
+        orderBy: { depth: 'desc' },
+        select: { descendant_id: true },
+      });
+      if (!lastDescendant) return [rootPersonId.toString()];
+
+      // Trace back from the last descendant to root
+      return this.buildLineagePath(lastDescendant.descendant_id, rootPersonId);
+    }
+
+    // Build path from user's linked person up to root
+    return this.buildLineagePath(userLink.person.id, rootPersonId);
+  }
+
+  /**
+   * Build a lineage path from a person up to a specific ancestor
+   */
+  private async buildLineagePath(fromPersonId: bigint, toAncestorId: bigint): Promise<string[]> {
+    const path: string[] = [];
+    let currentId = fromPersonId;
+
+    // Add the starting person
+    path.push(currentId.toString());
+
+    // Maximum iterations to prevent infinite loops
+    let safety = 100;
+
+    while (currentId !== toAncestorId && safety > 0) {
+      safety--;
+
+      const directParent = await this.getDirectParent(currentId);
+      if (!directParent) break;
+
+      path.unshift(directParent.toString());
+      currentId = directParent;
+    }
+
+    return path;
+  }
+
+  /**
+   * Find avatar URL for a person via MediaPersonLink
+   */
+  private async findPersonAvatar(personId: bigint): Promise<{ avatar_url?: string; thumbnail_url?: string; has_photo: boolean }> {
+    try {
+      const mediaLink = await this.prisma.mediaPersonLink.findFirst({
+        where: { person_id: personId },
+        include: { media: { select: { file_url: true } } },
+        orderBy: { media: { created_at: 'desc' } },
+      });
+
+      if (mediaLink) {
+        // Build thumbnail URL from original file URL
+        const fileUrl = mediaLink.media.file_url;
+        const thumbnailUrl = fileUrl.replace('/media/', '/media/thumbnails/');
+        // Extract filename and try to construct thumbnail path
+        const parts = fileUrl.split('/');
+        const filename = parts[parts.length - 1];
+        const extIndex = filename.lastIndexOf('.');
+        const basename = extIndex > -1 ? filename.substring(0, extIndex) : filename;
+        const ext = extIndex > -1 ? filename.substring(extIndex) : '.jpg';
+
+        return {
+          avatar_url: fileUrl,
+          thumbnail_url: `/media/thumbnails/${basename}_80w${ext}`,
+          has_photo: true,
+        };
+      }
+
+      return { has_photo: false };
+    } catch {
+      return { has_photo: false };
+    }
   }
 
   private async getDirectParent(personId: bigint): Promise<bigint | null> {
@@ -136,7 +311,8 @@ export class TreeService {
     return parentAncestry?.ancestor_id ?? null;
   }
 
-  private toTreeNode(person: Person): TreeNode {
+  private async toTreeNode(person: Person): Promise<TreeNode> {
+    const avatarInfo = await this.findPersonAvatar(person.id);
     return {
       id: person.id.toString(),
       name: person.full_name,
@@ -145,6 +321,9 @@ export class TreeService {
       death_date: person.death_date,
       is_living: person.is_living,
       children: [],
+      avatar_url: avatarInfo.avatar_url,
+      thumbnail_url: avatarInfo.thumbnail_url,
+      has_photo: avatarInfo.has_photo,
     };
   }
 

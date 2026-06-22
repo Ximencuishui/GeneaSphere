@@ -42,6 +42,12 @@ export class AdminController {
         ],
       },
       {
+        title: '迁徙管理',
+        children: [
+          { title: '迁徙事件', path: '/admin/migration' },
+        ],
+      },
+      {
         title: '系统设置',
         children: [
           { title: '隐私配置', path: '/admin/settings/privacy' },

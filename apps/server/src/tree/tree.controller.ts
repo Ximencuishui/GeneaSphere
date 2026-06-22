@@ -1,5 +1,5 @@
-﻿import { Controller, Post, Get, Body, Param, Patch } from '@nestjs/common';
-import { TreeService, TreeNode } from './tree.service';
+﻿import { Controller, Post, Get, Body, Param, Patch, Query } from '@nestjs/common';
+import { TreeService, TreeNode, ClanTreeResponse } from './tree.service';
 import { CreatePersonDto } from './dto/create-person.dto';
 import { MoveSubTreeDto } from './dto/move-subtree.dto';
 import { Person } from '@prisma/client';
@@ -26,6 +26,17 @@ export class TreeController {
   @Get('subtree/:rootPersonId')
   async getSubTree(@Param('rootPersonId') rootPersonId: string): Promise<TreeNode> {
     return await this.treeService.getSubTree(BigInt(rootPersonId));
+  }
+
+  /**
+   * Get full clan tree data including main lineage path and avatar info
+   */
+  @Get('clan/:clanId/full')
+  async getClanFullTree(
+    @Param('clanId') clanId: string,
+    @Query('userId') userId?: string,
+  ): Promise<ClanTreeResponse> {
+    return await this.treeService.getClanFullTree(BigInt(clanId), userId);
   }
 
   @Patch('move-subtree')

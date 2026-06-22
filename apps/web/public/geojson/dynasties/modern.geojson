@@ -1,0 +1,18 @@
+{
+  "type": "FeatureCollection",
+  "name": "modern",
+  "crs": { "type": "name", "properties": { "name": "EPSG:4326" } },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "现代中国疆域（示意）" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [73, 39], [78, 42], [85, 47], [95, 49], [110, 49], [120, 48], [128, 47], [134, 45], [135, 40],
+          [128, 34], [122, 28], [118, 22], [108, 21], [100, 21], [92, 22], [85, 26], [78, 32], [73, 39]
+        ]]
+      }
+    }
+  ]
+}

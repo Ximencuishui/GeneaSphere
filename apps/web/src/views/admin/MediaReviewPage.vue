@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -14,6 +14,18 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const activeTab = ref('PENDING')
 
+// 批量审核状态
+const selectedReviews = ref<any[]>([])
+const batchOperating = ref(false)
+
+// 预设驳回理由（依据需求文档 4.3.1）
+const presetRejectReasons = [
+  '涉及隐私',
+  '图像模糊',
+  '重复上传',
+  '其他',
+]
+
 const fetchReviews = async () => {
   loading.value = true
   try {
@@ -27,6 +39,8 @@ const fetchReviews = async () => {
     })
     reviews.value = res.data.data
     total.value = res.data.pagination.total
+    // 切换 Tab 时清空选择
+    selectedReviews.value = []
   } catch (error) {
     console.error('Failed to fetch reviews:', error)
   } finally {
@@ -69,10 +83,113 @@ const handleReject = async (review: any) => {
   }
 }
 
-const handleBatchApprove = async () => {
-  // TODO: 批量通过
-  ElMessage.info('批量操作开发中')
+const toggleSelection = (review: any, checked: boolean) => {
+  if (checked) {
+    if (!selectedReviews.value.find((r) => r.id === review.id)) {
+      selectedReviews.value.push(review)
+    }
+  } else {
+    selectedReviews.value = selectedReviews.value.filter(
+      (r) => r.id !== review.id
+    )
+  }
 }
+
+// 批量通过
+const handleBatchApprove = async () => {
+  if (selectedReviews.value.length === 0) {
+    ElMessage.warning('请先勾选要通过的影像')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要批量通过选中的 ${selectedReviews.value.length} 项影像吗？`,
+      '批量通过',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    batchOperating.value = true
+    const reviewIds = selectedReviews.value.map((r) => r.id)
+    const res = await axios.post('/api/admin/reviews/media/batch-approve', {
+      reviewIds,
+    })
+    ElMessage.success(res.data.message || `成功通过 ${res.data.count} 项`)
+    fetchReviews()
+  } catch (error: any) {
+    if (error !== 'cancel' && error.response?.data?.message) {
+      ElMessage.error(error.response.data.message)
+    }
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+// 批量驳回：使用预设理由下拉
+const handleBatchReject = async () => {
+  if (selectedReviews.value.length === 0) {
+    ElMessage.warning('请先勾选要驳回的影像')
+    return
+  }
+  try {
+    const { value: reason } = await ElMessageBox.prompt(
+      '请输入驳回理由',
+      `批量驳回 ${selectedReviews.value.length} 项影像`,
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPattern: /.+/,
+        inputErrorMessage: '理由不能为空',
+        inputType: 'textarea',
+        inputPlaceholder: '预设理由：涉及隐私 / 图像模糊 / 重复上传 / 其他',
+      }
+    )
+    batchOperating.value = true
+    const reviewIds = selectedReviews.value.map((r) => r.id)
+    const res = await axios.post('/api/admin/reviews/media/batch-reject', {
+      reviewIds,
+      reason,
+    })
+    ElMessage.success(res.data.message || `成功驳回 ${res.data.count} 项`)
+    fetchReviews()
+  } catch (error: any) {
+    if (error !== 'cancel' && error.response?.data?.message) {
+      ElMessage.error(error.response.data.message)
+    }
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+// 快速使用预设理由进行批量驳回
+const handleBatchRejectWithPreset = async (preset: string) => {
+  if (selectedReviews.value.length === 0) {
+    ElMessage.warning('请先勾选要驳回的影像')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将选中的 ${selectedReviews.value.length} 项影像以预设理由「${preset}」批量驳回？`,
+      '批量驳回',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    batchOperating.value = true
+    const reviewIds = selectedReviews.value.map((r) => r.id)
+    const res = await axios.post('/api/admin/reviews/media/batch-reject', {
+      reviewIds,
+      reason: preset,
+    })
+    ElMessage.success(res.data.message || `成功驳回 ${res.data.count} 项`)
+    fetchReviews()
+  } catch (error: any) {
+    if (error !== 'cancel' && error.response?.data?.message) {
+      ElMessage.error(error.response.data.message)
+    }
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+const hasSelection = computed(() => selectedReviews.value.length > 0)
+const allSelectedIds = computed(() => selectedReviews.value.map((r) => r.id))
 
 onMounted(() => {
   clanId.value = route.query.clanId as string || '1'
@@ -87,8 +204,41 @@ onMounted(() => {
         <div class="page-header">
           <h2>影像审核</h2>
           <div class="header-actions">
-            <ElButton type="primary" @click="handleBatchApprove">
-              批量通过
+            <ElButton
+              type="success"
+              :disabled="!hasSelection || batchOperating"
+              :loading="batchOperating"
+              @click="handleBatchApprove"
+            >
+              批量通过 ({{ selectedReviews.length }})
+            </ElButton>
+            <ElDropdown @command="handleBatchRejectWithPreset">
+              <ElButton
+                type="danger"
+                :disabled="!hasSelection || batchOperating"
+                :loading="batchOperating"
+              >
+                批量驳回 ({{ selectedReviews.length }})<ElIcon class="el-icon--right"><ArrowDown /></ElIcon>
+              </ElButton>
+              <template #dropdown>
+                <ElDropdownMenu>
+                  <ElDropdownItem
+                    v-for="preset in presetRejectReasons"
+                    :key="preset"
+                    :command="preset"
+                  >
+                    {{ preset }}
+                  </ElDropdownItem>
+                </ElDropdownMenu>
+              </template>
+            </ElDropdown>
+            <ElButton
+              type="warning"
+              plain
+              :disabled="!hasSelection || batchOperating"
+              @click="handleBatchReject"
+            >
+              自定义理由驳回
             </ElButton>
           </div>
         </div>
@@ -105,8 +255,15 @@ onMounted(() => {
           v-for="review in reviews"
           :key="review.id"
           class="review-card"
+          :class="{ 'is-selected': allSelectedIds.includes(review.id) }"
           shadow="hover"
         >
+          <ElCheckbox
+            v-if="activeTab === 'PENDING'"
+            class="review-checkbox"
+            :model-value="allSelectedIds.includes(review.id)"
+            @change="(val: any) => toggleSelection(review, val)"
+          />
           <div class="review-image">
             <ElImage
               :src="review.media_url"
@@ -174,6 +331,12 @@ onMounted(() => {
   margin: 0;
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .review-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -184,6 +347,22 @@ onMounted(() => {
 .review-card {
   display: flex;
   flex-direction: column;
+  position: relative;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.review-card.is-selected {
+  border: 2px solid #409EFF;
+}
+
+.review-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 4px;
+  padding: 2px 6px;
 }
 
 .review-image {

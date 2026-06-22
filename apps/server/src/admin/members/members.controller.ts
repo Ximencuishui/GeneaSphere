@@ -227,6 +227,9 @@ export class MembersController {
 
     const member = await this.prisma.clanMember.findUnique({
       where: { id: memberId },
+      include: {
+        user: { select: { id: true, phone: true } },
+      },
     });
 
     if (!member) {
@@ -235,11 +238,52 @@ export class MembersController {
 
     await this.adminService.requireAdmin(member.clan_id, userId);
 
-    // 检查是否有关联的人员记录（需要先转移关系）
-    const linkedPersons = await this.prisma.person.findMany({
-      where: { clan_id: member.clan_id },
-      // 这里需要扩展 schema 来关联 user_id 和 person
+    // 检查该成员是否关联到本家族中拥有子女的人员记录。
+    // 由于 schema 中 person 未直接关联 user_id，采用通过 phone 后缀匹配姓名等
+    // 作为辅助查找途径。如未来 schema 补充 user_id 字段，可直接使用精确查询。
+    const userPhone = member.user.phone;
+
+    // 在 FamilyUnit 中查找作为丈夫/妻子且有子女的人员名与该成员手机号后 4 位匹配的记录
+    const familiesWithChildren = await this.prisma.familyUnit.findMany({
+      where: {
+        clan_id: member.clan_id,
+        children: { some: {} },
+      },
+      include: {
+        husband: { select: { id: true, full_name: true } },
+        wife: { select: { id: true, full_name: true } },
+        children: { select: { child_id: true } },
+      },
     });
+
+    const blockingRelations: { personId: string; personName: string; childCount: number }[] = [];
+    for (const family of familiesWithChildren) {
+      const candidates = [family.husband, family.wife].filter(Boolean) as Array<{
+        id: bigint;
+        full_name: string;
+      }>;
+      for (const person of candidates) {
+        // 简化关联：会员手机号末 4 位出现于姓名中，或名称与账号匹配
+        if (
+          person.full_name.includes(userPhone.slice(-4)) ||
+          userPhone.includes(person.full_name)
+        ) {
+          blockingRelations.push({
+            personId: person.id.toString(),
+            personName: person.full_name,
+            childCount: family.children.length,
+          });
+        }
+      }
+    }
+
+    if (blockingRelations.length > 0) {
+      throw new BadRequestException(
+        `该成员关联到本家族中拥有子女的人员记录，无法直接移除。请先转移子女关系。关联人员：${blockingRelations
+          .map((r) => `${r.personName}（${r.childCount} 名子女）`)
+          .join('、')}`,
+      );
+    }
 
     await this.prisma.clanMember.delete({
       where: { id: memberId },
@@ -251,6 +295,7 @@ export class MembersController {
       action: 'REMOVE_MEMBER',
       targetType: 'ClanMember',
       targetId: memberIdStr,
+      details: `Removed member phone=${userPhone}`,
     });
 
     return { message: 'Member removed successfully' };

@@ -78,12 +78,57 @@ export class AuthService {
       select: { id: true },
     });
 
-    const payload = { sub: user.id, phone: user.phone };
+    // 获取用户在家族中的角色
+    const memberRole = await this.prisma.clanMember.findFirst({
+      where: { user_id: user.id, clan_id: demoClan?.id },
+      select: { role: true },
+    });
+
+    const payload = { sub: user.id, phone: user.phone, role: memberRole?.role || 'VIEWER' };
     const token = this.jwtService.sign(payload);
 
     return {
       access_token: token,
-      user: { id: user.id, phone: user.phone },
+      user: { id: user.id, phone: user.phone, role: memberRole?.role || 'VIEWER' },
+      demoClanId: demoClan ? String(demoClan.id) : null,
+    };
+  }
+
+  /**
+   * 族员演示登录（普通成员角色）
+   */
+  async demoMemberLogin() {
+    const phone = '13800000001';
+    const password = 'demo123';
+
+    const user = await this.prisma.user.findUnique({ where: { phone } });
+    if (!user) {
+      throw new UnauthorizedException('演示账号尚未初始化，请稍后再试');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('演示账号尚未初始化，请稍后再试');
+    }
+
+    // 查找演示家族
+    const demoClan = await this.prisma.clan.findFirst({
+      where: { name: '李氏宗族（演示）' },
+      select: { id: true },
+    });
+
+    // 获取用户在家族中的角色
+    const memberRole = await this.prisma.clanMember.findFirst({
+      where: { user_id: user.id, clan_id: demoClan?.id },
+      select: { role: true },
+    });
+
+    const payload = { sub: user.id, phone: user.phone, role: memberRole?.role || 'EDITOR' };
+    const token = this.jwtService.sign(payload);
+
+    return {
+      access_token: token,
+      user: { id: user.id, phone: user.phone, role: memberRole?.role || 'EDITOR' },
       demoClanId: demoClan ? String(demoClan.id) : null,
     };
   }

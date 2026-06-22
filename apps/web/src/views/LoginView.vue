@@ -9,7 +9,8 @@ const authStore = useAuthStore()
 const router = useRouter()
 const phone = ref("")
 const password = ref("")
-const demoLoading = ref(false)
+const demoAdminLoading = ref(false)
+const demoMemberLoading = ref(false)
 
 if (localStorage.getItem("geneasphere_token")) {
   localStorage.removeItem("geneasphere_token")
@@ -25,34 +26,67 @@ const handleLogin = async () => {
   }
 }
 
-const handleDemoLogin = async () => {
-  demoLoading.value = true
+// 族谱管理员演示登录
+const handleAdminDemoLogin = async () => {
+  demoAdminLoading.value = true
   try {
     const response = await axios.post('/api/auth/demo-login')
-    const { access_token, demoClanId } = response.data
+    const { access_token, demoClanId, user } = response.data
 
     localStorage.setItem('geneasphere_token', access_token)
     axios.defaults.headers.common['Authorization'] = 'Bearer ' + access_token
 
     authStore.token = access_token
     authStore.user = {
-      sub: response.data.user.id,
-      phone: response.data.user.phone,
-      role: 'OWNER',
+      sub: user.id,
+      phone: user.phone,
+      role: user.role,
     }
 
-    ElMessage.success('欢迎体验根脉云谱！')
+    ElMessage.success('欢迎体验族谱管理后台！')
 
     if (demoClanId) {
       router.push(`/tree/${demoClanId}`)
     } else {
-      router.push('/clans')
+      router.push('/admin/dashboard')
     }
   } catch (error: any) {
     const msg = error.response?.data?.message || '演示服务暂不可用'
     ElMessage.error(msg)
   } finally {
-    demoLoading.value = false
+    demoAdminLoading.value = false
+  }
+}
+
+// 族员个人页面演示登录
+const handleMemberDemoLogin = async () => {
+  demoMemberLoading.value = true
+  try {
+    const response = await axios.post('/api/auth/demo-member-login')
+    const { access_token, demoClanId, user } = response.data
+
+    localStorage.setItem('geneasphere_token', access_token)
+    axios.defaults.headers.common['Authorization'] = 'Bearer ' + access_token
+
+    authStore.token = access_token
+    authStore.user = {
+      sub: user.id,
+      phone: user.phone,
+      role: user.role,
+    }
+
+    ElMessage.success('欢迎体验族员个人页面！')
+
+    if (demoClanId) {
+      router.push(`/user-center/families`)
+    } else {
+      router.push('/dashboard')
+    }
+  } catch (error: any) {
+    const msg = error.response?.data?.message || '演示服务暂不可用'
+    ElMessage.error(msg)
+  } finally {
+    demoMemberLoading.value = false
   }
 }
 </script>
@@ -70,7 +104,6 @@ const handleDemoLogin = async () => {
             v-model="phone"
             placeholder="手机号"
             size="large"
-            :prefix-icon="null"
           />
         </ElFormItem>
         <ElFormItem>
@@ -96,18 +129,32 @@ const handleDemoLogin = async () => {
         <div class="form-divider">
           <span>或</span>
         </div>
-        <ElFormItem>
-          <ElButton
-            size="large"
-            class="btn-demo"
-            :loading="demoLoading"
-            @click="handleDemoLogin"
-            style="width: 100%"
-          >
-            <span class="demo-icon">▶</span>
-            一键体验演示账号
-          </ElButton>
-        </ElFormItem>
+        <div class="demo-buttons">
+          <ElFormItem>
+            <ElButton
+              size="large"
+              class="btn-demo-admin"
+              :loading="demoAdminLoading"
+              @click="handleAdminDemoLogin"
+              style="width: 100%"
+            >
+              <span class="demo-icon">&#9654;</span>
+              一键体验族谱管理演示
+            </ElButton>
+          </ElFormItem>
+          <ElFormItem>
+            <ElButton
+              size="large"
+              class="btn-demo-member"
+              :loading="demoMemberLoading"
+              @click="handleMemberDemoLogin"
+              style="width: 100%"
+            >
+              <span class="demo-icon">&#9679;</span>
+              一键体验族员个人页面
+            </ElButton>
+          </ElFormItem>
+        </div>
         <ElFormItem>
           <ElButton text @click="router.push('/register')" style="width: 100%; color: #5D4037;">
             还没有账号？立即注册
@@ -177,7 +224,13 @@ const handleDemoLogin = async () => {
   background: #e2e8f0;
 }
 
-.btn-demo {
+.demo-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.btn-demo-admin {
   background: linear-gradient(135deg, #5D4037, #8D6E63);
   border: none;
   color: white;
@@ -187,13 +240,28 @@ const handleDemoLogin = async () => {
   box-shadow: 0 4px 15px rgba(93, 64, 55, 0.25);
 }
 
-.btn-demo:hover {
+.btn-demo-admin:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 20px rgba(93, 64, 55, 0.35);
 }
 
+.btn-demo-member {
+  background: linear-gradient(135deg, #1976D2, #42A5F5);
+  border: none;
+  color: white;
+  font-weight: 600;
+  border-radius: 8px;
+  transition: all 0.3s;
+  box-shadow: 0 4px 15px rgba(25, 118, 210, 0.25);
+}
+
+.btn-demo-member:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(25, 118, 210, 0.35);
+}
+
 .demo-icon {
-  margin-right: 6px;
-  font-size: 13px;
+  margin-right: 8px;
+  font-size: 14px;
 }
 </style>

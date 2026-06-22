@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaClient, MediaArchive } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import { AvatarService } from './avatar.service';
 
 const prisma = new PrismaClient();
 
@@ -18,8 +19,10 @@ interface QueryFilters {
 @Injectable()
 export class MediaService {
   private storageRoot: string;
+  private avatarService: AvatarService;
 
   constructor() {
+    this.avatarService = new AvatarService();
     this.storageRoot = process.env.STORAGE_PATH || path.join(process.cwd(), 'storage', 'media');
     if (!fs.existsSync(this.storageRoot)) {
       fs.mkdirSync(this.storageRoot, { recursive: true });
@@ -127,14 +130,92 @@ export class MediaService {
     });
   }
 
+  async getMediaByPersonId(personId: bigint): Promise<MediaArchive[]> {
+    const links = await prisma.mediaPersonLink.findMany({
+      where: { person_id: personId },
+      include: { media: true },
+    });
+    return links.map((l) => l.media);
+  }
+
   async deleteMedia(id: bigint): Promise<void> {
     await prisma.mediaArchive.delete({ where: { id } });
   }
 
+  /**
+   * Generate avatar thumbnail for a person from their linked media
+   */
+  async generatePersonAvatar(personId: bigint, mediaId: bigint): Promise<string | null> {
+    const media = await prisma.mediaArchive.findUnique({
+      where: { id: mediaId },
+    });
+
+    if (!media) return null;
+
+    const fileUrl = media.file_url;
+    // Resolve the physical file path from the URL
+    const filename = fileUrl.startsWith('/media/') ? fileUrl.replace('/media/', '') : fileUrl;
+    const filePath = path.join(this.storageRoot, filename);
+
+    if (!fs.existsSync(filePath)) return null;
+
+    const thumbnailUrl = await this.avatarService.generatePersonAvatar(filePath, personId);
+    if (!thumbnailUrl) return null;
+
+    // Update person record with thumbnail URL
+    const { basename, ext } = this.parseFilename(filename);
+    const thumbnail80Url = `/media/thumbnails/${basename}_80w${ext}`;
+
+    await (prisma.person.update as any)({
+      where: { id: personId },
+      data: {
+        avatar_url: fileUrl,
+        thumbnail_url: thumbnail80Url,
+      },
+    });
+
+    return thumbnail80Url;
+  }
+
+  /**
+   * Get avatar info for a person
+   */
+  async getPersonAvatar(personId: bigint): Promise<{ avatar_url?: string; thumbnail_url?: string; has_photo: boolean }> {
+    const person = await (prisma.person.findUnique as any)({
+      where: { id: personId },
+      select: { avatar_url: true, thumbnail_url: true },
+    });
+
+    if (person?.avatar_url || person?.thumbnail_url) {
+      return {
+        avatar_url: person.avatar_url || undefined,
+        thumbnail_url: person.thumbnail_url || undefined,
+        has_photo: true,
+      };
+    }
+
+    return { has_photo: false };
+  }
+
+  private parseFilename(filename: string): { basename: string; ext: string } {
+    const extIndex = filename.lastIndexOf('.');
+    const basename = extIndex > -1 ? filename.substring(0, extIndex) : filename;
+    const ext = extIndex > -1 ? filename.substring(extIndex) : '.jpg';
+    return { basename, ext };
+}
+
+  /**
+   * Override linkMediaToPerson to also generate avatar thumbnail
+   */
   async linkMediaToPerson(media_id: bigint, person_id: bigint): Promise<void> {
     await prisma.mediaPersonLink.create({
       data: { media_id, person_id },
     });
+
+    // Generate avatar thumbnail in the background
+    this.generatePersonAvatar(person_id, media_id).catch((err) =>
+      console.error('Failed to generate avatar:', err),
+    );
   }
 
   async unlinkMediaFromPerson(media_id: bigint, person_id: bigint): Promise<void> {

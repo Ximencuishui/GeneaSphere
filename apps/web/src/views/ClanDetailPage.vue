@@ -28,6 +28,10 @@
             <el-icon><Share /></el-icon>
             查看族谱树
           </el-button>
+          <el-button type="success" @click="goToMigration">
+            <el-icon><MapLocation /></el-icon>
+            查看迁徙地图
+          </el-button>
           <el-button @click="editClan">
             <el-icon><Edit /></el-icon>
             编辑
@@ -97,7 +101,7 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { ArrowLeft, Edit, Share, ArrowRight } from '@element-plus/icons-vue';
+import { ArrowLeft, Edit, Share, ArrowRight, MapLocation } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
 import { clanApi } from '@/api/clan';
 import type { Clan, Person } from '@/types';
@@ -138,6 +142,10 @@ onMounted(async () => {
 // Methods
 function goToTree() {
   router.push(`/tree/${route.params.id}`);
+}
+
+function goToMigration() {
+  router.push(`/clans/${route.params.id}/migration`);
 }
 
 function editClan() {

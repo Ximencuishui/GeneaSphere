@@ -46,6 +46,10 @@ export class SearchService {
       xipai_keywords,
       contact_info: encryptedContactInfo,
       created_by: created_by || 'unknown',
+      status: 'PUBLISHED' as any,
+      reviewed_at: null,
+      reviewer_id: null,
+      reject_reason: null,
       created_at: now,
       updated_at: now,
     };

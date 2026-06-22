@@ -24,16 +24,16 @@ const genealogyStore = useGenealogyStore()
         <div v-if="genealogyStore.selectedNode" class="detail-content">
           <ElDescriptions :column="1" border>
             <ElDescriptionsItem label="姓名">
-              {{ genealogyStore.selectedNode.name }}
+              {{ genealogyStore.selectedNode.full_name || genealogyStore.selectedNode.label }}
             </ElDescriptionsItem>
             <ElDescriptionsItem label="性别">
               {{ genealogyStore.selectedNode.gender === 'male' ? '男' : '女' }}
             </ElDescriptionsItem>
-            <ElDescriptionsItem label="出生日期" v-if="genealogyStore.selectedNode.birthDate">
-              {{ genealogyStore.selectedNode.birthDate }}
+            <ElDescriptionsItem label="出生日期" v-if="genealogyStore.selectedNode.birth_date">
+              {{ genealogyStore.selectedNode.birth_date }}
             </ElDescriptionsItem>
-            <ElDescriptionsItem label="逝世日期" v-if="genealogyStore.selectedNode.deathDate">
-              {{ genealogyStore.selectedNode.deathDate }}
+            <ElDescriptionsItem label="逝世日期" v-if="genealogyStore.selectedNode.death_date">
+              {{ genealogyStore.selectedNode.death_date }}
             </ElDescriptionsItem>
           </ElDescriptions>
         </div>

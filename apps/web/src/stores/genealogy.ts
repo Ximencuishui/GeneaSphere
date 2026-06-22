@@ -1,19 +1,16 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
+import type { GenealogyNode } from "@/types"
 
-export interface GenealogyNode {
-  id: string
-  name: string
-  gender: "male" | "female"
-  birthDate?: string
-  deathDate?: string
-  spouseId?: string
-  children?: GenealogyNode[]
-}
+export type ViewMode = 'compact' | 'detailed' | 'portrait'
 
 export const useGenealogyStore = defineStore("genealogy", () => {
   const selectedNode = ref<GenealogyNode | null>(null)
   const treeData = ref<GenealogyNode | null>(null)
+  const viewMode = ref<ViewMode>('detailed')
+  const mainLineage = ref<string[]>([])
+  const totalPersons = ref(0)
+  const isLoading = ref(false)
 
   const selectNode = (node: GenealogyNode | null) => {
     selectedNode.value = node
@@ -23,5 +20,29 @@ export const useGenealogyStore = defineStore("genealogy", () => {
     treeData.value = data
   }
 
-  return { selectedNode, treeData, selectNode, setTreeData }
+  const setViewMode = (mode: ViewMode) => {
+    viewMode.value = mode
+  }
+
+  const setMainLineage = (lineage: string[]) => {
+    mainLineage.value = lineage
+  }
+
+  const isInMainLineage = (nodeId: string | number): boolean => {
+    return mainLineage.value.includes(String(nodeId))
+  }
+
+  return {
+    selectedNode,
+    treeData,
+    viewMode,
+    mainLineage,
+    totalPersons,
+    isLoading,
+    selectNode,
+    setTreeData,
+    setViewMode,
+    setMainLineage,
+    isInMainLineage,
+  }
 })

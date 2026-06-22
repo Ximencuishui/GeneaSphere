@@ -61,6 +61,22 @@ export class MediaController {
     return await this.mediaService.deleteMedia(BigInt(id));
   }
 
+  /**
+   * Get media by person ID (via MediaPersonLink)
+   */
+  @Get('person/:personId')
+  async getMediaByPersonId(@Param('personId') personId: string): Promise<MediaArchive[]> {
+    return await this.mediaService.getMediaByPersonId(BigInt(personId));
+  }
+
+  /**
+   * Get avatar info for a person
+   */
+  @Get('person/:personId/avatar')
+  async getPersonAvatar(@Param('personId') personId: string) {
+    return await this.mediaService.getPersonAvatar(BigInt(personId));
+  }
+
   @Post('link')
   async linkMediaToPerson(@Body() dto: LinkMediaDto): Promise<void> {
     return await this.mediaService.linkMediaToPerson(dto.media_id, dto.person_id);

@@ -68,15 +68,60 @@ export class DashboardController {
         storage_used: storageUsed,
         storage_percentage: await this.getStoragePercentage(clanId),
         pending_media_reviews: pendingMediaReviews,
+        pending_bio_reviews: await this.prisma.bioReview.count({
+          where: { person: { clan_id: clanId }, status: 'PENDING' },
+        }),
         pending_applications: pendingApplications,
       },
-      recent_reviews: recentReviews.map(r => ({
-        id: r.id.toString(),
-        media_id: r.media_id.toString(),
-        media_url: r.media.file_url,
-        uploader_id: r.media.uploader_id,
-        created_at: r.created_at,
-      })),
+      todos: {
+        media_reviews: recentReviews.map((r) => ({
+          id: r.id.toString(),
+          media_id: r.media_id.toString(),
+          media_url: r.media.file_url,
+          uploader_id: r.media.uploader_id,
+          created_at: r.created_at,
+          link: `/admin/reviews/media?reviewId=${r.id}`,
+        })),
+        bio_reviews: (
+          await this.prisma.bioReview.findMany({
+            where: { person: { clan_id: clanId }, status: 'PENDING' },
+            include: {
+              person: { select: { id: true, full_name: true } },
+              author: { select: { id: true, phone: true } },
+            },
+            orderBy: { created_at: 'desc' },
+            take: 5,
+          })
+        ).map((r) => ({
+          id: r.id.toString(),
+          person_id: r.person_id.toString(),
+          person_name: r.person.full_name,
+          title: r.title,
+          author_phone: r.author.phone,
+          created_at: r.created_at,
+          link: `/admin/reviews/bio?reviewId=${r.id}`,
+        })),
+        merge_applications: (
+          await this.prisma.mergeApplication.findMany({
+            where: { clan_id: clanId, status: 'PENDING' },
+            include: {
+              applicant: { select: { id: true, phone: true } },
+              matched_person: { select: { id: true, full_name: true } },
+            },
+            orderBy: { created_at: 'desc' },
+            take: 5,
+          })
+        ).map((a) => ({
+          id: a.id.toString(),
+          applicant_id: a.applicant_id,
+          applicant_phone: a.applicant.phone,
+          origin_place: a.origin_place,
+          ancestor_name: a.ancestor_name,
+          match_score: a.match_score,
+          created_at: a.created_at,
+          link: `/admin/merge/applications?appId=${a.id}`,
+        })),
+      },
     };
   }
 

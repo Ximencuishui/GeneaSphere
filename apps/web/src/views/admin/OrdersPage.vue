@@ -6,6 +6,13 @@ import axios from 'axios'
 const route = useRoute()
 const router = useRouter()
 
+const statusLabels: Record<string, string> = {
+  PENDING: '待支付',
+  PRINTING: '印刷中',
+  SHIPPED: '已发货',
+  COMPLETED: '已完成',
+}
+
 const clanId = ref('')
 const loading = ref(false)
 const orders = ref<any[]>([])
@@ -77,7 +84,7 @@ onMounted(() => {
             <ElTag
               :type="row.status === 'COMPLETED' ? 'success' : row.status === 'SHIPPED' ? 'primary' : 'warning'"
             >
-              {{ row.status }}
+              {{ statusLabels[row.status] || row.status }}
             </ElTag>
           </template>
         </ElTableColumn>

@@ -1,4 +1,15 @@
 :root {
+  /* Element Plus 主题色定制 - 对齐 GeneaSphere 设计规范 */
+  --el-color-primary: #5D4037;
+  --el-color-primary-light-3: #7D6358;
+  --el-color-primary-light-5: #9D8A82;
+  --el-color-primary-light-7: #BEB1AC;
+  --el-color-primary-light-8: #CEC6C2;
+  --el-color-primary-light-9: #DFD9D6;
+  --el-color-primary-dark-2: #4A3229;
+  --el-border-radius-base: 8px;
+  --el-font-size-base: 14px;
+
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;

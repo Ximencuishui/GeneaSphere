@@ -1,5 +1,21 @@
 export * from '@prisma/client';
+export { RelationChangeStatus, RelationChangeType, RelationPrivacyLevel, CustodyStatus, MarriageType, MarriageEndReason, FamilyRelationChange, ChildCustodyRecord, MarriageHistory, RelationPrivacyPreference } from '@prisma/client';
 import { PrismaClient, Gender } from '@prisma/client';
+import { Injectable, Module, OnModuleInit, Global } from '@nestjs/common';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit {
+  async onModuleInit() {
+    await this.$connect();
+  }
+}
+
+@Global()
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class PrismaModule {}
 
 const prisma = new PrismaClient();
 

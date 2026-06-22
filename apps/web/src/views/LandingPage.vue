@@ -283,6 +283,15 @@ const goRegister = () => router.push('/register')
           <a href="#" @click.prevent="router.push('/login')">登录</a>
           <a href="#" @click.prevent="goRegister">注册</a>
         </div>
+        <div class="footer-legal">
+          <a href="/privacy" target="_blank">隐私政策</a>
+          <span class="legal-divider">|</span>
+          <a href="/terms" target="_blank">用户协议</a>
+          <span class="legal-divider">|</span>
+          <a href="/service-terms" target="_blank">服务条款</a>
+          <span class="legal-divider">|</span>
+          <a href="/cookie-policy" target="_blank">Cookie 政策</a>
+        </div>
         <div class="footer-copy">
           &copy; {{ currentYear }} 根脉云谱 GeneaSphere. All rights reserved.
         </div>
@@ -573,21 +582,21 @@ const goRegister = () => router.push('/register')
 }
 .flow-steps {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   justify-content: center;
   gap: 24px;
-  max-width: 1000px;
+  max-width: 1200px;
   margin: 0 auto 48px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .flow-step {
   background: white;
   border-radius: 16px;
   padding: 32px 24px;
   text-align: center;
-  flex: 1;
-  min-width: 240px;
-  max-width: 280px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 360px;
   position: relative;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
 }
@@ -717,6 +726,28 @@ const goRegister = () => router.push('/register')
 .footer-links a:hover {
   color: white;
 }
+.footer-legal {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 12px;
+}
+.footer-legal a {
+  color: rgba(255, 255, 255, 0.45);
+  text-decoration: none;
+  font-size: 12px;
+  transition: color 0.2s;
+}
+.footer-legal a:hover {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: underline;
+}
+.legal-divider {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+}
 .footer-copy {
   font-size: 13px;
   width: 100%;
@@ -727,6 +758,18 @@ const goRegister = () => router.push('/register')
 }
 
 /* ====== 响应式 ====== */
+@media (max-width: 1024px) {
+  .flow-steps {
+    flex-wrap: wrap;
+  }
+  .flow-step {
+    flex: 1 1 calc(50% - 12px);
+    max-width: calc(50% - 12px);
+  }
+  .flow-arrow {
+    display: none;
+  }
+}
 @media (max-width: 768px) {
   .nav-actions .btn-outline {
     display: none;
@@ -748,10 +791,12 @@ const goRegister = () => router.push('/register')
     align-items: center;
   }
   .flow-arrow {
+    display: block;
     transform: rotate(90deg);
     padding: 0;
   }
   .flow-step {
+    flex: 1 1 100%;
     max-width: 100%;
   }
   .hero {
@@ -763,6 +808,12 @@ const goRegister = () => router.push('/register')
   .footer-inner {
     flex-direction: column;
     text-align: center;
+  }
+  .footer-legal {
+    gap: 8px;
+  }
+  .footer-legal a {
+    font-size: 11px;
   }
 }
 </style>

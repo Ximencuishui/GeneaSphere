@@ -24,4 +24,10 @@ export class AuthController {
   async demoLogin() {
     return this.authService.demoLogin();
   }
+
+  @Public()
+  @Post('demo-member-login')
+  async demoMemberLogin() {
+    return this.authService.demoMemberLogin();
+  }
 }
