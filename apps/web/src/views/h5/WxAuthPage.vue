@@ -3,7 +3,7 @@
     <div class="h5-card" style="text-align: center; padding: 32px 20px;">
       <div style="font-size: 48px;">💬</div>
       <h1 class="h5-title">微信授权</h1>
-      <p class="h5-subtitle">允许「根脉云谱」获取你的微信基本信息</p>
+      <p class="h5-subtitle">允许「寻根路」获取你的微信基本信息</p>
 
       <div v-if="profile" style="margin: 16px 0; padding: 12px; background: #f5f7fa; border-radius: 8px;">
         <div style="display: flex; align-items: center; gap: 12px; text-align: left;">

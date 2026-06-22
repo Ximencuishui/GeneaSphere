@@ -1,6 +1,6 @@
-《根脉云谱》AI 辅助开发计划书 
+《寻根路》AI 辅助开发计划书 
 
-项目代号: GeneaSphere
+项目代号: 寻根路（xungenlu.cn）
 技术栈: Vue 3 + Vite + Pinia + NestJS + PostgreSQL + AntV G6
 AI 指令风格: 我们将使用 @filename 引用文件，并使用 // TODO: 和 // CONSTRAINT: 来约束 AI 行为。
 

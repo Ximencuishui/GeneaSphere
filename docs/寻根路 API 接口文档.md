@@ -1,4 +1,4 @@
-# GeneaSphere API 接口文档
+# 寻根路 · xungenlu.cn API 接口文档
 
 ## 目录
 

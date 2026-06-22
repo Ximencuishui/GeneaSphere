@@ -235,7 +235,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import type { FormInstance, FormRules } from 'element-plus';
 import { Location, Plus, Warning, Right } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
 import { migrationApi } from '@/api/migration';

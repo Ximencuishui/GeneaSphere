@@ -1,5 +1,5 @@
 /**
- * GeneaSphere 全局类型定义
+ * 寻根路（xungenlu.cn）全局类型定义
  */
 
 // ==================== 家族相关 ====================
@@ -151,11 +151,16 @@ export interface MediaArchive {
   clan_id: number;
   uploader_id: string;
   file_url: string;
+  display_url?: string;
+  thumb_url?: string;
+  original_key?: string;
   taken_year?: number;
   taken_location?: string;
   description?: string;
   created_at: string;
   updated_at: string;
+  file_size?: number;
+  media_type?: string;
 }
 
 export interface CreateMediaDto {

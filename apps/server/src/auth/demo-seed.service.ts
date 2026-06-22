@@ -105,7 +105,7 @@ export class DemoSeedService implements OnModuleInit {
         demoClan = await this.prisma.clan.create({
           data: {
             name: '李氏宗族（演示）',
-            description: '这是一个演示家族，展示了根脉云谱的核心功能。包含完整的族谱树结构、人物档案和影像资料。',
+            description: '这是一个演示家族，展示了寻根路的核心功能。包含完整的族谱树结构、人物档案和影像资料。',
             admin_user: { connect: { id: demoUser.id } },
           },
         });

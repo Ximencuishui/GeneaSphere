@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Edit, Download, History, Fold, Expand } from '@element-plus/icons-vue'
+import { ArrowLeft, Edit, Download, Clock, Fold, Expand } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import discussionApi from '@/api/discussion'
 import type { DiscussionSummary, SummaryVersion } from '@/types'
@@ -120,7 +120,7 @@ onMounted(fetchSummary)
             >
               编辑
             </ElButton>
-            <ElButton :icon="History" @click="fetchVersions">版本历史</ElButton>
+            <ElButton :icon="Clock" @click="fetchVersions">版本历史</ElButton>
             <ElDropdown trigger="click">
               <ElButton :icon="Download">导出</ElButton>
               <template #dropdown>

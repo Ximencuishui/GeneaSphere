@@ -44,6 +44,8 @@ model User {
   photo_claims            PhotoClaimRecord[]
   print_orders            PrintOrder[]
   tool_usage_logs         ToolUsageLog[]
+  ocr_usage_logs          OcrUsageLog[]
+    pdf_import_logs         PdfImportLog[]
   credit                  UserCredit?
   setting                 UserSetting?
   vip_orders              VideoVipOrder[]
@@ -95,6 +97,7 @@ model Clan {
   shared_credits           FamilySharedCredit[]
   families                 FamilyUnit[]
   media                    MediaArchive[]
+    pdf_import_logs         PdfImportLog[]
   merge_applications       MergeApplication[]
   persons                  Person[]
   print_orders             PrintOrder[]
@@ -214,6 +217,9 @@ model MediaArchive {
   updated_at                   DateTime                   @updatedAt @map("updated_at")
   file_size                    BigInt                     @default(0) @map("file_size")
   media_type                   String                     @default("image") @map("media_type")
+  display_url                  String?                    @map("display_url")
+  thumb_url                    String?                    @map("thumb_url")
+  original_key                 String?                    @map("original_key")
   clan                         Clan                       @relation(fields: [clan_id], references: [id], onDelete: Cascade)
   uploader                     User                       @relation(fields: [uploader_id], references: [id], onDelete: Cascade)
   person_links                 MediaPersonLink[]
@@ -593,6 +599,10 @@ model UserCredit {
   free_remaining Int      @default(10) @map("free_remaining")
   paid_balance   Int      @default(0) @map("paid_balance")
   updated_at     DateTime @default(now()) @updatedAt @map("updated_at")
+  // ========== OCR 月度免费额度追踪（v1.0 限免策略）==========
+  ocr_pages_used Int      @default(0) @map("ocr_pages_used")
+  ocr_chars_used Int      @default(0) @map("ocr_chars_used")
+  ocr_reset_date DateTime @default(dbgenerated("CURRENT_DATE")) @map("ocr_reset_date") @db.Date
   user           User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("user_credits")
@@ -611,6 +621,84 @@ model CreditPurchaseLog {
   @@index([user_id])
   @@index([expires_at])
   @@map("credit_purchase_logs")
+}
+
+// ========== OCR 使用记录（v1.0 限免策略）==========
+model OcrUsageLog {
+  id              BigInt   @id @default(autoincrement()) @map("id")
+  user_id         String   @map("user_id")
+  task_id         String?  @map("task_id")
+  pages_total     Int      @map("pages_total")
+  chars_total     Int      @map("chars_total")
+  free_pages_used Int      @map("free_pages_used")
+  free_chars_used Int      @map("free_chars_used")
+  charged_pages   Int      @map("charged_pages")
+  charged_chars   Int      @map("charged_chars")
+  fee_amount      Decimal  @map("fee_amount") @db.Decimal(10, 2)
+  fee_source      String   @map("fee_source")
+  status          String   @default("completed") @map("status")
+  created_at      DateTime @default(now()) @map("created_at")
+  user            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("ocr_usage_logs")
+}
+
+// ========== PDF 导入记录表（v1.0 需求文档）==========
+model PdfImportLog {
+  id              BigInt          @id @default(autoincrement()) @map("id")
+  task_id         String          @unique @map("task_id")
+  user_id         String          @map("user_id")
+  clan_id         BigInt          @map("clan_id")
+  file_name       String          @map("file_name")
+  file_size       BigInt          @map("file_size")
+  file_path       String?         @map("file_path")
+  parse_mode      String          @map("parse_mode") // text | ocr
+  total_pages     Int             @default(0) @map("total_pages")
+  total_records   Int             @default(0) @map("total_records")
+  success_records Int             @default(0) @map("success_records")
+  failed_records  Int             @default(0) @map("failed_records")
+  status          String          @default("pending") @map("status") // pending|parsing|preview|correcting|importing|completed|failed
+  error_message   String?         @map("error_message")
+  created_at      DateTime        @default(now()) @map("created_at")
+  completed_at    DateTime?       @map("completed_at")
+  user            User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  clan            Clan            @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  temp_records    PdfParseTemp[]
+
+  @@index([user_id])
+  @@index([clan_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("pdf_import_logs")
+}
+
+// ========== PDF 解析临时数据表（v1.0 需求文档）==========
+model PdfParseTemp {
+  id                BigInt          @id @default(autoincrement()) @map("id")
+  import_log_id     BigInt          @map("import_log_id")
+  row_number        Int             @map("row_number")
+  full_name         String          @map("full_name")
+  gender            String          @default("UNKNOWN") @map("gender") // M | F | UNKNOWN
+  generation        Int?            @map("generation")
+  birth_date        DateTime?       @map("birth_date")
+  death_date        DateTime?       @map("death_date")
+  is_living         Boolean         @default(true) @map("is_living")
+  parent_name       String?         @map("parent_name")
+  spouse_name       String?         @map("spouse_name")
+  biography         String?         @map("biography")
+  burial_place      String?         @map("burial_place")
+  notes             String?         @map("notes")
+  confidence_score  Decimal?        @map("confidence_score") @db.Decimal(5, 2)
+  original_text     String?         @map("original_text")
+  is_corrected      Boolean         @default(false) @map("is_corrected")
+  created_at        DateTime        @default(now()) @map("created_at")
+  import_log        PdfImportLog    @relation(fields: [import_log_id], references: [id], onDelete: Cascade)
+
+  @@index([import_log_id])
+  @@index([confidence_score])
+  @@map("pdf_parse_temp")
 }
 
 model ToolUsageLog {

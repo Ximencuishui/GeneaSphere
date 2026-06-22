@@ -1,15 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaClient, MediaArchive } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AvatarService } from './avatar.service';
+import { CosService } from '../cos/cos.service';
+import { ImageProcessorService } from '../cos/image-processor.service';
 
 const prisma = new PrismaClient();
-
-interface UploadResult {
-  file_url: string;
-  filename: string;
-}
 
 interface QueryFilters {
   taken_year?: number;
@@ -18,17 +15,26 @@ interface QueryFilters {
 
 @Injectable()
 export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
   private storageRoot: string;
   private avatarService: AvatarService;
 
-  constructor() {
-    this.avatarService = new AvatarService();
+  constructor(
+    private readonly cosService: CosService,
+    private readonly imageProcessor: ImageProcessorService,
+    avatarService: AvatarService,
+  ) {
+    this.avatarService = avatarService;
     this.storageRoot = process.env.STORAGE_PATH || path.join(process.cwd(), 'storage', 'media');
     if (!fs.existsSync(this.storageRoot)) {
       fs.mkdirSync(this.storageRoot, { recursive: true });
     }
   }
 
+  /**
+   * 上传媒体文件
+   * 根据 STORAGE_DRIVER/COS_ENABLED 自动选择存储后端
+   */
   async uploadFile(
     file: Express.Multer.File,
     clan_id: bigint,
@@ -37,11 +43,18 @@ export class MediaService {
     taken_location?: string,
     description?: string
   ): Promise<MediaArchive> {
+    // 检查是否是图片且 COS 已启用 -> 三档处理
+    const isImage = file.mimetype.startsWith('image/');
+    const useCos = this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true';
+
+    if (isImage && useCos) {
+      return this.uploadImageToCos(file, clan_id, uploader_id, taken_year, taken_location, description);
+    }
+
+    // 非图片或本地模式：本地存储
     const filename = `${Date.now()}_${file.originalname}`;
     const filePath = path.join(this.storageRoot, filename);
-
     fs.writeFileSync(filePath, file.buffer);
-
     const fileUrl = `/media/${filename}`;
 
     return await prisma.mediaArchive.create({
@@ -52,10 +65,50 @@ export class MediaService {
         taken_year,
         taken_location,
         description,
+        file_size: file.size,
       },
     });
   }
 
+  /**
+   * COS 图片三档上传
+   */
+  private async uploadImageToCos(
+    file: Express.Multer.File,
+    clan_id: bigint,
+    uploader_id: string,
+    taken_year?: number,
+    taken_location?: string,
+    description?: string
+  ): Promise<MediaArchive> {
+    const result = await this.imageProcessor.processImage(
+      file.buffer,
+      clan_id,
+      uploader_id,
+    );
+
+    const fileUrl = result.displayUrl;
+
+    return await prisma.mediaArchive.create({
+      data: {
+        clan_id,
+        uploader_id,
+        file_url: fileUrl,
+        display_url: result.displayUrl,
+        thumb_url: result.thumbUrl,
+        original_key: result.originalKey,
+        taken_year,
+        taken_location,
+        description,
+        file_size: file.size,
+        media_type: 'image',
+      },
+    });
+  }
+
+  /**
+   * 上传到对象存储（保留原有接口签名，内部使用 COS）
+   */
   async uploadToOSS(
     file: Express.Multer.File,
     clan_id: bigint,
@@ -64,44 +117,7 @@ export class MediaService {
     taken_location?: string,
     description?: string
   ): Promise<MediaArchive> {
-    const ossEnabled = process.env.OSS_ENABLED === 'true';
-    let fileUrl: string;
-
-    if (ossEnabled) {
-      fileUrl = await this.uploadToAliyunOSS(file);
-    } else {
-      const filename = `${Date.now()}_${file.originalname}`;
-      const filePath = path.join(this.storageRoot, filename);
-      fs.writeFileSync(filePath, file.buffer);
-      fileUrl = `/media/${filename}`;
-    }
-
-    return await prisma.mediaArchive.create({
-      data: {
-        clan_id,
-        uploader_id,
-        file_url: fileUrl,
-        taken_year,
-        taken_location,
-        description,
-      },
-    });
-  }
-
-  private async uploadToAliyunOSS(file: Express.Multer.File): Promise<string> {
-    const OSS = await import('ali-oss').then((m) => m.default);
-
-    const client = new OSS({
-      region: process.env.OSS_REGION || '',
-      accessKeyId: process.env.OSS_ACCESS_KEY_ID || '',
-      accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET || '',
-      bucket: process.env.OSS_BUCKET || '',
-    });
-
-    const filename = `${Date.now()}_${file.originalname}`;
-    await client.put(filename, file.buffer);
-
-    return `https://${process.env.OSS_BUCKET}.${process.env.OSS_REGION}.aliyuncs.com/${filename}`;
+    return this.uploadFile(file, clan_id, uploader_id, taken_year, taken_location, description);
   }
 
   async listMedia(clan_id: bigint, filters?: QueryFilters): Promise<MediaArchive[]> {

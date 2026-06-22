@@ -95,7 +95,7 @@ const handleMemberDemoLogin = async () => {
   <div class="login-container">
     <div class="login-form">
       <div class="form-header">
-        <h2>登录根脉云谱</h2>
+        <h2>登录寻根路</h2>
         <p class="form-subtitle">管理您的家族数字化档案</p>
       </div>
       <ElForm :model="{ phone, password }" label-width="0">

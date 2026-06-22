@@ -25,9 +25,11 @@ import { LineageVideoModule } from './lineage-video/lineage-video.module';
 import { InviteModule } from './invite/invite.module';
 import { FamilyBookModule } from './family-book/family-book.module';
 import { FamilyRelationModule } from './family-relation/family-relation.module';
+import { CosModule } from './cos/cos.module';
 
 @Module({
   imports: [
+    CosModule,
     ConfigModule.forRoot({
       isGlobal: true,
     }),

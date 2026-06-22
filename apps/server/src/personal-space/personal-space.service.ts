@@ -8,6 +8,8 @@ import { PrismaService } from '@geneasphere/db';
 import { SpacePrivacyLevel } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import { CosService } from '../cos/cos.service';
+import { ImageProcessorService } from '../cos/image-processor.service';
 
 const QUOTA_BYTES = BigInt(209715200); // 200MB
 
@@ -15,7 +17,11 @@ const QUOTA_BYTES = BigInt(209715200); // 200MB
 export class PersonalSpaceService {
   private storageRoot: string;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cosService: CosService,
+    private readonly imageProcessor: ImageProcessorService,
+  ) {
     this.storageRoot =
       process.env.STORAGE_PATH || path.join(process.cwd(), 'storage', 'personal');
     if (!fs.existsSync(this.storageRoot)) {
@@ -292,11 +298,25 @@ export class PersonalSpaceService {
     // 校验存储配额
     await this.ensureStorage(userId, fileSize);
 
-    // 保存文件
-    const filename = `${Date.now()}_${file.originalname}`;
-    const filePath = path.join(this.storageRoot, filename);
-    fs.writeFileSync(filePath, file.buffer);
-    const fileUrl = `/personal/${filename}`;
+    const useCos = this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true';
+    let fileUrl: string;
+
+    if (useCos) {
+      // COS 模式：上传图片到热 Bucket
+      const clanId = 'personal';
+      const result = await this.imageProcessor.processImage(
+        file.buffer,
+        clanId,
+        userId,
+      );
+      fileUrl = result.displayUrl;
+    } else {
+      // 本地模式：保存文件到磁盘
+      const filename = `${Date.now()}_${file.originalname}`;
+      const filePath = path.join(this.storageRoot, filename);
+      fs.writeFileSync(filePath, file.buffer);
+      fileUrl = `/personal/${filename}`;
+    }
 
     // 继承相册隐私设置
     const privacy = data.privacy || album.default_privacy;

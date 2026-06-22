@@ -21,6 +21,7 @@ import { createHash, randomBytes } from 'crypto';
 import { WechatService } from './wechat.service';
 import { NotificationService } from '../common/notification.service';
 import { AdminService } from '../admin/admin.service';
+import { CosService } from '../cos/cos.service';
 
 const SESSION_TTL_MINUTES = 30;
 const PEER_QRCODE_TTL_MINUTES = 30;
@@ -56,6 +57,7 @@ export class InviteService {
     private readonly wechat: WechatService,
     private readonly notification: NotificationService,
     private readonly admin: AdminService,
+    private readonly cosService: CosService,
   ) {}
 
   // ==================== 邀请二维码（管理端） ====================
@@ -83,10 +85,35 @@ export class InviteService {
       details: `expire_days=${expireDays}`,
     });
 
+    // COS 模式：生成二维码图片并上传
+    let qrcodeDataUrl: string | undefined;
+    const useCos = this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true';
+    if (useCos) {
+      try {
+        const QRCode = require('qrcode');
+        const scanUrl = this.buildScanUrl(created.code);
+        const qrBuffer: Buffer = await QRCode.toBuffer(scanUrl, {
+          type: 'png',
+          width: 480,
+          margin: 1,
+        });
+        const key = `media/qrcodes/${clanId}/${created.id}.png`;
+        const result = await this.cosService.uploadFile(key, qrBuffer, {
+          contentType: 'image/png',
+          bucketType: 'hot',
+        });
+        qrcodeDataUrl = result.url;
+        this.logger.log(`邀请二维码图片已上传至 COS: ${result.url}`);
+      } catch (err: any) {
+        this.logger.warn(`邀请二维码图片上传失败（非关键错误）: ${err.message}`);
+      }
+    }
+
     return {
       qrcode_id: created.id.toString(),
       code: created.code,
       url: this.buildScanUrl(created.code),
+      qrcode_data_url: qrcodeDataUrl,
       expire_at: created.expire_at,
       status: created.status,
     };

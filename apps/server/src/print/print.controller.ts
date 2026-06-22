@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Res, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Param, Query, Res, HttpException, HttpStatus } from '@nestjs/common';
 import { PrintService } from './print.service';
 import { Response } from 'express';
 import { Public } from '../auth/public.decorator';
@@ -11,10 +11,19 @@ export class PrintController {
   @Get('genealogy/:clanId')
   async exportGenealogy(
     @Param('clanId') clanId: string,
-    @Res() res: Response
+    @Res() res: Response,
+    @Query('mode') mode?: string,
   ) {
     try {
       const clanIdBigInt = BigInt(clanId);
+
+      // COS 模式：返回 CDN URL
+      if (mode === 'cos' || process.env.COS_ENABLED === 'true') {
+        const pdfUrl = await this.printService.generateAndUploadPdf(clanIdBigInt);
+        return res.json({ url: pdfUrl });
+      }
+
+      // 本地模式：直接返回 PDF
       const pdfBuffer = await this.printService.generateGenealogyPdf(clanIdBigInt);
 
       res.set({

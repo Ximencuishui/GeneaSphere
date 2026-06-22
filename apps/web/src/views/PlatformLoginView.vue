@@ -41,9 +41,9 @@ const handleLogin = async () => {
     </div>
     <ElCard class="login-card" shadow="always">
       <div class="brand">
-        <div class="logo">GS</div>
-        <h1>根脉云谱 · 平台管理后台</h1>
-        <p class="subtitle">GeneaSphere Platform Administration Console</p>
+        <div class="logo">寻</div>
+        <h1>寻根路 · 平台管理后台</h1>
+        <p class="subtitle">xungenlu.cn Platform Administration Console</p>
       </div>
       <ElForm @submit.prevent="handleLogin" label-position="top">
         <ElFormItem label="用户名">

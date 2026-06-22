@@ -1,6 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { PdfTextParserService, PdfParseResult } from './pdf-text-parser.service';
+import { OcrService } from './ocr.service';
+import { CosService } from '../cos/cos.service';
+import { ImageProcessorService } from '../cos/image-processor.service';
+import {
+  OcrBillingService,
+  OcrFeeDetail,
+  OcrPrecheckResult,
+} from './ocr-billing.service';
 
 export interface PdfImportTask {
   taskId: string;
@@ -12,6 +20,12 @@ export interface PdfImportTask {
   extractedRecords: PdfPersonRecord[];
   metadata: Record<string, any>;
   errorMessage?: string;
+  // ========== OCR 计费相关字段 ==========
+  ocrProvider?: string;
+  ocrEstimatedFee?: number;
+  ocrPrecheck?: OcrPrecheckResult;
+  ocrFeeDetail?: OcrFeeDetail;
+  ocrCharsCount?: number;
 }
 
 export interface PdfPersonRecord {
@@ -38,7 +52,11 @@ export class PdfImportService {
 
   constructor(
     private readonly pdfTextParser: PdfTextParserService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    private readonly ocrService: OcrService,
+    private readonly ocrBilling: OcrBillingService,
+    private readonly cosService: CosService,
+    private readonly imageProcessor: ImageProcessorService,
   ) {}
 
   /**
@@ -73,6 +91,13 @@ export class PdfImportService {
     };
 
     this.importTasks.set(taskId, task);
+
+    // COS 模式：异步上传原始 PDF 到冷 Bucket
+    if (this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true') {
+      this.uploadOriginalPdfToCos(taskId, fileBuffer, userId, clanId).catch((err) => {
+        this.logger.warn(`原始 PDF 上传 COS 失败（非关键路径）: ${err.message}`);
+      });
+    }
 
     // 异步开始解析
     this.parsePdfAsync(taskId, fileBuffer, userId, clanId);
@@ -181,8 +206,9 @@ export class PdfImportService {
 
     try {
       task.status = 'parsing';
+      task.ocrProvider = this.ocrService.getProviderName();
 
-      // 解析PDF文本
+      // 解析PDF文本（如需 OCR，pdfTextParser 内部自动调用）
       const pdfResult: PdfParseResult = await this.pdfTextParser.parsePdf(fileBuffer);
       task.totalPages = pdfResult.totalPages;
       task.metadata = pdfResult.metadata;
@@ -192,6 +218,57 @@ export class PdfImportService {
       task.parseMode = pdfType === 'scan' ? 'ocr' : 'text';
 
       this.logger.log(`PDF类型: ${pdfType}, 页数: ${pdfResult.totalPages}`);
+
+      // ========== OCR 计费集成（扫描件 PDF 才走）==========
+      if (task.parseMode === 'ocr' && task.totalPages > 0) {
+        const precheck = await this.ocrBilling.precheckCost(
+          userId,
+          task.totalPages,
+        );
+        task.ocrPrecheck = precheck;
+        task.ocrEstimatedFee = precheck.estimated_fee;
+        this.logger.log(
+          `OCR 预检 user=${userId} pages=${task.totalPages} ` +
+            `estimated_fee=¥${precheck.estimated_fee.toFixed(2)} ` +
+            `sufficient=${precheck.sufficient}`,
+        );
+
+        // 统计本次识别的中文字数
+        const totalChars = OcrBillingService.countChineseChars(pdfResult.text);
+        task.ocrCharsCount = totalChars;
+
+        // 精确扣费（事务：余额检查 + 扣费 + 写日志）
+        try {
+          const feeDetail = await this.ocrBilling.chargeAfterOcr(userId, {
+            taskId,
+            pages: task.totalPages,
+            totalChars,
+          });
+          task.ocrFeeDetail = feeDetail;
+        } catch (error) {
+          if (error instanceof HttpException) {
+            task.status = 'failed';
+            const resp = error.getResponse() as any;
+            task.errorMessage =
+              resp?.message || 'OCR 计费失败，余额不足';
+            task.metadata.ocrBillingError = {
+              error: resp?.error || 'INSUFFICIENT_BALANCE',
+              required: resp?.required,
+              current: resp?.current,
+            };
+            await this.ocrBilling.recordFailure(
+              userId,
+              taskId,
+              task.errorMessage,
+            );
+            this.logger.error(
+              `任务 ${taskId} OCR 计费失败：${task.errorMessage}`,
+            );
+            return;
+          }
+          throw error;
+        }
+      }
 
       // 清理文本
       const cleanedText = this.pdfTextParser.cleanPdfText(pdfResult.text);
@@ -380,5 +457,23 @@ export class PdfImportService {
    */
   private generateTaskId(): string {
     return `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  }
+
+  /**
+   * 上传原始 PDF 到 COS 冷 Bucket
+   */
+  private async uploadOriginalPdfToCos(
+    taskId: string,
+    fileBuffer: Buffer,
+    _userId: string,
+    clanId: bigint,
+  ): Promise<void> {
+    const uuid = require('uuid').v4().replace(/-/g, '');
+    const key = `scan/pdf/${clanId}/${uuid}.pdf`;
+    await this.cosService.uploadFile(key, fileBuffer, {
+      contentType: 'application/pdf',
+      bucketType: 'cold',
+    });
+    this.logger.log(`原始 PDF 已上传至 COS 冷 Bucket: ${key} (task=${taskId})`);
   }
 }

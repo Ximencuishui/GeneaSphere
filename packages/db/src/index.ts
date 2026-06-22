@@ -1,12 +1,30 @@
 export * from '@prisma/client';
 export { RelationChangeStatus, RelationChangeType, RelationPrivacyLevel, CustodyStatus, MarriageType, MarriageEndReason, FamilyRelationChange, ChildCustodyRecord, MarriageHistory, RelationPrivacyPreference } from '@prisma/client';
 import { PrismaClient, Gender } from '@prisma/client';
-import { Injectable, Module, OnModuleInit, Global } from '@nestjs/common';
+import { Injectable, Module, OnModuleInit, Global, Logger } from '@nestjs/common';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
+  private readonly logger = new Logger(PrismaService.name);
+
   async onModuleInit() {
-    await this.$connect();
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY_MS = 5000;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await this.$connect();
+        this.logger.log('数据库连接成功');
+        return;
+      } catch (error) {
+        this.logger.warn(`数据库连接失败 (第 ${attempt}/${MAX_RETRIES} 次): ${error.message}`);
+        if (attempt === MAX_RETRIES) {
+          this.logger.error('数据库重连已达最大次数，放弃连接');
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      }
+    }
   }
 }
 

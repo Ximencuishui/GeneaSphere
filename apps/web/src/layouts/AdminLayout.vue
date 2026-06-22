@@ -170,8 +170,8 @@ const handleLogout = () => {
     <!-- 侧边栏 -->
     <ElAside :width="isCollapse ? '64px' : '240px'" class="sidebar">
       <div class="sidebar-header">
-        <h2 v-if="!isCollapse" class="logo">根脉云谱</h2>
-        <h2 v-else class="logo">G</h2>
+        <h2 v-if="!isCollapse" class="logo">寻根路 · xungenlu.cn</h2>
+        <h2 v-else class="logo">寻</h2>
       </div>
       <ElMenu
         :default-active="activeMenu"

@@ -37,7 +37,7 @@ const handleDemoLogin = async () => {
       role: 'OWNER',
     }
 
-    ElMessage.success('欢迎体验根脉云谱！')
+    ElMessage.success('欢迎体验寻根路！')
 
     // 引导到最能展示核心卖点的页面：族谱树
     if (demoClanId) {
@@ -63,8 +63,8 @@ const goRegister = () => router.push('/register')
     <header class="navbar" :class="{ scrolled: scrollY > 50 }">
       <div class="nav-inner">
         <div class="logo">
-          <span class="logo-icon">根</span>
-          <span class="logo-text">根脉云谱</span>
+          <span class="logo-icon">寻</span>
+          <span class="logo-text">寻根路 · xungenlu.cn</span>
         </div>
         <div class="nav-actions">
           <el-button class="btn-outline" @click="goRegister">注册</el-button>
@@ -130,7 +130,7 @@ const goRegister = () => router.push('/register')
     <!-- ====== 核心卖点 ====== -->
     <section class="features" id="features">
       <div class="section-header">
-        <h2>为什么选择根脉云谱</h2>
+        <h2>为什么选择寻根路</h2>
         <p>专为家族文化传承打造的全链路数字化工具</p>
       </div>
 
@@ -251,7 +251,7 @@ const goRegister = () => router.push('/register')
     <section class="cta-section">
       <div class="cta-content">
         <h2>准备好开启家族数字化之旅了吗？</h2>
-        <p>立即体验根脉云谱，让家族记忆永续传承</p>
+        <p>立即体验寻根路，让家族记忆永续传承</p>
         <div class="cta-buttons">
           <el-button
             type="primary"
@@ -274,8 +274,8 @@ const goRegister = () => router.push('/register')
     <footer class="footer">
       <div class="footer-inner">
         <div class="footer-brand">
-          <span class="logo-icon">根</span>
-          <span class="logo-text">根脉云谱 GeneaSphere</span>
+          <span class="logo-icon">寻</span>
+          <span class="logo-text">寻根路 · xungenlu.cn</span>
         </div>
         <div class="footer-links">
           <a href="#features">核心功能</a>
@@ -293,7 +293,7 @@ const goRegister = () => router.push('/register')
           <a href="/cookie-policy" target="_blank">Cookie 政策</a>
         </div>
         <div class="footer-copy">
-          &copy; {{ currentYear }} 根脉云谱 GeneaSphere. All rights reserved.
+          &copy; {{ currentYear }} 寻根路 · xungenlu.cn. All rights reserved.
         </div>
       </div>
     </footer>

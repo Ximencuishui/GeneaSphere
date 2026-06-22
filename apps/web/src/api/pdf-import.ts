@@ -1,4 +1,5 @@
 import request from '@/utils/request';
+import type { OcrFeeDetail, OcrPrecheckResult } from './ocr';
 
 export interface PdfImportTask {
   taskId: string;
@@ -10,6 +11,12 @@ export interface PdfImportTask {
   recordCount: number;
   metadata: Record<string, any>;
   errorMessage?: string;
+  // ========== OCR 计费信息（v1.0 限免策略）==========
+  ocrProvider?: string;
+  ocrEstimatedFee?: number;
+  ocrPrecheck?: OcrPrecheckResult;
+  ocrFeeDetail?: OcrFeeDetail;
+  ocrCharsCount?: number;
 }
 
 export interface PdfPersonRecord {
@@ -32,11 +39,19 @@ export interface PdfPersonRecord {
 /**
  * 上传PDF文件
  */
-export function uploadPdf(file: File, clanId: string | number, userId: string) {
+export function uploadPdf(
+  file: File,
+  clanId: string | number,
+  userId: string,
+  forceOcr = false,
+) {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('clan_id', String(clanId));
   formData.append('user_id', userId);
+  if (forceOcr) {
+    formData.append('force_ocr', 'true');
+  }
 
   return request.post('/api/import/pdf/upload', formData, {
     headers: {

@@ -128,7 +128,7 @@ export class SmsController {
       userId,
       body.content,
       body.recipientIds,
-      body.signName || '【根脉云谱】',
+      body.signName || '【寻根路】',
       body.sendType || 'IMMEDIATE',
       body.scheduledAt ? new Date(body.scheduledAt) : undefined,
     );

@@ -1,5 +1,4 @@
 import { Module, forwardRef } from '@nestjs/common';
-import { PrismaModule } from '@geneasphere/db';
 import { PlatformAuthModule } from './auth/platform-auth.module';
 import { DashboardController } from './dashboard/dashboard.controller';
 import { FamiliesController } from './families/families.controller';
@@ -12,7 +11,7 @@ import { PlatformLogsController } from './logs/logs.controller';
 import { SettingsService } from './settings/settings.service';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => PlatformAuthModule)],
+  imports: [forwardRef(() => PlatformAuthModule)],
   controllers: [
     DashboardController,
     FamiliesController,

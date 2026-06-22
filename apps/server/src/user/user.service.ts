@@ -7,14 +7,21 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '@geneasphere/db';
+import sharp from 'sharp';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { Role, NotificationType } from '@prisma/client';
+import { CosService } from '../cos/cos.service';
+import { ImageProcessorService } from '../cos/image-processor.service';
 
 @Injectable()
 export class UserService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cosService: CosService,
+    private readonly imageProcessor: ImageProcessorService,
+  ) {}
 
   // ==================== 资料相关 ====================
 
@@ -143,8 +150,8 @@ export class UserService {
   }
 
   /**
-   * 上传头像（data-url 模式简化实现）
-   * 返回 avatar_url（前端可直接使用的相对 URL）
+   * 上传头像
+   * 根据 STORAGE_DRIVER 自动选择本地占位或 COS 存储
    */
   async uploadAvatar(userId: string, dataUrl: string): Promise<string> {
     if (!dataUrl || !dataUrl.startsWith('data:image/')) {
@@ -166,8 +173,27 @@ export class UserService {
       throw new BadRequestException('头像仅支持 jpg/png/webp');
     }
 
-    // 保存 dataUrl 作为占位 URL（生产环境应改为对象存储）
-    // 这里采用占位策略：将 data-url 写入 public/avatars/{userId}.{ext}
+    const useCos = this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true';
+
+    if (useCos) {
+      // COS 模式：上传头像至热 Bucket
+      const imageBuffer = Buffer.from(match[2], 'base64');
+      const avatarKey = `media/display/avatar/${userId}.${ext}`;
+      const result = await this.cosService.uploadFile(avatarKey, imageBuffer, {
+        contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
+        bucketType: 'hot',
+      });
+      const avatarUrl = result.url;
+
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatar_url: avatarUrl },
+      });
+
+      return avatarUrl;
+    }
+
+    // 本地模式：占位 URL
     const avatarUrl = `/api/user/avatar/${userId}.${ext}`;
 
     await this.prisma.user.update({

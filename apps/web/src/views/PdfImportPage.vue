@@ -3,7 +3,7 @@
     <el-card class="import-card">
       <template #header>
         <div class="card-header">
-          <h2>📄 PDF族谱导入</h2>
+          <h2>PDF 族谱导入</h2>
           <el-button @click="handleGoBack">返回</el-button>
         </div>
       </template>
@@ -26,6 +26,38 @@
         <p class="step-description">
           请上传PDF格式的族谱文档（支持文本PDF和扫描PDF）。系统将自动解析并提取人员信息。
         </p>
+
+        <!-- OCR 额度提示 -->
+        <el-alert
+          v-if="quota"
+          class="quota-alert"
+          :type="quotaAlertType"
+          :closable="false"
+          show-icon
+        >
+          <template #default>
+            <div class="quota-row">
+              <span>
+                您本月剩余免费额度：
+                <strong>{{ quota.free_pages_remaining }}</strong> 页 /
+                <strong>{{ quota.free_chars_remaining }}</strong> 字
+              </span>
+              <span class="quota-pricing">
+                超出部分：¥{{ quota.price_per_page.toFixed(2) }}/页，
+                ¥{{ quota.price_per_100_chars.toFixed(2) }}/百字
+              </span>
+              <span v-if="quota.paid_balance > 0" class="quota-balance">
+                账户余额：¥{{ quota.paid_balance.toFixed(2) }}
+              </span>
+              <span v-else class="quota-balance warn">
+                当前为免费用户，超出免费额度需先充值
+              </span>
+            </div>
+            <div class="quota-engine">
+              当前 OCR 引擎：{{ quota.provider === 'tencent' ? '腾讯云 OCR' : 'Tesseract.js（本地）' }}
+            </div>
+          </template>
+        </el-alert>
 
         <el-upload
           ref="uploadRef"
@@ -72,24 +104,23 @@
         <h3>第二步：PDF解析中</h3>
         <p class="step-description">
           <span v-if="taskInfo?.parseMode === 'ocr'">
-            系统正在使用OCR识别扫描件，这可能需要几分钟时间，请稍候...
+            系统正在使用OCR识别扫描件（{{ taskInfo?.ocrProvider === 'tencent' ? '腾讯云' : '本地' }}），这可能需要几分钟时间，请稍候...
           </span>
           <span v-else>
             系统正在解析PDF文档并提取人员信息，请稍候...
           </span>
         </p>
 
-        <!-- OCR模式提示 -->
         <el-alert
           v-if="taskInfo?.parseMode === 'ocr'"
-          title="OCR识别模式"
+          title="OCR 识别模式"
           type="info"
           :closable="false"
           show-icon
           class="ocr-notice"
         >
           <template #default>
-            <p>正在识别扫描件，可能需要较长时间。请保持页面开启，识别进度如下：</p>
+            <p>扫描件 PDF 将调用 OCR 服务，可能需要较长时间。识别完成后将按页数 / 字数自动结算费用。</p>
           </template>
         </el-alert>
 
@@ -100,6 +131,22 @@
             :stroke-width="20"
           />
           <p class="status-text">{{ parsingMessage }}</p>
+
+          <!-- OCR 实时消耗显示 -->
+          <div v-if="taskInfo?.parseMode === 'ocr'" class="ocr-realtime">
+            <el-descriptions :column="3" border size="small">
+              <el-descriptions-item label="总页数">{{ taskInfo.totalPages }} 页</el-descriptions-item>
+              <el-descriptions-item label="预计费用">
+                ¥{{ (taskInfo.ocrEstimatedFee ?? 0).toFixed(2) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="引擎">
+                {{ taskInfo.ocrProvider === 'tencent' ? '腾讯云' : 'Tesseract' }}
+              </el-descriptions-item>
+            </el-descriptions>
+            <p class="realtime-tip">
+              即将超出免费额度：第 {{ (quota?.free_pages_remaining ?? 0) + 1 }} 页起将开始扣费
+            </p>
+          </div>
         </div>
 
         <div v-if="taskInfo" class="task-details">
@@ -226,6 +273,48 @@
           </template>
         </el-result>
 
+        <!-- OCR 费用明细（仅扫描件 PDF 显示） -->
+        <div v-if="feeDetail" class="fee-detail">
+          <h4>OCR 费用明细</h4>
+          <el-alert
+            :title="feeDetailTitle"
+            :type="feeDetail.fee_amount > 0 ? 'warning' : 'success'"
+            :closable="false"
+            show-icon
+          >
+            <template #default>
+              <el-descriptions :column="2" border size="small" class="fee-descriptions">
+                <el-descriptions-item label="成功识别">
+                  {{ feeDetail.pages_total }} 页，{{ feeDetail.chars_total }} 字
+                </el-descriptions-item>
+                <el-descriptions-item label="免费页数">{{ feeDetail.free_pages_used }} 页</el-descriptions-item>
+                <el-descriptions-item label="免费字数">{{ feeDetail.free_chars_used }} 字</el-descriptions-item>
+                <el-descriptions-item label="超出页数" v-if="feeDetail.charged_pages > 0">
+                  {{ feeDetail.charged_pages }} 页 × ¥{{ quota?.price_per_page.toFixed(2) }} =
+                  ¥{{ (feeDetail.charged_pages * (quota?.price_per_page || 0)).toFixed(2) }}
+                </el-descriptions-item>
+                <el-descriptions-item label="超出字数" v-if="feeDetail.charged_chars > 0">
+                  {{ feeDetail.charged_chars }} 字（{{ Math.ceil(feeDetail.charged_chars / 100) }} 百字）×
+                  ¥{{ quota?.price_per_100_chars.toFixed(2) }} =
+                  ¥{{ (Math.ceil(feeDetail.charged_chars / 100) * (quota?.price_per_100_chars || 0)).toFixed(2) }}
+                </el-descriptions-item>
+                <el-descriptions-item label="合计费用" v-if="feeDetail.fee_amount > 0">
+                  <strong class="fee-total">¥{{ feeDetail.fee_amount.toFixed(2) }}</strong>
+                </el-descriptions-item>
+                <el-descriptions-item label="结算结果" v-if="feeDetail.fee_amount > 0">
+                  已从余额扣除
+                  <span v-if="feeDetail.paid_balance_after !== undefined">
+                    （余额：¥{{ feeDetail.paid_balance_after.toFixed(2) }}）
+                  </span>
+                </el-descriptions-item>
+              </el-descriptions>
+              <div v-if="feeDetail.fee_amount === 0" class="free-note">
+                本次识别全部走免费额度，未产生费用
+              </div>
+            </template>
+          </el-alert>
+        </div>
+
         <div v-if="importResult?.errors && importResult.errors.length > 0" class="error-details">
           <h4>错误详情</h4>
           <el-alert
@@ -243,12 +332,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { UploadFilled, Document } from '@element-plus/icons-vue';
-import { uploadPdf, getTaskStatus, getTaskPreview, executeImport } from '@/api/pdf-import';
+import {
+  uploadPdf,
+  getTaskStatus,
+  getTaskPreview,
+  executeImport,
+} from '@/api/pdf-import';
 import type { PdfImportTask, PdfPersonRecord } from '@/api/pdf-import';
+import { ocrApi } from '@/api/ocr';
+import type { OcrQuota, OcrFeeDetail } from '@/api/ocr';
 import { useAuthStore } from '@/stores/auth';
 import { useClanStore } from '@/stores/clan';
 
@@ -264,7 +360,14 @@ const importing = ref(false);
 const taskId = ref('');
 const taskInfo = ref<PdfImportTask | null>(null);
 const previewRecords = ref<PdfPersonRecord[]>([]);
-const importResult = ref<{ successCount: number; failureCount: number; errors: string[] } | null>(null);
+const importResult = ref<{
+  successCount: number;
+  failureCount: number;
+  errors: string[];
+  ocrFeeDetail?: OcrFeeDetail;
+} | null>(null);
+
+const quota = ref<OcrQuota | null>(null);
 
 // 轮询定时器
 let pollingTimer: number | null = null;
@@ -289,17 +392,65 @@ const parsingMessage = computed(() => {
   if (!taskInfo.value) return '';
   switch (taskInfo.value.status) {
     case 'pending': return '任务已创建，等待解析...';
-    case 'parsing': return '正在解析PDF文档...';
+    case 'parsing':
+      return taskInfo.value.parseMode === 'ocr'
+        ? '正在 OCR 识别扫描件，请稍候...'
+        : '正在解析PDF文档...';
     case 'preview': return '解析完成！';
-    case 'failed': return `解析失败: ${taskInfo.value.errorMessage}`;
+    case 'failed':
+      return `解析失败: ${taskInfo.value.errorMessage}`;
     default: return '';
   }
 });
 
 const totalRecords = computed(() => previewRecords.value.length);
-const highConfidenceCount = computed(() => previewRecords.value.filter(r => r.confidenceScore >= 90).length);
-const mediumConfidenceCount = computed(() => previewRecords.value.filter(r => r.confidenceScore >= 70 && r.confidenceScore < 90).length);
-const lowConfidenceCount = computed(() => previewRecords.value.filter(r => r.confidenceScore < 70).length);
+const highConfidenceCount = computed(
+  () => previewRecords.value.filter((r) => r.confidenceScore >= 90).length,
+);
+const mediumConfidenceCount = computed(
+  () =>
+    previewRecords.value.filter(
+      (r) => r.confidenceScore >= 70 && r.confidenceScore < 90,
+    ).length,
+);
+const lowConfidenceCount = computed(
+  () => previewRecords.value.filter((r) => r.confidenceScore < 70).length,
+);
+
+const feeDetail = computed<OcrFeeDetail | null>(
+  () => importResult.value?.ocrFeeDetail || taskInfo.value?.ocrFeeDetail || null,
+);
+
+const feeDetailTitle = computed(() => {
+  const f = feeDetail.value;
+  if (!f) return '';
+  if (f.fee_amount === 0) return '本次识别全部免费';
+  return `本次 OCR 费用 ¥${f.fee_amount.toFixed(2)}，已从余额扣除`;
+});
+
+const quotaAlertType = computed(() => {
+  if (!quota.value) return 'info';
+  if (quota.value.paid_balance <= 0) return 'warning';
+  return 'info';
+});
+
+onMounted(async () => {
+  await fetchQuota();
+});
+
+onUnmounted(() => {
+  stopPolling();
+});
+
+// ========== 数据获取 ==========
+
+async function fetchQuota() {
+  try {
+    quota.value = await ocrApi.getQuota();
+  } catch (error) {
+    console.warn('获取 OCR 额度失败', error);
+  }
+}
 
 // 文件处理
 function handleFileChange(file: any) {
@@ -319,7 +470,7 @@ async function handleUpload() {
     const response = await uploadPdf(
       selectedFile.value,
       clanStore.currentClan.id,
-      authStore.userId
+      authStore.user?.sub || '',
     );
 
     taskId.value = response.data.taskId;
@@ -328,7 +479,16 @@ async function handleUpload() {
     // 开始轮询任务状态
     startPolling();
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.message || '上传失败');
+    const status = error.response?.status;
+    const data = error.response?.data;
+    if (status === 402 && data?.error === 'INSUFFICIENT_BALANCE') {
+      await handleInsufficientBalance({
+        required: data.required ?? 0,
+        current: data.current ?? 0,
+      });
+    } else {
+      ElMessage.error(data?.message || '上传失败');
+    }
   } finally {
     uploading.value = false;
   }
@@ -347,7 +507,15 @@ function startPolling() {
         await loadPreview();
       } else if (response.data.status === 'failed') {
         stopPolling();
-        ElMessage.error('PDF解析失败: ' + response.data.errorMessage);
+        const billingErr = response.data.metadata?.ocrBillingError;
+        if (billingErr) {
+          await handleInsufficientBalance({
+            required: billingErr.required ?? 0,
+            current: billingErr.current ?? 0,
+          });
+        } else {
+          ElMessage.error('PDF解析失败: ' + response.data.errorMessage);
+        }
       }
     } catch (error) {
       console.error('轮询任务状态失败:', error);
@@ -368,6 +536,8 @@ async function loadPreview() {
     const response = await getTaskPreview(taskId.value);
     previewRecords.value = response.data.records;
     currentStep.value = 3;
+    // 刷新额度（任务可能消耗了免费额度）
+    await fetchQuota();
   } catch (error: any) {
     ElMessage.error('加载预览数据失败');
   }
@@ -379,24 +549,52 @@ async function handleExecuteImport() {
 
   importing.value = true;
   try {
-    // 先提交校对数据
-    // await submitCorrection(taskId.value, previewRecords.value);
-
-    // 执行导入
     const response = await executeImport(
       taskId.value,
-      authStore.userId,
-      clanStore.currentClan.id
+      authStore.user?.sub || '',
+      clanStore.currentClan.id,
     );
 
     importResult.value = response.data;
     currentStep.value = 4;
 
     ElMessage.success('导入完成');
+    // 刷新额度
+    await fetchQuota();
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.message || '导入失败');
+    const status = error.response?.status;
+    const data = error.response?.data;
+    if (status === 402 && data?.error === 'INSUFFICIENT_BALANCE') {
+      await handleInsufficientBalance({
+        required: data.required ?? 0,
+        current: data.current ?? 0,
+      });
+    } else {
+      ElMessage.error(data?.message || '导入失败');
+    }
   } finally {
     importing.value = false;
+  }
+}
+
+// 余额不足弹窗
+async function handleInsufficientBalance(opts: {
+  required: number;
+  current: number;
+}) {
+  try {
+    await ElMessageBox.confirm(
+      `本次 OCR 识别预计需要 ¥${opts.required.toFixed(2)}，当前余额 ¥${opts.current.toFixed(2)}。请充值后再继续导入。`,
+      '余额不足',
+      {
+        confirmButtonText: '去充值',
+        cancelButtonText: '取消导入',
+        type: 'warning',
+      },
+    );
+    router.push('/user-center/toolbox');
+  } catch {
+    // 用户取消
   }
 }
 
@@ -432,12 +630,8 @@ function handleReset() {
   taskInfo.value = null;
   previewRecords.value = [];
   importResult.value = null;
+  fetchQuota();
 }
-
-// 组件卸载时清理定时器
-onUnmounted(() => {
-  stopPolling();
-});
 </script>
 
 <style scoped>
@@ -539,6 +733,77 @@ onUnmounted(() => {
 
 .error-details h4 {
   margin-bottom: 10px;
-  color: #F56C6C;
+  color: #f56c6c;
+}
+
+/* ========== OCR 限免相关样式 ========== */
+.quota-alert {
+  margin-bottom: 20px;
+}
+
+.quota-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.quota-pricing {
+  color: #909399;
+}
+
+.quota-balance {
+  margin-left: auto;
+  color: #67c23a;
+  font-weight: 500;
+}
+
+.quota-balance.warn {
+  color: #e6a23c;
+}
+
+.quota-engine {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.ocr-realtime {
+  margin-top: 16px;
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+
+.realtime-tip {
+  margin: 10px 0 0 0;
+  font-size: 13px;
+  color: #e6a23c;
+}
+
+.fee-detail {
+  margin-top: 30px;
+  max-width: 800px;
+}
+
+.fee-detail h4 {
+  margin-bottom: 12px;
+  color: #303133;
+}
+
+.fee-descriptions {
+  margin-top: 12px;
+}
+
+.fee-total {
+  color: #f56c6c;
+  font-size: 18px;
+}
+
+.free-note {
+  margin-top: 12px;
+  color: #67c23a;
+  font-size: 13px;
 }
 </style>

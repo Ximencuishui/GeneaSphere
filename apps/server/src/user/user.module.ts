@@ -3,6 +3,8 @@ import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
+import { UserOcrController } from './user-ocr.controller';
+import { ImportModule } from '../import/import.module';
 import { PrismaService } from '@geneasphere/db';
 
 @Module({
@@ -11,8 +13,9 @@ import { PrismaService } from '@geneasphere/db';
       storage: memoryStorage(),
       limits: { fileSize: 5 * 1024 * 1024 },
     }),
+    ImportModule,
   ],
-  controllers: [UserController],
+  controllers: [UserController, UserOcrController],
   providers: [UserService, PrismaService],
   exports: [UserService],
 })

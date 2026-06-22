@@ -1,9 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaClient, Person } from '@prisma/client';
 import * as puppeteer from 'puppeteer-core';
 import * as handlebars from 'handlebars';
 import * as fs from 'fs';
 import * as path from 'path';
+import { CosService } from '../cos/cos.service';
+import { ImageProcessorService } from '../cos/image-processor.service';
+import { v4 as uuidv4 } from 'uuid';
 
 const prisma = new PrismaClient();
 
@@ -19,7 +22,13 @@ interface TreeNode {
 
 @Injectable()
 export class PrintService {
+  private readonly logger = new Logger(PrintService.name);
   private readonly templatePath = path.join(__dirname, 'templates', 'genealogy.hbs');
+
+  constructor(
+    private readonly cosService: CosService,
+    private readonly imageProcessor: ImageProcessorService,
+  ) {}
 
   async generateGenealogyPdf(clanId: bigint): Promise<Buffer> {
     const [clan, persons] = await Promise.all([
@@ -251,5 +260,26 @@ export class PrintService {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  }
+
+  /**
+   * 生成 PDF 并上传至 COS 热 Bucket
+   * @returns CDN URL
+   */
+  async generateAndUploadPdf(clanId: bigint, orderId?: string): Promise<string> {
+    const pdfBuffer = await this.generateGenealogyPdf(clanId);
+
+    const uuid = uuidv4().replace(/-/g, '');
+    const subPath = orderId || clanId.toString();
+    const result = await this.imageProcessor.uploadFile(
+      pdfBuffer,
+      'print/pdf',
+      subPath,
+      'pdf',
+      'hot',
+    );
+
+    this.logger.log(`印刷 PDF 已上传至 COS: ${result.url}`);
+    return result.url;
   }
 }

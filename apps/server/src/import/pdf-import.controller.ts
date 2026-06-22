@@ -7,17 +7,35 @@ import {
   UploadedFile,
   Body,
   Param,
+  Query,
   ParseIntPipe,
   BadRequestException,
   NotFoundException,
+  UseGuards,
+  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { PdfImportService, PdfPersonRecord } from './pdf-import.service';
+import { OcrBillingService } from './ocr-billing.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
+@UseGuards(JwtAuthGuard)
 @Controller('import/pdf')
 export class PdfImportController {
-  constructor(private readonly pdfImportService: PdfImportService) {}
+  constructor(
+    private readonly pdfImportService: PdfImportService,
+    private readonly ocrBilling: OcrBillingService,
+  ) {}
+
+  /**
+   * 查询当前用户 OCR 免费额度
+   */
+  @Get('quota')
+  async getOcrQuota(@Request() req) {
+    const userId = req.user.userId;
+    return this.ocrBilling.getOcrQuota(userId);
+  }
 
   /**
    * 上传PDF文件并创建导入任务
@@ -40,7 +58,8 @@ export class PdfImportController {
   async uploadPdf(
     @UploadedFile() file: Express.Multer.File,
     @Body('clan_id') clanIdStr: string,
-    @Body('user_id') userId: string
+    @Body('user_id') userId: string,
+    @Body('force_ocr') forceOcr?: string
   ) {
     if (!file) {
       throw new BadRequestException('请上传PDF文件');
@@ -59,6 +78,7 @@ export class PdfImportController {
       return {
         success: true,
         taskId,
+        forceOcr: forceOcr === 'true',
         message: 'PDF上传成功，正在解析...',
       };
     } catch (error) {
@@ -87,6 +107,12 @@ export class PdfImportController {
       recordCount: task.extractedRecords.length,
       metadata: task.metadata,
       errorMessage: task.errorMessage,
+      // ========== OCR 计费信息 ==========
+      ocrProvider: task.ocrProvider,
+      ocrEstimatedFee: task.ocrEstimatedFee,
+      ocrPrecheck: task.ocrPrecheck,
+      ocrFeeDetail: task.ocrFeeDetail,
+      ocrCharsCount: task.ocrCharsCount,
     };
   }
 
@@ -147,10 +173,13 @@ export class PdfImportController {
         clanId
       );
 
+      const task = this.pdfImportService.getTaskStatus(taskId);
       return {
         success: true,
         message: `导入完成: 成功 ${result.successCount} 条, 失败 ${result.failureCount} 条`,
         ...result,
+        ocrFeeDetail: task?.ocrFeeDetail,
+        ocrEstimatedFee: task?.ocrEstimatedFee,
       };
     } catch (error) {
       throw new BadRequestException(error.message || '导入执行失败');

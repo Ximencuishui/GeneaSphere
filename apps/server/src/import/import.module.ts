@@ -5,6 +5,8 @@ import { PdfImportController } from './pdf-import.controller';
 import { PdfImportService } from './pdf-import.service';
 import { PdfTextParserService } from './pdf-text-parser.service';
 import { OcrService } from './ocr.service';
+import { TencentOcrService } from './tencent-ocr.service';
+import { OcrBillingService } from './ocr-billing.service';
 import { TreeModule } from '../tree/tree.module';
 import { PrismaService } from '@geneasphere/db';
 
@@ -16,7 +18,10 @@ import { PrismaService } from '@geneasphere/db';
     PdfImportService,
     PdfTextParserService,
     OcrService,
+    TencentOcrService,
+    OcrBillingService,
     PrismaService,
   ],
+  exports: [OcrBillingService, OcrService],
 })
 export class ImportModule {}

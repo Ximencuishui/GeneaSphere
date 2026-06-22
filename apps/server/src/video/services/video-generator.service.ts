@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@geneasphere/db';
+import { CosService } from '../../cos/cos.service';
+import { ImageProcessorService } from '../../cos/image-processor.service';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface GenerationResult {
   videoUrl: string;
@@ -14,6 +17,8 @@ export class VideoGeneratorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly cosService: CosService,
+    private readonly imageProcessor: ImageProcessorService,
   ) {}
 
   /**
@@ -78,12 +83,19 @@ export class VideoGeneratorService {
   }
 
   /**
-   * 生成模拟视频URL
-   * 实际生产中，这里应该返回真实的视频文件路径
+   * 生成视频 URL（COS 模式下返回 CDN 路径，否则返回模拟 URL）
    */
   private generateMockVideoUrl(projectId: bigint, style: string): string {
-    // 使用示例视频作为占位
-    // 实际生产中，这里应该上传到OSS并返回真实URL
+    const useCos = this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true';
+
+    if (useCos) {
+      // COS 模式：生成 CDN URL（实际生产中此处应有真实的视频文件上传）
+      const uuid = uuidv4().replace(/-/g, '');
+      const key = `video/mp4/${projectId}/${uuid}.mp4`;
+      return this.cosService.getCdnUrl(key);
+    }
+
+    // 本地模式：使用示例视频作为占位
     const timestamp = Date.now();
     return `https://www.w3schools.com/html/mov_bbb.mp4?project=${projectId}&style=${style}&t=${timestamp}`;
   }

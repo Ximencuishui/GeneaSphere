@@ -1,13 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import sharp from 'sharp';
 import * as fs from 'fs';
 import * as path from 'path';
+import { CosService } from '../cos/cos.service';
 
 @Injectable()
 export class AvatarService {
+  private readonly logger = new Logger(AvatarService.name);
   private readonly thumbnailsRoot: string;
 
-  constructor() {
+  constructor(private readonly cosService: CosService) {
     this.thumbnailsRoot = process.env.THUMBNAILS_PATH
       ? path.resolve(process.env.THUMBNAILS_PATH)
       : path.join(process.cwd(), 'storage', 'media', 'thumbnails');
@@ -19,15 +21,15 @@ export class AvatarService {
 
   /**
    * Generate a square thumbnail (center-cropped) from a source image
-   * @param sourcePath Absolute or relative path to the source image
+   * @param sourcePath Absolute or relative path to the source image (local mode)
    * @param size Target thumbnail size in pixels (width and height)
-   * @returns The relative URL path of the generated thumbnail, or null on failure
+   * @returns The URL path of the generated thumbnail, or null on failure
    */
   async generateThumbnail(sourcePath: string, size: number = 200): Promise<string | null> {
     try {
       const resolvedPath = path.resolve(sourcePath);
       if (!fs.existsSync(resolvedPath)) {
-        console.error(`Source image not found: ${resolvedPath}`);
+        this.logger.error(`Source image not found: ${resolvedPath}`);
         return null;
       }
 
@@ -58,7 +60,48 @@ export class AvatarService {
 
       return `/media/thumbnails/${thumbnailFilename}`;
     } catch (error) {
-      console.error('Failed to generate thumbnail:', error);
+      this.logger.error('Failed to generate thumbnail:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Generate avatar thumbnails and upload to COS (COS mode)
+   */
+  async generateAvatarToCos(imageBuffer: Buffer, clanId: string, personId: string): Promise<{ avatarUrl: string; thumbnailUrl: string } | null> {
+    try {
+      const uuid = personId;
+
+      // Generate 200x200 avatar
+      const avatarBuffer = await sharp(imageBuffer)
+        .resize(200, 200, { fit: 'cover', position: 'centre' })
+        .jpeg({ quality: 85, progressive: true })
+        .toBuffer();
+
+      const avatarKey = `media/display/avatar/${uuid}.jpg`;
+      const avatarResult = await this.cosService.uploadFile(avatarKey, avatarBuffer, {
+        contentType: 'image/jpeg',
+        bucketType: 'hot',
+      });
+
+      // Generate 80x80 thumbnail
+      const thumbBuffer = await sharp(imageBuffer)
+        .resize(80, 80, { fit: 'cover', position: 'centre' })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+
+      const thumbKey = `media/thumb/avatar/${uuid}_80w.jpg`;
+      const thumbResult = await this.cosService.uploadFile(thumbKey, thumbBuffer, {
+        contentType: 'image/jpeg',
+        bucketType: 'hot',
+      });
+
+      return {
+        avatarUrl: avatarResult.url,
+        thumbnailUrl: thumbResult.url,
+      };
+    } catch (error) {
+      this.logger.error('Failed to generate avatar to COS:', error);
       return null;
     }
   }

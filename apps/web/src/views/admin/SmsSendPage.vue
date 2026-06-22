@@ -21,9 +21,9 @@ const selectedMembers = ref<string[]>([])
 
 // 短信内容
 const smsContent = ref('')
-const signName = ref('【根脉云谱】')
+const signName = ref('【寻根路】')
 const signOptions = [
-  '【根脉云谱】',
+  '【寻根路】',
   '【张氏宗亲会】',
   '【李氏家族】',
   '【王氏宗祠】',

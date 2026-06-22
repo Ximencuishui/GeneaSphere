@@ -4,8 +4,8 @@
     <header class="navbar">
       <div class="nav-inner">
         <a href="/" class="logo">
-          <span class="logo-icon">根</span>
-          <span class="logo-text">根脉云谱</span>
+          <span class="logo-icon">寻</span>
+          <span class="logo-text">寻根路 · xungenlu.cn</span>
         </a>
         <nav class="nav-links">
           <a href="/">首页</a>
@@ -26,8 +26,8 @@
     <footer class="footer">
       <div class="footer-inner">
         <div class="footer-brand">
-          <span class="logo-icon">根</span>
-          <span class="logo-text">根脉云谱 GeneaSphere</span>
+          <span class="logo-icon">寻</span>
+          <span class="logo-text">寻根路 · xungenlu.cn</span>
         </div>
         <div class="footer-links">
           <a href="/">首页</a>
@@ -44,7 +44,7 @@
           <a href="/cookie-policy" target="_blank">Cookie 政策</a>
         </div>
         <div class="footer-copy">
-          &copy; {{ currentYear }} 根脉云谱 GeneaSphere. All rights reserved.
+          &copy; {{ currentYear }} 寻根路 · xungenlu.cn. All rights reserved.
         </div>
       </div>
     </footer>
