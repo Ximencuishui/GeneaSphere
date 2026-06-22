@@ -1,0 +1,27 @@
+FROM nginx:alpine
+
+COPY apps/web/dist /usr/share/nginx/html
+
+# Nginx 配置：API 代理到后端 server
+RUN echo 'server { \
+    listen 80; \
+    server_name xungenlu.cn; \
+    root /usr/share/nginx/html; \
+    index index.html; \
+    \
+    location /api/ { \
+        proxy_pass http://server:3000; \
+        proxy_set_header Host $host; \
+        proxy_set_header X-Real-IP $remote_addr; \
+    } \
+    \
+    location /uploads/ { \
+        proxy_pass http://server:3000; \
+    } \
+    \
+    location / { \
+        try_files $uri $uri/ /index.html; \
+    } \
+}' > /etc/nginx/conf.d/default.conf
+
+EXPOSE 80

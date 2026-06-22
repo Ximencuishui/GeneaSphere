@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geneasphere-server
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_PLATFORM_SECRET=${JWT_PLATFORM_SECRET}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL}
+      - OCR_PROVIDER=${OCR_PROVIDER:-auto}
+      - OCR_FREE_PAGES=${OCR_FREE_PAGES:-10}
+      - OCR_FREE_CHARS=${OCR_FREE_CHARS:-1000}
+      - STORAGE_DRIVER=${STORAGE_DRIVER:-local}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads_data:/app/storage
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: geneasphere-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+
+volumes:
+  uploads_data:

@@ -1,0 +1,12 @@
+node_modules
+.git
+temp
+storage
+uploads
+worker
+docs
+*.7z
+*.tgz
+install_output.txt
+run_pnpm.bat
+create-schema.ps1

@@ -1,0 +1,26 @@
+{
+  "name": "geneasphere",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:server": "pnpm --filter server start:dev",
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "postinstall": "prisma generate --schema=packages/db/prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.22.0",
+    "prisma": "^5.22.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "element-plus": "^2.14.2",
+    "esbuild": "^0.28.1"
+  }
+}
