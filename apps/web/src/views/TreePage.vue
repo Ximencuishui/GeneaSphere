@@ -217,7 +217,7 @@ function viewMedia(_media: MediaArchive) {
 async function fetchRelatedMedia(personId: number) {
   try {
     const response = await mediaApi.getByPersonId(personId);
-    relatedMedia.value = response.data || [];
+    relatedMedia.value = response;
   } catch (error) {
     console.error('Failed to fetch related media:', error);
   }

@@ -83,7 +83,7 @@ export const lineageVideoApi = {
    * 创建直系血缘视频项目
    */
   createProject: (data: CreateLineageProjectDto) =>
-    request.post<{ id: string; queue_position: number; estimated_wait_minutes: number }>(
+    request.post<{ id: string; queue_position: number; estimated_wait_minutes: number }, { id: string; queue_position: number; estimated_wait_minutes: number }>(
       '/api/lineage-video/projects',
       data,
     ),
@@ -92,7 +92,7 @@ export const lineageVideoApi = {
    * 获取我的项目列表
    */
   listProjects: (params?: { page?: number; pageSize?: number }) =>
-    request.get<{ data: LineageVideoProject[]; pagination: Pagination<LineageVideoProject>['pagination'] }>(
+    request.get<{ data: LineageVideoProject[]; pagination: Pagination<LineageVideoProject>['pagination'] }, { data: LineageVideoProject[]; pagination: Pagination<LineageVideoProject>['pagination'] }>(
       '/api/lineage-video/projects',
       { params },
     ),
@@ -101,7 +101,7 @@ export const lineageVideoApi = {
    * 获取项目详情
    */
   getProject: (id: string) =>
-    request.get<LineageVideoProject & { materials: LineageVideoMaterial[] }>(
+    request.get<LineageVideoProject & { materials: LineageVideoMaterial[] }, LineageVideoProject & { materials: LineageVideoMaterial[] }>(
       `/api/lineage-video/projects/${id}`,
     ),
 
@@ -127,19 +127,25 @@ export const lineageVideoApi = {
     downGenerations?: number;
     includeSpouse?: boolean;
   }) =>
-    request.get<LineagePreviewResult>('/api/lineage-video/preview', { params }),
+    request.get<LineagePreviewResult, LineagePreviewResult>('/api/lineage-video/preview', { params }),
 
   /**
    * 获取月度用量
    */
   getMonthlyUsage: () =>
-    request.get<MonthlyUsage>('/api/lineage-video/monthly-usage'),
+    request.get<MonthlyUsage, MonthlyUsage>('/api/lineage-video/monthly-usage'),
 
   /**
    * 在家族内搜索人物
    */
   searchPersons: (keyword?: string, limit = 20) =>
     request.get<Array<{
+      id: string;
+      full_name: string;
+      gender: string;
+      birth_date?: string;
+      death_date?: string;
+    }>, Array<{
       id: string;
       full_name: string;
       gender: string;

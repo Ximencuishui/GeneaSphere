@@ -332,7 +332,7 @@ function getFieldLabels(fields: string[]) {
               {{ project.page_count }} 页
             </ElDescriptionsItem>
             <ElDescriptionsItem label="分类方式">
-              {{ GROUPING_OPTIONS.find((o) => o.value === project.grouping)?.label }}
+              {{ GROUPING_OPTIONS.find((o) => o.value === project?.grouping)?.label }}
             </ElDescriptionsItem>
             <ElDescriptionsItem label="展示字段">
               {{ getFieldLabels(project.selected_fields) }}

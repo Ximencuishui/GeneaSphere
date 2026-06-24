@@ -2,16 +2,60 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import type { AxiosResponse } from 'axios'
+// ========== 接口响应类型定义 ==========
+
+interface SummaryTotals {
+  new_families: number
+  new_users: number
+  new_media: number
+  new_orders: number
+  revenue: number
+}
+
+interface SummaryResponse {
+  period: 'day' | 'week' | 'month'
+  since: string
+  totals: SummaryTotals
+  trends: Array<{ date: string; revenue: number; order_count: number }>
+}
+
+interface FamilyRankingItem {
+  clan_id: string
+  name: string
+  value: number
+}
+
+interface FamilyRankingResponse {
+  type: string
+  data: FamilyRankingItem[]
+}
+
+interface ToolUsageItem {
+  tool_key: string
+  tool_name: string
+  count: number
+}
+
+// ========== 状态 ==========
 
 const period = ref<'day' | 'week' | 'month'>('week')
-const summary = ref<any>({ totals: { new_families: 0, new_users: 0, new_media: 0, new_orders: 0, revenue: 0 }, trends: [] })
+const summary = ref<SummaryResponse>({
+  period: 'week',
+  since: '',
+  totals: { new_families: 0, new_users: 0, new_media: 0, new_orders: 0, revenue: 0 },
+  trends: [],
+})
 const rankingType = ref<'member_count' | 'photo_count' | 'storage' | 'revenue'>('member_count')
-const rankingData = ref<any[]>([])
-const toolUsageMessage = ref('AI 工具埋点表尚未上线（v1.1 引入）')
+const rankingData = ref<FamilyRankingItem[]>([])
+const rankingPagination = ref({ page: 1, page_size: 20, total: 0, total_pages: 0 })
+const toolUsageData = ref<ToolUsageItem[]>([])
+const toolUsagePeriod = ref<'day' | 'week' | 'month'>('week')
+const pdfPeriod = ref<'day' | 'week' | 'month'>('week')
 
 const fetchSummary = async () => {
   try {
-    const res = await axios.get('/api/platform/statistics/summary', {
+    const res = await axios.get<SummaryResponse>('/api/platform/statistics/summary', {
       params: { period: period.value },
     })
     summary.value = res.data
@@ -22,9 +66,10 @@ const fetchSummary = async () => {
 
 const fetchRanking = async () => {
   try {
-    const res = await axios.get('/api/platform/statistics/family-ranking', {
-      params: { type: rankingType.value, limit: 20 },
-    })
+    const res = await axios.get<FamilyRankingResponse>(
+      '/api/platform/statistics/family-ranking',
+      { params: { type: rankingType.value, limit: 20 } },
+    )
     rankingData.value = res.data.data
   } catch (err) {
     console.error(err)
@@ -33,8 +78,11 @@ const fetchRanking = async () => {
 
 const fetchToolUsage = async () => {
   try {
-    const res = await axios.get('/api/platform/statistics/tool-usage')
-    toolUsageMessage.value = res.data.message
+    const res = await axios.get<{ period: string; since: string; data: ToolUsageItem[] }>(
+      '/api/platform/statistics/tool-usage',
+      { params: { period: toolUsagePeriod.value, limit: 20 } },
+    )
+    toolUsageData.value = res.data.data || []
   } catch (err) {
     console.error(err)
   }
@@ -42,7 +90,7 @@ const fetchToolUsage = async () => {
 
 const handleExport = async (type: 'summary' | 'family-ranking', format: 'excel' | 'csv') => {
   try {
-    const res = await axios.get('/api/platform/statistics/export', {
+    const res: AxiosResponse<Blob> = await axios.get('/api/platform/statistics/export', {
       params: { type, format },
       responseType: 'blob',
     })
@@ -58,6 +106,28 @@ const handleExport = async (type: 'summary' | 'family-ranking', format: 'excel' 
     ElMessage.success('已导出')
   } catch (err) {
     ElMessage.error('导出失败')
+  }
+}
+
+const handleDownloadPdf = async () => {
+  try {
+    const res: AxiosResponse<Blob> = await axios.get('/api/platform/statistics/report', {
+      params: { period: pdfPeriod.value },
+      responseType: 'blob',
+    })
+    const label =
+      pdfPeriod.value === 'day' ? 'daily' : pdfPeriod.value === 'week' ? 'weekly' : 'monthly'
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `xungenlu_${label}_report_${Date.now()}.pdf`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('PDF 报表已生成')
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || 'PDF 生成失败')
   }
 }
 
@@ -141,9 +211,39 @@ onMounted(() => {
 
     <ElCard shadow="hover" class="tool-usage">
       <template #header>
-        <h2>AI 工具使用统计</h2>
+        <div class="page-header">
+          <h2>工具使用排行</h2>
+          <ElRadioGroup v-model="toolUsagePeriod" @change="fetchToolUsage" size="small">
+            <ElRadioButton value="day">日</ElRadioButton>
+            <ElRadioButton value="week">周</ElRadioButton>
+            <ElRadioButton value="month">月</ElRadioButton>
+          </ElRadioGroup>
+        </div>
       </template>
-      <ElEmpty :description="toolUsageMessage" />
+      <ElTable v-if="toolUsageData.length > 0" :data="toolUsageData" size="small" stripe>
+        <ElTableColumn type="index" label="#" width="60" />
+        <ElTableColumn prop="tool_name" label="工具名称" min-width="160" />
+        <ElTableColumn prop="tool_key" label="标识" width="160" />
+        <ElTableColumn prop="count" label="调用次数" width="120" align="right">
+          <template #default="{ row }">{{ row.count.toLocaleString() }}</template>
+        </ElTableColumn>
+      </ElTable>
+      <ElEmpty v-else description="本周期暂无工具调用记录" />
+    </ElCard>
+
+    <ElCard shadow="hover" class="pdf-report-card">
+      <template #header>
+        <div class="page-header">
+          <h2>PDF 报表下载</h2>
+          <ElRadioGroup v-model="pdfPeriod" size="small">
+            <ElRadioButton value="day">日报</ElRadioButton>
+            <ElRadioButton value="week">周报</ElRadioButton>
+            <ElRadioButton value="month">月报</ElRadioButton>
+          </ElRadioGroup>
+        </div>
+      </template>
+      <p class="pdf-desc">自动生成包含核心指标、收入趋势、家族排行的 PDF 报表（需求 §3.11）。</p>
+      <ElButton type="primary" @click="handleDownloadPdf">下载 {{ pdfPeriod === 'day' ? '日报' : pdfPeriod === 'week' ? '周报' : '月报' }} PDF</ElButton>
     </ElCard>
   </div>
 </template>
@@ -205,5 +305,15 @@ onMounted(() => {
 
 .tool-usage {
   margin-top: 20px;
+}
+
+.pdf-report-card {
+  margin-top: 20px;
+}
+
+.pdf-desc {
+  color: #5a6678;
+  font-size: 13px;
+  margin: 0 0 12px;
 }
 </style>

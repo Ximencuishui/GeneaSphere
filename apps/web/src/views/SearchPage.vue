@@ -184,11 +184,11 @@ import { ref, reactive, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Search, Location, EditPen, Loading } from '@element-plus/icons-vue';
 import { searchPosts, createSearchPost, getContactInfo as getContactApi } from '@/api/search';
-import type { SearchPost } from '@prisma/client';
+import type { SearchPost } from '@/types';
 
 const loading = ref(false);
 const submitting = ref(false);
-const posts = ref<{ post: SearchPost; score: number }[]>([]);
+const posts = ref<Awaited<ReturnType<typeof searchPosts>>>([]);
 const searchQuery = ref('');
 const searchOriginPlace = ref('');
 
@@ -221,7 +221,7 @@ async function handleSearch() {
   loading.value = true;
   try {
     const result = await searchPosts(searchQuery.value, searchOriginPlace.value || undefined);
-    posts.value = result.data || result;
+    posts.value = result || [];
   } catch (error: any) {
     ElMessage.error(`搜索失败：${error.message}`);
   } finally {
@@ -234,7 +234,7 @@ async function loadAllPosts() {
   loading.value = true;
   try {
     const result = await searchPosts('', '');
-    posts.value = result.data || result;
+    posts.value = result || [];
   } catch (error: any) {
     console.error('加载失败：', error);
   } finally {
@@ -243,7 +243,7 @@ async function loadAllPosts() {
 }
 
 // 查看帖子详情
-function handleViewPost(post: SearchPost) {
+function handleViewPost(_post: SearchPost) {
   // TODO: 跳转到帖子详情页
   ElMessage.info('帖子详情功能开发中...');
 }
@@ -251,8 +251,8 @@ function handleViewPost(post: SearchPost) {
 // 查看联系方式
 async function handleViewContact(post: SearchPost) {
   try {
-    const result = await getContactApi(post.id);
-    contactInfo.value = result.data?.contact_info || result.contact_info || '暂无联系方式';
+    const result = await getContactApi(String(post.id));
+    contactInfo.value = result?.contact_info || '暂无联系方式';
     selectedPost.value = post;
     showContactDialog.value = true;
   } catch (error: any) {

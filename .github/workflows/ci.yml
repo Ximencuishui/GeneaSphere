@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# 取消旧运行，节省 CI 资源
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── 1. 后端：type-check + jest 单测 ───────────────────────────────
+  server:
+    name: Server (type-check + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # 单元测试不需要真实 DB，但 prisma generate 在 postinstall 阶段执行，
+      # 这里不提供 DB 即可，jest 只跑纯逻辑用例。
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: geneasphere_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/geneasphere_test?schema=public
+      JWT_SECRET: ci-test-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Prisma generate
+        run: pnpm prisma generate --schema=packages/db/prisma/schema.prisma
+
+      - name: Build @geneasphere/db
+        run: pnpm --filter @geneasphere/db build
+
+      - name: Type-check (server)
+        run: pnpm --filter server exec tsc --noEmit
+
+      - name: Unit tests (server)
+        run: pnpm --filter server test -- --passWithNoTests
+
+  # ─── 2. 前端：type-check + vite build ─────────────────────────────
+  web:
+    name: Web (type-check + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Type-check (web)
+        run: pnpm --filter web exec vue-tsc --noEmit -p tsconfig.app.json
+
+      - name: Build (web)
+        run: pnpm --filter web build
+        env:
+          VITE_API_BASE_URL: /api

@@ -35,6 +35,30 @@ export const useAuthStore = defineStore("auth", () => {
 
   const isLoggedIn = computed(() => !!token.value)
 
+  /** 发送短信验证码 */
+  const sendSmsCode = async (phone: string, purpose: 'REGISTER' | 'LOGIN') => {
+    const response = await axios.post("/api/auth/send-sms-code", { phone, purpose })
+    return response.data
+  }
+
+  /** 短信验证码登录（无密码自动注册） */
+  const loginBySms = async (phone: string, smsCode: string) => {
+    loading.value = true
+    try {
+      const response = await axios.post("/api/auth/login", { phone, smsCode })
+      token.value = response.data.access_token
+      localStorage.setItem(TOKEN_KEY, token.value)
+      axios.defaults.headers.common["Authorization"] = "Bearer " + token.value
+      user.value = parseTokenPayload(token.value)
+      await router.push("/dashboard")
+    } catch (error) {
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** 密码登录 */
   const login = async (phone: string, password: string) => {
     loading.value = true
     try {
@@ -59,10 +83,11 @@ export const useAuthStore = defineStore("auth", () => {
     router.push("/login")
   }
 
-  const register = async (phone: string, password: string) => {
+  /** 注册（需要短信验证码） */
+  const register = async (phone: string, password: string, smsCode: string) => {
     loading.value = true
     try {
-      const response = await axios.post("/api/auth/register", { phone, password })
+      const response = await axios.post("/api/auth/register", { phone, password, smsCode })
       token.value = response.data.access_token
       localStorage.setItem(TOKEN_KEY, token.value)
       axios.defaults.headers.common["Authorization"] = "Bearer " + token.value
@@ -75,5 +100,5 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  return { token, loading, user, isLoggedIn, login, logout, register }
+  return { token, loading, user, isLoggedIn, sendSmsCode, login, loginBySms, logout, register }
 })

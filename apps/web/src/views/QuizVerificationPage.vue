@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref } from 'vue';import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useMemoryStore } from '@/stores/memory'
 import QuestionCard from '@/components/memory/QuestionCard.vue'

@@ -1,8 +1,6 @@
 import { defineStore } from 'pinia'
 import axios from 'axios'
-import type { MemoryQuiz, MemoryAnswer, MemoryBadge, MemoryWallData } from '@/types/memory'
-
-export const useMemoryStore = defineStore('memory', {
+import type { MemoryQuiz, MemoryBadge, MemoryWallData } from '@/types/memory';export const useMemoryStore = defineStore('memory', {
   state: () => ({
     currentQuizzes: [] as MemoryQuiz[],
     quizResults: null as any | null,

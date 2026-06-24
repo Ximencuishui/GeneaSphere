@@ -18,17 +18,17 @@ export const discussionApi = {
   groups: {
     /** 获取我加入的小组列表 */
     list: () =>
-      request.get<{ data: DiscussionGroup[]; notice?: string }>(
+      request.get<{ data: DiscussionGroup[]; notice?: string }, { data: DiscussionGroup[]; notice?: string }>(
         '/api/discussion/groups',
       ),
 
     /** 创建小组 */
     create: (data: { name: string; description?: string; is_public?: boolean }) =>
-      request.post<DiscussionGroup>('/api/discussion/groups', data),
+      request.post<DiscussionGroup, DiscussionGroup>('/api/discussion/groups', data),
 
     /** 获取小组详情 */
     getById: (id: string | number) =>
-      request.get<DiscussionGroup>(`/api/discussion/groups/${trimId(id)}`),
+      request.get<DiscussionGroup, DiscussionGroup>(`/api/discussion/groups/${trimId(id)}`),
 
     /** 更新小组信息 */
     update: (
@@ -42,7 +42,7 @@ export const discussionApi = {
 
     /** 获取未读话题数 */
     unreadCount: (id: string | number) =>
-      request.get<{ unread_count: number }>(
+      request.get<{ unread_count: number }, { unread_count: number }>(
         `/api/discussion/groups/${trimId(id)}/unread-count`,
       ),
 
@@ -55,7 +55,7 @@ export const discussionApi = {
   members: {
     /** 获取小组成员列表 */
     list: (groupId: string | number) =>
-      request.get<GroupMember[]>(
+      request.get<GroupMember[], GroupMember[]>(
         `/api/discussion/groups/${trimId(groupId)}/members`,
       ),
 
@@ -90,7 +90,7 @@ export const discussionApi = {
       groupId: string | number,
       params?: { page?: number; pageSize?: number; keyword?: string },
     ) =>
-      request.get<Pagination<GroupTopic>>(
+      request.get<Pagination<GroupTopic>, Pagination<GroupTopic>>(
         `/api/discussion/groups/${trimId(groupId)}/topics`,
         { params },
       ),
@@ -100,14 +100,14 @@ export const discussionApi = {
       groupId: string | number,
       data: { title: string; content: string },
     ) =>
-      request.post<GroupTopic>(
+      request.post<GroupTopic, GroupTopic>(
         `/api/discussion/groups/${trimId(groupId)}/topics`,
         data,
       ),
 
     /** 获取话题详情 */
     getById: (id: string | number, params?: { page?: number; pageSize?: number }) =>
-      request.get<TopicDetail>(`/api/discussion/topics/${trimId(id)}`, { params }),
+      request.get<TopicDetail, TopicDetail>(`/api/discussion/topics/${trimId(id)}`, { params }),
 
     /** 删除话题 */
     delete: (id: string | number) =>
@@ -125,7 +125,7 @@ export const discussionApi = {
       topicId: string | number,
       data: { content: string; media_urls?: string[] },
     ) =>
-      request.post<TopicReply>(
+      request.post<TopicReply, TopicReply>(
         `/api/discussion/topics/${trimId(topicId)}/replies`,
         data,
       ),
@@ -139,13 +139,13 @@ export const discussionApi = {
   summaries: {
     /** 获取小组总结列表 */
     list: (groupId: string | number) =>
-      request.get<DiscussionSummary[]>(
+      request.get<DiscussionSummary[], DiscussionSummary[]>(
         `/api/discussion/groups/${trimId(groupId)}/summaries`,
       ),
 
     /** 生成话题总结 */
     generateTopic: (topicId: string | number) =>
-      request.post<{ id: string; title: string; summary_type: string; message: string }>(
+      request.post<{ id: string; title: string; summary_type: string; message: string }, { id: string; title: string; summary_type: string; message: string }>(
         `/api/discussion/topics/${trimId(topicId)}/summary`,
       ),
 
@@ -154,14 +154,14 @@ export const discussionApi = {
       groupId: string | number,
       data?: { time_range_start?: string; time_range_end?: string },
     ) =>
-      request.post<{ id: string; title: string; summary_type: string; message: string }>(
+      request.post<{ id: string; title: string; summary_type: string; message: string }, { id: string; title: string; summary_type: string; message: string }>(
         `/api/discussion/groups/${trimId(groupId)}/summary`,
         data,
       ),
 
     /** 获取总结详情 */
     getById: (id: string | number) =>
-      request.get<DiscussionSummary>(`/api/discussion/summaries/${trimId(id)}`),
+      request.get<DiscussionSummary, DiscussionSummary>(`/api/discussion/summaries/${trimId(id)}`),
 
     /** 编辑总结 */
     update: (id: string | number, content: any) =>
@@ -169,7 +169,7 @@ export const discussionApi = {
 
     /** 获取版本历史 */
     versions: (id: string | number) =>
-      request.get<SummaryVersion[]>(
+      request.get<SummaryVersion[], SummaryVersion[]>(
         `/api/discussion/summaries/${trimId(id)}/versions`,
       ),
 

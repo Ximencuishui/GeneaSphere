@@ -15,13 +15,13 @@ export const personalSpaceApi = {
   // ========== 存储用量 ==========
   storage: {
     get: () =>
-      request.get<UserStorageInfo>('/api/personal-space/storage'),
+      request.get<UserStorageInfo, UserStorageInfo>('/api/personal-space/storage'),
   },
 
   // ========== 相册 ==========
   albums: {
     list: (sort?: string) =>
-      request.get<UserAlbum[]>('/api/personal-space/albums', {
+      request.get<UserAlbum[], UserAlbum[]>('/api/personal-space/albums', {
         params: { sort },
       }),
 
@@ -29,7 +29,7 @@ export const personalSpaceApi = {
       name: string
       description?: string
       default_privacy?: SpacePrivacyLevel
-    }) => request.post<UserAlbum>('/api/personal-space/albums', data),
+    }) => request.post<UserAlbum, UserAlbum>('/api/personal-space/albums', data),
 
     update: (
       id: string | number,
@@ -52,7 +52,7 @@ export const personalSpaceApi = {
       page?: number
       pageSize?: number
     }) =>
-      request.get<Pagination<UserPhoto>>('/api/personal-space/photos', {
+      request.get<Pagination<UserPhoto>, Pagination<UserPhoto>>('/api/personal-space/photos', {
         params: {
           ...params,
           album_id: params?.album_id ? trimId(params.album_id) : undefined,
@@ -108,7 +108,7 @@ export const personalSpaceApi = {
       page?: number
       pageSize?: number
     }) =>
-      request.get<Pagination<UserMessage>>('/api/personal-space/messages', {
+      request.get<Pagination<UserMessage>, Pagination<UserMessage>>('/api/personal-space/messages', {
         params,
       }),
 

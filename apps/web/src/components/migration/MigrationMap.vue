@@ -7,8 +7,8 @@
     </div>
 
     <!-- 当前朝代标注 -->
-    <div v-if="currentDynasty" class="dynasty-badge" :style="{ borderColor: currentDynasty.color }">
-      <div class="dynasty-name" :style="{ color: currentDynasty.color }">
+    <div v-if="currentDynasty" class="dynasty-badge" :style="{ borderColor: currentDynasty.color ?? '' }">
+      <div class="dynasty-name" :style="{ color: currentDynasty.color ?? '' }">
         {{ currentDynasty.name }}
       </div>
       <div class="dynasty-period">
@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   Loading,

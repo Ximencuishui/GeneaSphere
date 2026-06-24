@@ -1,11 +1,22 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { SmsService } from './sms.service';
+import { RegisterDto, LoginDto, SendSmsCodeDto } from './dto/auth.dto';
 import { Public } from './public.decorator';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private smsService: SmsService,
+  ) {}
+
+  @Public()
+  @Post('send-sms-code')
+  async sendSmsCode(@Body() dto: SendSmsCodeDto, @Req() req: any) {
+    const ip = req.ip || req.connection?.remoteAddress;
+    return this.smsService.sendVerifyCode(dto.phone, dto.purpose, ip);
+  }
 
   @Public()
   @Post('register')

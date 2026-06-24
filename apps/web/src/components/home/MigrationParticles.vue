@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import type { SurnameData, ParticleState } from '@/types/home'
+import { ref, onMounted, onUnmounted } from 'vue';import type { SurnameData, ParticleState } from '@/types/home'
 
 const props = defineProps<{
   highlightedSurname: string | null

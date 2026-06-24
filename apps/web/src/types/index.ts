@@ -116,6 +116,21 @@ export interface ColumnMapping {
   required: boolean;
 }
 
+/**
+ * 简化的列映射（前端 store 使用的字段名形式）
+ */
+export interface SimpleColumnMapping {
+  full_name: string;
+  gender: string;
+  birth_date: string;
+  death_date: string;
+  is_living: string;
+  parent_name: string;
+  spouse_name: string;
+  generation: string;
+  description: string;
+}
+
 export interface ImportPreview {
   total: number;
   valid: number;
@@ -124,6 +139,28 @@ export interface ImportPreview {
     message: string;
   }[];
   data: any[];
+}
+
+/**
+ * 导入结果（异步任务的最终状态）
+ */
+export interface ImportResult {
+  task_id: string;
+  status: 'pending' | 'running' | 'success' | 'failed';
+  total: number;
+  imported: number;
+  imported_count?: number;
+  success_count?: number;
+  successCount?: number;
+  skipped: number;
+  failure_count?: number;
+  failureCount?: number;
+  errors: {
+    row: number;
+    message: string;
+  }[];
+  finished_at?: string;
+  message?: string;
 }
 
 // ==================== 寻亲相关 ====================
@@ -149,6 +186,7 @@ export interface CreateSearchPostDto {
 export interface MediaArchive {
   id: number;
   clan_id: number;
+  clan_name?: string;
   uploader_id: string;
   file_url: string;
   display_url?: string;
@@ -161,6 +199,23 @@ export interface MediaArchive {
   updated_at: string;
   file_size?: number;
   media_type?: string;
+  person_links?: MediaPersonLink[];
+  data?: MediaArchive[];
+}
+
+/**
+ * 媒体与人物关联
+ */
+export interface MediaPersonLink {
+  id: number;
+  media_id: number;
+  person_id: number;
+  person_name?: string;
+  relation?: string;
+  person?: {
+    id: number;
+    full_name: string;
+  };
 }
 
 export interface CreateMediaDto {

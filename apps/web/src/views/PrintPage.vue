@@ -136,9 +136,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { useClanStore } from '@/stores/clan';
-
-const clanStore = useClanStore();
 
 // 状态
 const selectedClanId = ref<string | number | null>(null);
@@ -182,7 +179,7 @@ const estimatedPrice = computed(() => {
 
 // 处理家族选择变化
 function handleClanChange(clanId: string | number) {
-  const clan = clanList.value.find(c => c.id === clanId);
+  const clan = clanList.value.find(c => String(c.id) === String(clanId));
   selectedClanName.value = clan?.name || '';
   pdfPreviewUrl.value = ''; // 清空预览
 }

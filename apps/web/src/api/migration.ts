@@ -20,7 +20,7 @@ export const migrationApi = {
    * 获取家族 POI 列表
    */
   getPois: (clanId: string | number, branch?: string) =>
-    request.get<MigrationPoi[]>(`/api/migration/${clanId}/pois`, {
+    request.get<MigrationPoi[], MigrationPoi[]>(`/api/migration/${clanId}/pois`, {
       params: branch ? { branch } : undefined,
     }),
 
@@ -28,7 +28,7 @@ export const migrationApi = {
    * 获取迁徙事件列表
    */
   getEvents: (clanId: string | number, branch?: string) =>
-    request.get<MigrationEvent[]>(`/api/migration/${clanId}/events`, {
+    request.get<MigrationEvent[], MigrationEvent[]>(`/api/migration/${clanId}/events`, {
       params: branch ? { branch } : undefined,
     }),
 
@@ -36,18 +36,18 @@ export const migrationApi = {
    * 获取支系列表
    */
   getBranches: (clanId: string | number) =>
-    request.get<Branch[]>(`/api/migration/${clanId}/branches`),
+    request.get<Branch[], Branch[]>(`/api/migration/${clanId}/branches`),
 
   /**
    * 获取预置朝代数据
    */
-  getDynasties: () => request.get<Dynasty[]>('/api/migration/dynasties'),
+  getDynasties: () => request.get<Dynasty[], Dynasty[]>('/api/migration/dynasties'),
 
   /**
    * 获取某地点关联的图片
    */
   getLocationMedia: (clanId: string | number, location: string) =>
-    request.get<LocationMediaItem[]>(`/api/migration/${clanId}/location-media`, {
+    request.get<LocationMediaItem[], LocationMediaItem[]>(`/api/migration/${clanId}/location-media`, {
       params: { location },
     }),
 
@@ -57,7 +57,7 @@ export const migrationApi = {
    * 创建迁徙事件
    */
   createEvent: (clanId: string | number, data: CreateMigrationEventDto) =>
-    request.post<{ id: string; message: string }>(
+    request.post<{ id: string; message: string }, { id: string; message: string }>(
       `/api/migration/${clanId}/events`,
       data,
     ),
@@ -70,7 +70,7 @@ export const migrationApi = {
     id: string,
     data: UpdateMigrationEventDto,
   ) =>
-    request.put<{ message: string }>(
+    request.put<{ message: string }, { message: string }>(
       `/api/migration/${clanId}/events/${id}`,
       data,
     ),
@@ -79,7 +79,7 @@ export const migrationApi = {
    * 删除迁徙事件
    */
   deleteEvent: (clanId: string | number, id: string) =>
-    request.delete<{ message: string }>(`/api/migration/${clanId}/events/${id}`),
+    request.delete<{ message: string }, { message: string }>(`/api/migration/${clanId}/events/${id}`),
 
   // ============ 地点-图片关联（管理员） ============
 
@@ -90,7 +90,7 @@ export const migrationApi = {
     clanId: string | number,
     data: LinkLocationMediaDto,
   ) =>
-    request.post<{ id: string; message: string }>(
+    request.post<{ id: string; message: string }, { id: string; message: string }>(
       `/api/migration/${clanId}/location-media`,
       data,
     ),
@@ -99,7 +99,7 @@ export const migrationApi = {
    * 解除图片与地点的关联
    */
   unlinkLocationMedia: (clanId: string | number, linkId: string) =>
-    request.delete<{ message: string }>(
+    request.delete<{ message: string }, { message: string }>(
       `/api/migration/${clanId}/location-media/${linkId}`,
     ),
 
@@ -111,6 +111,8 @@ export const migrationApi = {
   getMissingCoords: (clanId: string | number) =>
     request.get<
       Array<{ name: string; lat: number | null; lng: number | null; person_count: number }>
+    , 
+      Array<{ name: string; lat: number | null; lng: number | null; person_count: number }>
     >(`/api/migration/${clanId}/locations/missing-coords`),
 
   /**
@@ -120,7 +122,7 @@ export const migrationApi = {
     clanId: string | number,
     data: { location_name: string; lat: number; lng: number },
   ) =>
-    request.post<{ message: string }>(
+    request.post<{ message: string }, { message: string }>(
       `/api/migration/${clanId}/locations/fill-coords`,
       data,
     ),

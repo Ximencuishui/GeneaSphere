@@ -8,6 +8,7 @@ import { PlatformAuthController } from './platform-auth.controller';
 import { PlatformJwtStrategy } from './platform-jwt.strategy';
 import { PlatformAuthGuard } from './platform-auth.guard';
 import { PlatformOperationLogService } from '../common/platform-operation-log.service';
+import { LoginLockService } from '../../common/login-lock.service';
 
 @Module({
   imports: [
@@ -30,12 +31,14 @@ import { PlatformOperationLogService } from '../common/platform-operation-log.se
     PlatformJwtStrategy,
     PlatformAuthGuard,
     PlatformOperationLogService,
+    LoginLockService,
   ],
   exports: [
     PlatformAuthService,
     PlatformAuthGuard,
     PlatformJwtStrategy,
     PlatformOperationLogService,
+    LoginLockService,
   ],
 })
 export class PlatformAuthModule {}

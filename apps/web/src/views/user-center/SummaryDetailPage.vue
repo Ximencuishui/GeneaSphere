@@ -2,8 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Edit, Download, Clock, Fold, Expand } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import discussionApi from '@/api/discussion'
+import { ElMessage } from 'element-plus';import discussionApi from '@/api/discussion'
 import type { DiscussionSummary, SummaryVersion } from '@/types'
 
 const route = useRoute()
@@ -57,7 +56,7 @@ async function handleSaveEdit() {
 
 async function handleExport(format: 'md' | 'pdf') {
   try {
-    const blob = await discussionApi.summaries.export(summaryId.value, format)
+    const blob = await discussionApi.summaries.export(summaryId.value, format) as unknown as Blob;
     const url = URL.createObjectURL(blob as Blob)
     const a = document.createElement('a')
     a.href = url
@@ -75,14 +74,6 @@ function toggleSection(key: string) {
     expandedSections.value.delete(key)
   } else {
     expandedSections.value.add(key)
-  }
-}
-
-function getRoleLabel(role?: string) {
-  switch (role) {
-    case 'CREATOR': return '创建者'
-    case 'ADMIN': return '管理员'
-    default: return '成员'
   }
 }
 
@@ -202,7 +193,7 @@ onMounted(fetchSummary)
           </div>
           <div class="section-body" v-show="expandedSections.has('consensus')">
             <template v-if="editMode">
-              <div v-for="(item, index) in editContent.consensus" :key="index" class="edit-list-item">
+              <div v-for="(_item, index) in editContent.consensus" :key="index" class="edit-list-item">
                 <ElInput v-model="editContent.consensus[index]" />
               </div>
               <ElButton size="small" @click="editContent.consensus.push('')">添加共识</ElButton>
@@ -226,7 +217,7 @@ onMounted(fetchSummary)
           </div>
           <div class="section-body" v-show="expandedSections.has('disagreements')">
             <template v-if="editMode">
-              <div v-for="(item, index) in editContent.disagreements" :key="index" class="edit-list-item">
+              <div v-for="(_item, index) in editContent.disagreements" :key="index" class="edit-list-item">
                 <ElInput v-model="editContent.disagreements[index]" />
               </div>
               <ElButton size="small" @click="editContent.disagreements.push('')">添加分歧</ElButton>

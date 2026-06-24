@@ -2,8 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ChatLineRound, Clock, User, Plus } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import discussionApi from '@/api/discussion'
+import { ElMessage } from 'element-plus';import discussionApi from '@/api/discussion'
 import type { DiscussionGroup } from '@/types'
 
 const router = useRouter()

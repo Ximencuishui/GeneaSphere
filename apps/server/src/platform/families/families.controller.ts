@@ -90,6 +90,8 @@ export class FamiliesController {
         register_ip: c.register_ip,
         created_at: c.created_at,
         reviewed_at: c.reviewed_at,
+        has_id_card: !!c.id_card_url,
+        id_card_uploaded_at: c.id_card_uploaded_at,
       })),
       pagination: {
         page,
@@ -153,9 +155,21 @@ export class FamiliesController {
   }
 
   @Post(':id/approve')
-  @ApiOperation({ summary: '审核通过家族' })
+  @ApiOperation({ summary: '审核通过家族（需先上传证件）' })
   async approve(@Param('id') idStr: string, @Request() req: any) {
     const id = BigInt(idStr);
+    const clan = await this.prisma.clan.findUnique({
+      where: { id },
+      select: { id_card_url: true, status: true },
+    });
+    if (!clan) {
+      throw new NotFoundException('家族不存在');
+    }
+    if (!clan.id_card_url) {
+      throw new BadRequestException(
+        '该家族尚未上传身份证件，无法通过审核。请要求家族管理员上传证件后再审核。',
+      );
+    }
     const updated = await this.prisma.clan.update({
       where: { id },
       data: {
@@ -172,6 +186,108 @@ export class FamiliesController {
       ipAddress: getClientIp(req),
     });
     return { message: '已通过', status: updated.status };
+  }
+
+  /**
+   * 上传家族管理员身份证件（需求 §3.3.2）
+   * Body: { file_url, file_name, file_size, mime_type, uploader_id? }
+   * 说明：当前通过 URL 引用已上传到 COS 的文件，避免 controller 接收二进制。
+   */
+  @Post(':id/id-card')
+  @ApiOperation({ summary: '上传家族管理员证件' })
+  async uploadIdCard(
+    @Param('id') idStr: string,
+    @Body()
+    body: {
+      file_url: string;
+      file_name: string;
+      file_size?: number;
+      mime_type: string;
+      uploader_id?: string;
+    },
+    @Request() req: any,
+  ) {
+    if (!body.file_url || !body.file_name || !body.mime_type) {
+      throw new BadRequestException('file_url / file_name / mime_type 必填');
+    }
+    const id = BigInt(idStr);
+    const clan = await this.prisma.clan.findUnique({ where: { id } });
+    if (!clan) throw new NotFoundException('家族不存在');
+
+    const uploaderId =
+      body.uploader_id ||
+      (clan.admin_user_id ? clan.admin_user_id.toString() : req.user.adminId);
+
+    const attachment = await this.prisma.clanReviewAttachment.create({
+      data: {
+        clan_id: id,
+        uploader_id: uploaderId,
+        file_url: body.file_url,
+        file_name: body.file_name,
+        file_size: body.file_size || 0,
+        mime_type: body.mime_type,
+      },
+    });
+
+    await this.prisma.clan.update({
+      where: { id },
+      data: {
+        id_card_url: body.file_url,
+        id_card_uploaded_at: new Date(),
+      },
+    });
+
+    await this.logService.log({
+      adminId: req.user.adminId,
+      actionType: 'UPLOAD_CLAN_ID_CARD',
+      targetType: 'Clan',
+      targetId: idStr,
+      detail: { attachment_id: attachment.id.toString() },
+      ipAddress: getClientIp(req),
+    });
+
+    return {
+      message: '证件已上传',
+      attachment_id: attachment.id.toString(),
+      id_card_url: body.file_url,
+    };
+  }
+
+  @Get(':id/id-card')
+  @ApiOperation({ summary: '获取家族管理员证件信息' })
+  async getIdCard(@Param('id') idStr: string) {
+    const id = BigInt(idStr);
+    const clan = await this.prisma.clan.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        id_card_url: true,
+        id_card_uploaded_at: true,
+      },
+    });
+    if (!clan) throw new NotFoundException('家族不存在');
+
+    const attachments = await this.prisma.clanReviewAttachment.findMany({
+      where: { clan_id: id },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return {
+      clan_id: clan.id.toString(),
+      clan_name: clan.name,
+      has_id_card: !!clan.id_card_url,
+      id_card_url: clan.id_card_url,
+      id_card_uploaded_at: clan.id_card_uploaded_at,
+      attachments: attachments.map((a) => ({
+        id: a.id.toString(),
+        file_url: a.file_url,
+        file_name: a.file_name,
+        file_size: a.file_size,
+        mime_type: a.mime_type,
+        created_at: a.created_at,
+      })),
+    };
   }
 
   @Post(':id/reject')

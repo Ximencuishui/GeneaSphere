@@ -1,5 +1,5 @@
 import request from '@/utils/request';
-import type { MediaArchive, MediaPersonLink } from '@/types';
+import type { MediaArchive } from '@/types';
 
 /**
  * 上传媒体文件
@@ -36,7 +36,7 @@ export function listMedia(
     person_id?: string | number;
   }
 ) {
-  return request.get<MediaArchive[]>('/api/media/clan/' + clanId, {
+  return request.get<MediaArchive[], MediaArchive[]>('/api/media/clan/' + clanId, {
     params: filters,
   });
 }
@@ -45,7 +45,7 @@ export function listMedia(
  * 获取媒体详情
  */
 export function getMediaById(id: string | number) {
-  return request.get<MediaArchive>('/api/media/' + id);
+  return request.get<MediaArchive, MediaArchive>('/api/media/' + id);
 }
 
 /**
@@ -85,7 +85,7 @@ export function recommendMedia(
   location?: string,
   takenYear?: number
 ) {
-  return request.post<MediaArchive[]>('/api/media/recommend', {
+  return request.post<MediaArchive[], MediaArchive[]>('/api/media/recommend', {
     currentClanId,
     location,
     takenYear,
@@ -96,7 +96,7 @@ export function recommendMedia(
  * 获取人物相关的媒体
  */
 export function getByPersonId(personId: string | number) {
-  return request.get<MediaArchive[]>('/api/media/person/' + personId);
+  return request.get<MediaArchive[], MediaArchive[]>('/api/media/person/' + personId);
 }
 
 // 导出为对象形式，方便按需导入

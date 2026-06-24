@@ -1,5 +1,16 @@
 import request from '@/utils/request';
 
+/**
+ * 家族成员搜索结果项（轻量级，用于人物下拉搜索）
+ */
+export interface PersonSearchResult {
+  id: string | number;
+  full_name: string;
+  gender?: string;
+  birth_date?: string;
+  death_date?: string;
+}
+
 export const treeApi = {
   /**
    * Get subtree rooted at a specific person
@@ -13,6 +24,14 @@ export const treeApi = {
   getClanFullTree: (clanId: string, userId?: string) =>
     request.get(`/api/tree/clan/${clanId}/full`, {
       params: userId ? { userId } : {},
+    }),
+
+  /**
+   * Search persons by name within a clan (for person picker)
+   */
+  searchPersons: (query: string, clanId: string | number) =>
+    request.get<PersonSearchResult[], PersonSearchResult[]>('/api/tree/persons/search', {
+      params: { q: query, clan_id: clanId },
     }),
 
   /**

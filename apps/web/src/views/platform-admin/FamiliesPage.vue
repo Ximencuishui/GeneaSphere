@@ -178,6 +178,12 @@ onMounted(() => {
             <ElTag :type="statusType(row.status)">{{ statusLabel(row.status) }}</ElTag>
           </template>
         </ElTableColumn>
+        <ElTableColumn label="证件" width="100" align="center">
+          <template #default="{ row }">
+            <ElTag v-if="row.has_id_card" type="success" size="small">已上传</ElTag>
+            <ElTag v-else type="danger" size="small">未上传</ElTag>
+          </template>
+        </ElTableColumn>
         <ElTableColumn prop="register_ip" label="注册IP" width="140" />
         <ElTableColumn label="注册时间" width="170">
           <template #default="{ row }">

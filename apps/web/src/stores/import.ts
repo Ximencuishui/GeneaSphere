@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { importExcel as importExcelApi } from '@/api/import';
-import type { ImportResult, ColumnMapping } from '@/types';
+import type { ImportResult, SimpleColumnMapping } from '@/types';
 
 export const useImportStore = defineStore('import', () => {
   // 状态
@@ -16,7 +16,7 @@ export const useImportStore = defineStore('import', () => {
   const previewData = ref<Record<string, any>[]>([]); // 预览数据（前 5 行）
 
   // 列映射配置
-  const columnMapping = ref<ColumnMapping>({
+  const columnMapping = ref<Record<string, string>>({
     full_name: '', // 姓名
     gender: '', // 性别
     birth_date: '', // 出生日期
@@ -82,7 +82,7 @@ export const useImportStore = defineStore('import', () => {
     }
   }
 
-  function updateMapping(field: keyof ColumnMapping, value: string) {
+  function updateMapping(field: string, value: string) {
     columnMapping.value[field] = value;
   }
 
@@ -100,9 +100,9 @@ export const useImportStore = defineStore('import', () => {
       const result = await importExcelApi(
         uploadedFile.value,
         clanId,
-        columnMapping.value
+        columnMapping.value as unknown as SimpleColumnMapping
       );
-      importResult.value = result.data || result;
+      importResult.value = result;
       currentStep.value = 4; // 跳转到完成步骤
     } catch (err: any) {
       error.value = err.message || '导入失败，请重试';

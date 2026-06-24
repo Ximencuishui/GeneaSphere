@@ -77,6 +77,7 @@ model User {
   memory_answers          LocalMemoryAnswer[]
   memory_badges           MemoryBadge[]
   verified_locations      UserVerifiedLocation[]
+  clan_review_attachments ClanReviewAttachment[]
 
   @@index([ban_status])
   @@index([wx_openid])
@@ -95,6 +96,9 @@ model Clan {
   register_ip              String?                  @map("register_ip")
   reviewed_at              DateTime?                @map("reviewed_at")
   reviewer_id              BigInt?                  @map("reviewer_id")
+  // ========== 家族管理员证件审核（v1.0 需求 3.3.2）==========
+  id_card_url              String?                  @map("id_card_url")
+  id_card_uploaded_at      DateTime?                @map("id_card_uploaded_at")
   audit_logs               AuditLog[]
   clan_balance             ClanBalance?
   members                  ClanMember[]
@@ -121,6 +125,7 @@ model Clan {
   relation_changes FamilyRelationChange[]
   marriages        MarriageHistory[]
   custody_records  ChildCustodyRecord[]
+  review_attachments ClanReviewAttachment[]
 
   @@index([status])
   @@index([register_ip])
@@ -1872,4 +1877,63 @@ model HeavyJob {
   @@index([userId])
   @@index([status, createdAt])
   @@map("heavy_jobs")
+}
+
+// ==================== 短信验证码 ====================
+
+enum SmsCodePurpose {
+  REGISTER
+  LOGIN
+  RESET_PASSWORD
+  BIND_PHONE
+}
+
+model SmsVerifyCode {
+  id         BigInt          @id @default(autoincrement()) @map("id")
+  phone      String          @map("phone")
+  code       String          @map("code")
+  purpose    SmsCodePurpose  @map("purpose")
+  ip_address String?         @map("ip_address")
+  is_used    Boolean         @default(false) @map("is_used")
+  expires_at DateTime        @map("expires_at")
+  created_at DateTime        @default(now()) @map("created_at")
+  used_at    DateTime?       @map("used_at")
+
+  @@index([phone, purpose, is_used])
+  @@index([expires_at])
+  @@index([ip_address, created_at])
+  @@map("sms_verify_codes")
+}
+
+// ==================== Admin 后台 v1.0 补缺 ====================
+
+// 登录失败计数与锁定记录（家族管理员 / 平台管理员）
+model LoginAttempt {
+  id              BigInt    @id @default(autoincrement()) @map("id")
+  subject_type    String    @map("subject_type") // USER | PLATFORM_ADMIN
+  subject_key     String    @map("subject_key")  // phone or username
+  failed_count    Int       @default(0) @map("failed_count")
+  locked_until    DateTime? @map("locked_until")
+  last_attempt_at DateTime  @default(now()) @map("last_attempt_at")
+
+  @@unique([subject_type, subject_key])
+  @@index([locked_until])
+  @@map("login_attempts")
+}
+
+// 家族注册审核附件（身份证件等）
+model ClanReviewAttachment {
+  id          BigInt   @id @default(autoincrement()) @map("id")
+  clan_id     BigInt   @map("clan_id")
+  uploader_id String   @map("uploader_id")
+  file_url    String   @map("file_url")
+  file_name   String   @map("file_name")
+  file_size   Int      @default(0) @map("file_size")
+  mime_type   String   @map("mime_type")
+  created_at  DateTime @default(now()) @map("created_at")
+  clan        Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  uploader    User     @relation(fields: [uploader_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, created_at])
+  @@map("clan_review_attachments")
 }

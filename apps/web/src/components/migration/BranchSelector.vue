@@ -30,7 +30,7 @@
 <script setup lang="ts">
 import type { Branch } from '@/types';
 
-const props = defineProps<{
+defineProps<{
   modelValue?: string | null;
   branches: Branch[];
 }>();

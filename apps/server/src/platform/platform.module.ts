@@ -9,6 +9,7 @@ import { SettingsController } from './settings/settings.controller';
 import { StatisticsController } from './statistics/statistics.controller';
 import { PlatformLogsController } from './logs/logs.controller';
 import { SettingsService } from './settings/settings.service';
+import { PdfReportService } from './statistics/pdf-report.service';
 
 @Module({
   imports: [forwardRef(() => PlatformAuthModule)],
@@ -22,7 +23,7 @@ import { SettingsService } from './settings/settings.service';
     StatisticsController,
     PlatformLogsController,
   ],
-  providers: [SettingsService],
-  exports: [SettingsService],
+  providers: [SettingsService, PdfReportService],
+  exports: [SettingsService, PdfReportService],
 })
 export class PlatformModule {}

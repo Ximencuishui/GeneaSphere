@@ -1,5 +1,5 @@
 import request from '@/utils/request';
-import type { ImportResult, ColumnMapping } from '@/types';
+import type { SimpleColumnMapping, ImportResult } from '@/types';
 
 /**
  * 导入 Excel 文件
@@ -10,7 +10,7 @@ import type { ImportResult, ColumnMapping } from '@/types';
 export function importExcel(
   file: File,
   clanId: string | number,
-  columnMapping?: ColumnMapping
+  columnMapping?: SimpleColumnMapping
 ) {
   const formData = new FormData();
   formData.append('file', file);
@@ -20,7 +20,7 @@ export function importExcel(
     formData.append('column_mapping', JSON.stringify(columnMapping));
   }
 
-  return request.post('/api/import/excel', formData, {
+  return request.post<FormData, ImportResult>('/api/import/excel', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },

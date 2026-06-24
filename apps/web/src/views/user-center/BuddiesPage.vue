@@ -7,6 +7,7 @@ import { findBuddies, sendGreeting, getMyMatches } from '@/api/buddy'
 const router = useRouter()
 const loading = ref(false)
 const matches = ref<any[]>([])
+const locationInput = ref<{ focus: () => void } | null>(null)
 const findForm = ref({
   location_name: '',
   start_year: undefined as number | undefined,
@@ -83,7 +84,7 @@ onMounted(async () => {
     <ElCard class="quick-entry-card" shadow="hover">
       <ElRow :gutter="20">
         <ElCol :xs="24" :sm="8">
-          <ElButton type="primary" style="width: 100%" @click="$refs.locationInput?.focus()">
+          <ElButton type="primary" style="width: 100%" @click="locationInput?.focus?.()">
             <ElIcon><Location /></ElIcon>
             按地点找
           </ElButton>

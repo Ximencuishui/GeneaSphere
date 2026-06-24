@@ -32,13 +32,13 @@ const loadingPreview = ref(false)
 const vipStatus = ref<{ is_vip: boolean; expires_at?: string }>({ is_vip: false })
 
 // 创建表单
-const createForm = reactive({
+const createForm = reactive<{ style: 'nostalgic' | 'bw复古' | 'modern'; use_priority: boolean }>({
   style: 'nostalgic',
   use_priority: false,
 })
 
 // 视频风格选项
-const styleOptions = [
+const styleOptions: { value: 'nostalgic' | 'bw复古' | 'modern'; label: string }[] = [
   { value: 'nostalgic', label: '温馨怀旧（泛黄滤镜）' },
   { value: 'bw复古', label: '黑白复古' },
   { value: 'modern', label: '现代明亮' },

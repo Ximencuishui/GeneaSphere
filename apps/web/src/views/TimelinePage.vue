@@ -86,7 +86,7 @@
           <div class="media-grid">
             <div
               v-for="media in group.items"
-              :key="media.id"
+              :key="String(media.id)"
               class="media-card"
               @click="handleViewMedia(media)"
             >
@@ -197,7 +197,7 @@
     <!-- 照片预览对话框 -->
     <el-dialog v-model="previewDialogVisible" title="照片详情" width="800px">
       <div v-if="selectedMedia" class="media-preview">
-        <img :src="selectedMedia.file_url" :alt="selectedMedia.description" class="preview-image" />
+        <img :src="selectedMedia.file_url" :alt="selectedMedia.description ?? ''" class="preview-image" />
 
         <div class="preview-info">
           <h3>{{ selectedMedia.description || '未命名照片' }}</h3>
@@ -238,15 +238,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Upload, UploadFilled, Location } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
-import { listMedia, deleteMedia as deleteMediaApi, recommendMedia } from '@/api/media';
-import type { MediaArchive } from '@prisma/client';
+import { listMedia, deleteMedia as deleteMediaApi, recommendMedia, uploadMedia as uploadMediaApi } from '@/api/media';
+import type { MediaArchive } from '@/types';
 
-const route = useRoute();
-const router = useRouter();
 const clanStore = useClanStore();
 
 // 状态
@@ -325,7 +322,7 @@ async function loadMedia() {
   loading.value = true;
   try {
     const result = await listMedia(clanStore.currentClan.id);
-    mediaList.value = result.data || result;
+    mediaList.value = result;
   } catch (error: any) {
     ElMessage.error(`加载失败：${error.message}`);
   } finally {
@@ -343,7 +340,7 @@ async function loadRecommendations() {
       searchLocation.value || undefined,
       selectedYear.value || undefined
     );
-    recommendedMedia.value = result.data || result;
+    recommendedMedia.value = result;
   } catch (error: any) {
     console.error('加载推荐失败：', error);
   }
@@ -394,7 +391,7 @@ async function handleSubmitUpload() {
 
   uploading.value = true;
   try {
-    await uploadMedia({
+    await uploadMediaApi({
       file: uploadForm.file,
       clan_id: clanStore.currentClan.id,
       uploader_id: 'current-user-id', // TODO: 从 auth store 获取

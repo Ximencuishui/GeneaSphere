@@ -126,7 +126,7 @@ const effectiveMin = computed(() => {
 const effectiveMax = computed(() => {
   if (props.maxYear != null) return props.maxYear;
   const ys = props.pois
-    .map((p) => p.latest_year as number | undefined)
+    .map((p) => p.earliest_year as number | undefined)
     .filter((y): y is number => typeof y === 'number');
   return ys.length > 0 ? Math.max(...ys, new Date().getFullYear()) : new Date().getFullYear();
 });

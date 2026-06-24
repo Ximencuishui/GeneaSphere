@@ -98,13 +98,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, Edit, Share, ArrowRight, MapLocation } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
 import { clanApi } from '@/api/clan';
-import type { Clan, Person } from '@/types';
+import type { Person } from '@/types';
 
 const route = useRoute();
 const router = useRouter();

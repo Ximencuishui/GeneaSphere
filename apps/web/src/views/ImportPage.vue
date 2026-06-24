@@ -184,7 +184,7 @@
         </el-result>
 
         <!-- 错误详情 -->
-        <div v-if="importStore.importResult?.errors?.length > 0" class="error-details">
+        <div v-if="importStore.importResult && importStore.importResult.errors && importStore.importResult.errors.length > 0" class="error-details">
           <h4>导入错误详情</h4>
           <el-table :data="importStore.importResult.errors" border max-height="300">
             <el-table-column prop="row" label="行号" width="80" />
@@ -203,7 +203,7 @@ import { ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import { useImportStore } from '@/stores/import';
 import { useClanStore } from '@/stores/clan';
-import type { ColumnMapping } from '@/types';
+
 
 const router = useRouter();
 const importStore = useImportStore();
@@ -304,7 +304,7 @@ async function handleParseFile() {
     }
     
     const columns = (jsonData[0] as any[]).map(col => String(col).trim());
-    const preview = XLSX.utils.sheet_to_json(worksheet, { range: 1, limit: 5 });
+    const preview = (XLSX.utils.sheet_to_json(worksheet, { range: 1 }) as Record<string, any>[]).slice(0, 5);
     
     importStore.setFileColumns(columns, preview as Record<string, any>[]);
     importStore.nextStep();

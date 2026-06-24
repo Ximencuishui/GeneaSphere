@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, Request, Res } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Request, Res, BadRequestException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { PrismaService } from '@geneasphere/db';
@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { PlatformAuthGuard } from '../auth/platform-auth.guard';
 import { PlatformOperationLogService } from '../common/platform-operation-log.service';
 import { getClientIp } from '../common/ip.util';
+import { PdfReportService } from './pdf-report.service';
 
 @ApiTags('platform/statistics')
 @ApiBearerAuth('platform')
@@ -15,6 +16,7 @@ export class StatisticsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly logService: PlatformOperationLogService,
+    private readonly pdfReport: PdfReportService,
   ) {}
 
   @Get('summary')

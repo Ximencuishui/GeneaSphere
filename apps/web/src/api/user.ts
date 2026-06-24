@@ -19,7 +19,7 @@ const trimId = (s: string | number) => String(s);
 export const userApi = {
   // ========== 资料 ==========
   profile: {
-    get: () => request.get<UserProfile>('/api/user/profile'),
+    get: () => request.get<UserProfile, UserProfile>('/api/user/profile'),
 
     update: (data: {
       nickname?: string;
@@ -31,7 +31,7 @@ export const userApi = {
 
     /** 上传头像：base64 data-url 模式 */
     uploadAvatarByDataUrl: (dataUrl: string) =>
-      request.post<{ avatar_url: string }>('/api/user/avatar/data-url', {
+      request.post<{ avatar_url: string }, { avatar_url: string }>('/api/user/avatar/data-url', {
         data_url: dataUrl,
       }),
 
@@ -39,7 +39,7 @@ export const userApi = {
     uploadAvatarByFile: (file: File) => {
       const form = new FormData();
       form.append('file', file);
-      return request.post<{ avatar_url: string }>('/api/user/avatar', form, {
+      return request.post<{ avatar_url: string }, { avatar_url: string }>('/api/user/avatar', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
     },
@@ -69,13 +69,13 @@ export const userApi = {
       taken_year?: number;
       clan_id?: string | number;
     }) =>
-      request.get<Pagination<UserPhotoItem>>('/api/user/photos', { params }),
+      request.get<Pagination<UserPhotoItem>, Pagination<UserPhotoItem>>('/api/user/photos', { params }),
   },
 
   // ========== 我的标注 ==========
   annotations: {
     list: (params?: { page?: number; pageSize?: number }) =>
-      request.get<Pagination<UserAnnotation>>('/api/user/annotations', {
+      request.get<Pagination<UserAnnotation>, Pagination<UserAnnotation>>('/api/user/annotations', {
         params,
       }),
   },
@@ -87,10 +87,10 @@ export const userApi = {
       pageSize?: number;
       status?: string;
     }) =>
-      request.get<Pagination<UserOrder>>('/api/user/orders', { params }),
+      request.get<Pagination<UserOrder>, Pagination<UserOrder>>('/api/user/orders', { params }),
 
     getById: (id: string | number) =>
-      request.get<UserOrderDetail>(`/api/user/orders/${trimId(id)}`),
+      request.get<UserOrderDetail, UserOrderDetail>(`/api/user/orders/${trimId(id)}`),
   },
 
   // ========== 我的工具箱 ==========
@@ -100,24 +100,28 @@ export const userApi = {
         data: UserToolHistoryItem[];
         pagination: Pagination<UserToolHistoryItem>['pagination'];
         notice?: string;
+      }, {
+        data: UserToolHistoryItem[];
+        pagination: Pagination<UserToolHistoryItem>['pagination'];
+        notice?: string;
       }>('/api/user/tool-history'),
   },
 
   // ========== 我的小组 ==========
   groups: {
     list: () =>
-      request.get<{ data: UserGroup[]; notice?: string }>('/api/user/groups'),
+      request.get<{ data: UserGroup[]; notice?: string }, { data: UserGroup[]; notice?: string }>('/api/user/groups'),
   },
 
   // ========== 我的音像墙 ==========
   videos: {
     list: () =>
-      request.get<{ data: UserVideo[]; notice?: string }>('/api/user/videos'),
+      request.get<{ data: UserVideo[]; notice?: string }, { data: UserVideo[]; notice?: string }>('/api/user/videos'),
   },
 
   // ========== 设置 ==========
   settings: {
-    get: () => request.get<UserSetting>('/api/user/settings'),
+    get: () => request.get<UserSetting, UserSetting>('/api/user/settings'),
     update: (data: Partial<UserSetting>) =>
       request.put('/api/user/settings', data),
   },
@@ -125,11 +129,11 @@ export const userApi = {
   // ========== 通知 ==========
   notifications: {
     unreadCount: () =>
-      request.get<{ unread_count: number }>(
+      request.get<{ unread_count: number }, { unread_count: number }>(
         '/api/user/notifications/unread-count',
       ),
     list: () =>
-      request.get<{ data: UserNotification[] }>('/api/user/notifications'),
+      request.get<{ data: UserNotification[] }, { data: UserNotification[] }>('/api/user/notifications'),
     markRead: (id: string | number) =>
       request.post(`/api/user/notifications/${trimId(id)}/read`),
   },

@@ -116,7 +116,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
-import type { Clan, CreateClanDto, UpdateClanDto } from '@/types';
+import type { Clan, CreateClanDto } from '@/types';
 
 const router = useRouter();
 const clanStore = useClanStore();

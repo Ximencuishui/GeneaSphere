@@ -1,0 +1,36 @@
+-- Admin 后台 v1.0 补缺：登录锁定、证件审核附件
+-- 该迁移已通过 prisma db push 应用到目标数据库，此处仅作为历史记录。
+
+-- ALTER TABLE "clans"
+--   ADD COLUMN "id_card_url" TEXT,
+--   ADD COLUMN "id_card_uploaded_at" TIMESTAMP(3);
+
+-- CREATE TABLE "login_attempts" (
+--   "id"              BIGSERIAL PRIMARY KEY,
+--   "subject_type"    TEXT NOT NULL,
+--   "subject_key"     TEXT NOT NULL,
+--   "failed_count"    INTEGER NOT NULL DEFAULT 0,
+--   "locked_until"    TIMESTAMP(3),
+--   "last_attempt_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- );
+-- CREATE UNIQUE INDEX "login_attempts_subject_type_subject_key_key"
+--   ON "login_attempts"("subject_type", "subject_key");
+-- CREATE INDEX "login_attempts_locked_until_idx"
+--   ON "login_attempts"("locked_until");
+
+-- CREATE TABLE "clan_review_attachments" (
+--   "id"          BIGSERIAL PRIMARY KEY,
+--   "clan_id"     BIGINT NOT NULL,
+--   "uploader_id" TEXT NOT NULL,
+--   "file_url"    TEXT NOT NULL,
+--   "file_name"   TEXT NOT NULL,
+--   "file_size"   INTEGER NOT NULL DEFAULT 0,
+--   "mime_type"   TEXT NOT NULL,
+--   "created_at"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--   CONSTRAINT "clan_review_attachments_clan_id_fkey"
+--     FOREIGN KEY ("clan_id") REFERENCES "clans"("id") ON DELETE CASCADE,
+--   CONSTRAINT "clan_review_attachments_uploader_id_fkey"
+--     FOREIGN KEY ("uploader_id") REFERENCES "users"("id") ON DELETE CASCADE
+-- );
+-- CREATE INDEX "clan_review_attachments_clan_id_created_at_idx"
+--   ON "clan_review_attachments"("clan_id", "created_at");

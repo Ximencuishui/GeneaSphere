@@ -1,5 +1,5 @@
 import request from '@/utils/request';
-import type { Pagination, Person } from '@/types';
+import type { Pagination } from '@/types';
 
 export interface VideoProject {
   id: string;
@@ -88,7 +88,7 @@ export const videoApi = {
    * 创建视频生成项目
    */
   createProject: (data: CreateProjectDto) =>
-    request.post<{ id: string; queue_position: number; estimated_wait_minutes: number }>(
+    request.post<{ id: string; queue_position: number; estimated_wait_minutes: number }, { id: string; queue_position: number; estimated_wait_minutes: number }>(
       '/api/video/projects',
       data,
     ),
@@ -97,7 +97,7 @@ export const videoApi = {
    * 获取我的项目列表
    */
   listProjects: (params?: { page?: number; pageSize?: number }) =>
-    request.get<{ data: VideoProject[]; pagination: Pagination<VideoProject>['pagination'] }>(
+    request.get<{ data: VideoProject[]; pagination: Pagination<VideoProject>['pagination'] }, { data: VideoProject[]; pagination: Pagination<VideoProject>['pagination'] }>(
       '/api/video/projects',
       { params },
     ),
@@ -106,7 +106,7 @@ export const videoApi = {
    * 获取项目详情
    */
   getProject: (id: string) =>
-    request.get<VideoProject & { materials: VideoMaterial[] }>(`/api/video/projects/${id}`),
+    request.get<VideoProject & { materials: VideoMaterial[] }, VideoProject & { materials: VideoMaterial[] }>(`/api/video/projects/${id}`),
 
   /**
    * 取消项目
@@ -126,13 +126,13 @@ export const videoApi = {
    * 获取目标人物直系血脉信息
    */
   getPersonLineage: (personId: string | number) =>
-    request.get<LineageInfo>(`/api/video/person/${personId}/lineage`),
+    request.get<LineageInfo, LineageInfo>(`/api/video/person/${personId}/lineage`),
 
   /**
    * 预览可用素材
    */
   previewMaterials: (personId: string | number) =>
-    request.get<MaterialPreview>(`/api/video/person/${personId}/preview`),
+    request.get<MaterialPreview, MaterialPreview>(`/api/video/person/${personId}/preview`),
 
   // ========== VIP相关 ==========
 
@@ -140,13 +140,13 @@ export const videoApi = {
    * 获取VIP状态
    */
   getVipStatus: () =>
-    request.get<VipStatus>('/api/video/vip/status'),
+    request.get<VipStatus, VipStatus>('/api/video/vip/status'),
 
   /**
    * 购买VIP
    */
   purchaseVip: (data: PurchaseVipDto) =>
-    request.post<{ success: boolean; message: string }>('/api/video/vip/purchase', data),
+    request.post<{ success: boolean; message: string }, { success: boolean; message: string }>('/api/video/vip/purchase', data),
 
   // ========== 队列状态 ==========
 
@@ -154,7 +154,7 @@ export const videoApi = {
    * 获取排队状态
    */
   getQueueStatus: () =>
-    request.get<QueueStatus>('/api/video/queue/status'),
+    request.get<QueueStatus, QueueStatus>('/api/video/queue/status'),
 };
 
 export default videoApi;

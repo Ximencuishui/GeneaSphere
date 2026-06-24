@@ -7,24 +7,85 @@ import { Injectable, Module, OnModuleInit, Global, Logger } from '@nestjs/common
 export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name);
 
-  async onModuleInit() {
-    const MAX_RETRIES = 5;
-    const RETRY_DELAY_MS = 5000;
+  /**
+   * 启动连接重试参数（可通过环境变量覆盖）：
+   *   PRISMA_CONNECT_MAX_RETRIES       默认 5
+   *   PRISMA_CONNECT_RETRY_DELAY_MS    默认 5000
+   *   PRISMA_QUERY_MAX_RETRIES         默认 2
+   *   PRISMA_QUERY_RETRY_DELAY_MS      默认 300
+   */
+  private readonly connectMaxRetries = parseInt(
+    process.env.PRISMA_CONNECT_MAX_RETRIES || '5',
+    10,
+  );
+  private readonly connectRetryDelayMs = parseInt(
+    process.env.PRISMA_CONNECT_RETRY_DELAY_MS || '5000',
+    10,
+  );
+  private readonly queryMaxRetries = parseInt(
+    process.env.PRISMA_QUERY_MAX_RETRIES || '2',
+    10,
+  );
+  private readonly queryRetryDelayMs = parseInt(
+    process.env.PRISMA_QUERY_RETRY_DELAY_MS || '300',
+    10,
+  );
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  async onModuleInit() {
+    for (let attempt = 1; attempt <= this.connectMaxRetries; attempt++) {
       try {
         await this.$connect();
-        this.logger.log('数据库连接成功');
+        this.logger.log(
+          `数据库连接成功（配置：重试 ${this.connectMaxRetries} 次，间隔 ${this.connectRetryDelayMs}ms）`,
+        );
         return;
-      } catch (error) {
-        this.logger.warn(`数据库连接失败 (第 ${attempt}/${MAX_RETRIES} 次): ${error.message}`);
-        if (attempt === MAX_RETRIES) {
+      } catch (error: any) {
+        this.logger.warn(
+          `数据库连接失败 (第 ${attempt}/${this.connectMaxRetries} 次): ${error?.message || error}`,
+        );
+        if (attempt === this.connectMaxRetries) {
           this.logger.error('数据库重连已达最大次数，放弃连接');
           throw error;
         }
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        await new Promise((resolve) => setTimeout(resolve, this.connectRetryDelayMs));
       }
     }
+  }
+
+  /**
+   * 带重试的查询包装器。
+   * 针对偶发连接断开（如 Neon pooler 冷启动、自动休眠唤醒），
+   * 在 queryMaxRetries 范围内自动重试，提升稳定性。
+   *
+   * 注意：仅对幂等读操作自动重试。写操作请显式处理事务或由调用方控制。
+   */
+  async queryWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+    let lastErr: any;
+    for (let attempt = 1; attempt <= this.queryMaxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        lastErr = err;
+        const code = err?.code || '';
+        const msg = err?.message || '';
+        const isRetryable =
+          code === 'P1001' || // Can't reach database
+          code === 'P1002' || // Database connection timed out
+          code === 'P1008' || // Operations timed out
+          code === 'P1017' || // Server has closed the connection
+          /closed connection|connection terminated|ETIMEDOUT|ECONNRESET/i.test(msg);
+        if (!isRetryable || attempt === this.queryMaxRetries) {
+          throw err;
+        }
+        this.logger.warn(
+          `查询失败 (第 ${attempt}/${this.queryMaxRetries} 次，code=${code})，准备重试: ${msg}`,
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, this.queryRetryDelayMs * attempt),
+        );
+      }
+    }
+    throw lastErr;
   }
 }
 

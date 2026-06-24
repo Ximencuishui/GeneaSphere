@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue';import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import videoApi, { type VideoProject } from '@/api/video'
 

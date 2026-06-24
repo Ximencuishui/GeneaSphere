@@ -17,7 +17,7 @@ export function createSearchPost(data: {
  * 搜索寻亲帖
  */
 export function searchPosts(query: string, origin_place?: string) {
-  return request.get<{ post: SearchPost; score: number }[]>('/api/search/posts', {
+  return request.get<{ post: SearchPost; score: number }[], { post: SearchPost; score: number }[]>('/api/search/posts', {
     params: { query, origin_place },
   });
 }
@@ -26,12 +26,12 @@ export function searchPosts(query: string, origin_place?: string) {
  * 获取寻亲帖详情
  */
 export function getSearchPost(id: string | number) {
-  return request.get<SearchPost>('/api/search/post/' + id);
+  return request.get<SearchPost, SearchPost>('/api/search/post/' + id);
 }
 
 /**
  * 获取联系方式（需要权限）
  */
 export function getContactInfo(id: string | number) {
-  return request.get<{ contact_info: string }>('/api/search/post/' + id + '/contact');
+  return request.get<{ contact_info: string }, { contact_info: string }>('/api/search/post/' + id + '/contact');
 }

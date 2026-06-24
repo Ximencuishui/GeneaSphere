@@ -149,13 +149,13 @@ export interface PlaceFamilyBookOrderResult {
 export const familyBookApi = {
   /** 在家族内搜索人物 */
   searchPersons: (keyword?: string, limit = 20) =>
-    request.get<FamilyBookPerson[]>('/api/family-book/persons/search', {
+    request.get<FamilyBookPerson[], FamilyBookPerson[]>('/api/family-book/persons/search', {
       params: { keyword, limit },
     }),
 
   /** 创建项目 */
   createProject: (data: CreateFamilyBookDto) =>
-    request.post<{ id: string; message: string }>(
+    request.post<{ id: string; message: string }, { id: string; message: string }>(
       '/api/family-book/projects',
       data,
     ),
@@ -166,31 +166,35 @@ export const familyBookApi = {
       Pagination<FamilyBookProjectSummary> & {
         data: FamilyBookProjectSummary[];
       }
+    , 
+      Pagination<FamilyBookProjectSummary> & {
+        data: FamilyBookProjectSummary[];
+      }
     >('/api/family-book/projects', { params }),
 
   /** 获取项目详情 */
   getProject: (id: string) =>
-    request.get<FamilyBookProject>(`/api/family-book/projects/${id}`),
+    request.get<FamilyBookProject, FamilyBookProject>(`/api/family-book/projects/${id}`),
 
   /** 预览估算 */
   previewEstimate: (id: string) =>
-    request.post<FamilyBookEstimate>(
+    request.post<FamilyBookEstimate, FamilyBookEstimate>(
       `/api/family-book/projects/${id}/preview-estimate`,
     ),
 
   /** 生成预览内容 */
   generatePreview: (id: string) =>
-    request.post<{ message: string; page_count: number; person_count: number; estimated_price: number }>(
+    request.post<{ message: string; page_count: number; person_count: number; estimated_price: number }, { message: string; page_count: number; person_count: number; estimated_price: number }>(
       `/api/family-book/projects/${id}/generate`,
     ),
 
   /** 更新项目设置 */
   updateProject: (id: string, data: UpdateFamilyBookDto) =>
-    request.put<{ message: string }>(`/api/family-book/projects/${id}`, data),
+    request.put<{ message: string }, { message: string }>(`/api/family-book/projects/${id}`, data),
 
   /** 删除项目 */
   deleteProject: (id: string) =>
-    request.delete<{ message: string }>(`/api/family-book/projects/${id}`),
+    request.delete<{ message: string }, { message: string }>(`/api/family-book/projects/${id}`),
 
   /** 编辑某个页面 */
   updatePage: (
@@ -198,14 +202,14 @@ export const familyBookApi = {
     pageId: string,
     data: UpdateFamilyBookPageDto,
   ) =>
-    request.put<{ message: string }>(
+    request.put<{ message: string }, { message: string }>(
       `/api/family-book/projects/${projectId}/pages/${pageId}`,
       data,
     ),
 
   /** 下单印刷 */
   placeOrder: (projectId: string, data: PlaceFamilyBookOrderDto) =>
-    request.post<PlaceFamilyBookOrderResult>(
+    request.post<PlaceFamilyBookOrderResult, PlaceFamilyBookOrderResult>(
       `/api/family-book/projects/${projectId}/order`,
       data,
     ),

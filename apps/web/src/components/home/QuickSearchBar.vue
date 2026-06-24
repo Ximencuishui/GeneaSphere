@@ -42,6 +42,13 @@ function handleSearch() {
   }
 }
 
+function handleBlur() {
+  // 使用全局 setTimeout（不通过 Vue 实例 this.setTimeout 访问）
+  globalThis.setTimeout(() => {
+    showDropdown.value = false
+  }, 200)
+}
+
 function selectSuggestion(item: { label: string }) {
   searchText.value = item.label
   doSearch(item.label)
@@ -58,7 +65,7 @@ function selectSuggestion(item: { label: string }) {
         class="search-input"
         @keyup.enter="handleSearch"
         @focus="showDropdown = suggestions.length > 0"
-        @blur="setTimeout(() => showDropdown = false, 200)"
+        @blur="handleBlur"
       />
       <el-button
         class="search-btn"

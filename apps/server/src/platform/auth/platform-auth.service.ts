@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { PlatformLoginDto } from './dto/login.dto';
 import { getClientIp } from '../common/ip.util';
 import { PlatformOperationLogService } from '../common/platform-operation-log.service';
+import { LoginLockService } from '../../common/login-lock.service';
 
 @Injectable()
 export class PlatformAuthService {
@@ -13,17 +14,21 @@ export class PlatformAuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly logService: PlatformOperationLogService,
+    private readonly loginLockService: LoginLockService,
   ) {}
 
   async login(dto: PlatformLoginDto, req?: any) {
     const ipAddress = req ? getClientIp(req) : null;
+
+    // 锁定检查
+    await this.loginLockService.checkLock('PLATFORM_ADMIN', dto.username);
 
     const admin = await this.prisma.platformAdmin.findUnique({
       where: { username: dto.username },
     });
 
     if (!admin || admin.status !== PlatformAdminStatus.active) {
-      // 记录失败日志（需要先找到 adminId，如果 admin 不存在则使用 0 或跳过）
+      await this.loginLockService.recordFailure('PLATFORM_ADMIN', dto.username);
       if (admin) {
         await this.logService.log({
           adminId: admin.id.toString(),
@@ -40,17 +45,29 @@ export class PlatformAuthService {
 
     const isValid = await bcrypt.compare(dto.password, admin.password_hash);
     if (!isValid) {
+      const { locked } = await this.loginLockService.recordFailure(
+        'PLATFORM_ADMIN',
+        dto.username,
+      );
       await this.logService.log({
         adminId: admin.id.toString(),
         actionType: 'LOGIN_FAILED',
         targetType: 'PlatformAdmin',
         targetId: admin.id.toString(),
-        detail: { reason: 'wrong_password', username: dto.username },
+        detail: {
+          reason: locked ? 'locked_after_5_fails' : 'wrong_password',
+          username: dto.username,
+        },
         ipAddress,
         status: 'failed',
       });
-      throw new UnauthorizedException('用户名或密码错误');
+      throw new UnauthorizedException(
+        locked ? '密码错误次数过多，账号已锁定30分钟' : '用户名或密码错误',
+      );
     }
+
+    // 登录成功清零计数
+    await this.loginLockService.clearFailures('PLATFORM_ADMIN', dto.username);
 
     // 更新最后登录信息
     await this.prisma.platformAdmin.update({

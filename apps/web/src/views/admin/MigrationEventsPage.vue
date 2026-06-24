@@ -240,12 +240,7 @@ import type { FormInstance, FormRules } from 'element-plus';
 import { Location, Plus, Warning, Right } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
 import { migrationApi } from '@/api/migration';
-import type {
-  MigrationEvent,
-  CreateMigrationEventDto,
-  Branch,
-  MigrationPoi,
-} from '@/types';
+import type { MigrationEvent, CreateMigrationEventDto, Branch } from '@/types';
 
 const clanStore = useClanStore();
 

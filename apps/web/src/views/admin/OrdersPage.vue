@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +12,7 @@ const statusLabels: Record<string, string> = {
   PRINTING: '印刷中',
   SHIPPED: '已发货',
   COMPLETED: '已完成',
+  CANCELLED: '已取消',
 }
 
 const clanId = ref('')
@@ -47,6 +49,31 @@ const getLogistics = async (order: any) => {
   }
   // 对接快递100 API
   window.open(`https://www.kuaidi100.com/chaxun?nu=${order.tracking_no}`, '_blank')
+}
+
+const handleReorder = async (order: any) => {
+  try {
+    await ElMessageBox.confirm(
+      `基于订单 #${order.id} 生成新订单？规格、数量、收货地址将被复制。`,
+      '再次购买',
+      { type: 'info', confirmButtonText: '确认', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  loading.value = true
+  try {
+    const res = await axios.post(`/api/admin/orders/${order.id}/reorder`)
+    ElMessage.success(res.data.message || '新订单已生成')
+    await fetchOrders()
+    // 后端返回 redirect_url，前端优先使用；无则跳印刷页
+    const url = res.data.redirect_url || `/print?reorder=${res.data.new_order_id}`
+    router.push(url)
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || '再次购买失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(() => {

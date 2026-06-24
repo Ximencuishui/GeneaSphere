@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue"
-import { ElForm, ElFormItem, ElInput, ElButton, ElMessage } from "element-plus"
+import { ref, computed } from "vue"
+import { ElForm, ElFormItem, ElInput, ElButton, ElMessage, ElTabs, ElTabPane } from "element-plus"
 import { useAuthStore } from "@/stores/auth"
 import { useRouter } from "vue-router"
 import axios from "axios"
@@ -9,20 +9,70 @@ const authStore = useAuthStore()
 const router = useRouter()
 const phone = ref("")
 const password = ref("")
+const smsCode = ref("")
 const demoAdminLoading = ref(false)
 const demoMemberLoading = ref(false)
+const smsSending = ref(false)
+const smsCountdown = ref(0)
+const activeTab = ref("password")
+
+let countdownTimer: ReturnType<typeof setInterval> | null = null
 
 if (localStorage.getItem("geneasphere_token")) {
   localStorage.removeItem("geneasphere_token")
   delete axios.defaults.headers.common["Authorization"]
 }
 
+const isPhoneValid = computed(() => /^1[3-9]\d{9}$/.test(phone.value))
+
+const handleSendSms = async () => {
+  if (!isPhoneValid.value) {
+    ElMessage.error("请输入正确的手机号")
+    return
+  }
+  smsSending.value = true
+  try {
+    await authStore.sendSmsCode(phone.value, 'LOGIN')
+    ElMessage.success("验证码已发送")
+    // 倒计时
+    smsCountdown.value = 60
+    countdownTimer = setInterval(() => {
+      smsCountdown.value--
+      if (smsCountdown.value <= 0) {
+        if (countdownTimer) clearInterval(countdownTimer)
+      }
+    }, 1000)
+  } catch (error: any) {
+    const msg = error.response?.data?.message || "发送失败"
+    ElMessage.error(msg)
+  } finally {
+    smsSending.value = false
+  }
+}
+
+// 密码登录
 const handleLogin = async () => {
   try {
     await authStore.login(phone.value, password.value)
     ElMessage.success("登录成功")
-  } catch (error) {
-    ElMessage.error("登录失败，请检查手机号和密码")
+  } catch (error: any) {
+    const msg = error.response?.data?.message || "登录失败，请检查手机号和密码"
+    ElMessage.error(msg)
+  }
+}
+
+// 短信验证码登录
+const handleSmsLogin = async () => {
+  if (!smsCode.value) {
+    ElMessage.error("请输入验证码")
+    return
+  }
+  try {
+    await authStore.loginBySms(phone.value, smsCode.value)
+    ElMessage.success("登录成功")
+  } catch (error: any) {
+    const msg = error.response?.data?.message || "验证码登录失败"
+    ElMessage.error(msg)
   }
 }
 
@@ -98,74 +148,79 @@ const handleMemberDemoLogin = async () => {
         <h2>登录寻根路</h2>
         <p class="form-subtitle">管理您的家族数字化档案</p>
       </div>
-      <ElForm :model="{ phone, password }" label-width="0">
+
+      <ElTabs v-model="activeTab" class="login-tabs">
+        <ElTabPane label="密码登录" name="password">
+          <ElForm :model="{ phone, password }" label-width="0">
+            <ElFormItem>
+              <ElInput v-model="phone" placeholder="手机号" size="large" />
+            </ElFormItem>
+            <ElFormItem>
+              <ElInput v-model="password" type="password" placeholder="密码" size="large" show-password />
+            </ElFormItem>
+            <ElFormItem>
+              <ElButton type="primary" size="large" :loading="authStore.loading" @click="handleLogin" style="width: 100%">
+                登录
+              </ElButton>
+            </ElFormItem>
+          </ElForm>
+        </ElTabPane>
+
+        <ElTabPane label="短信登录" name="sms">
+          <ElForm :model="{ phone, smsCode }" label-width="0">
+            <ElFormItem>
+              <ElInput v-model="phone" placeholder="手机号" size="large" />
+            </ElFormItem>
+            <ElFormItem>
+              <div class="sms-code-row">
+                <ElInput v-model="smsCode" placeholder="验证码" size="large" class="sms-input" maxlength="6" />
+                <ElButton
+                  size="large"
+                  class="sms-btn"
+                  :loading="smsSending"
+                  :disabled="smsCountdown > 0 || !isPhoneValid"
+                  @click="handleSendSms"
+                >
+                  {{ smsCountdown > 0 ? `${smsCountdown}s` : '获取验证码' }}
+                </ElButton>
+              </div>
+            </ElFormItem>
+            <ElFormItem>
+              <ElButton type="primary" size="large" :loading="authStore.loading" @click="handleSmsLogin" style="width: 100%">
+                登录
+              </ElButton>
+            </ElFormItem>
+          </ElForm>
+        </ElTabPane>
+      </ElTabs>
+
+      <div class="form-divider">
+        <span>或</span>
+      </div>
+      <div class="demo-buttons">
         <ElFormItem>
-          <ElInput
-            v-model="phone"
-            placeholder="手机号"
-            size="large"
-          />
-        </ElFormItem>
-        <ElFormItem>
-          <ElInput
-            v-model="password"
-            type="password"
-            placeholder="密码"
-            size="large"
-            show-password
-          />
-        </ElFormItem>
-        <ElFormItem>
-          <ElButton
-            type="primary"
-            size="large"
-            :loading="authStore.loading"
-            @click="handleLogin"
-            style="width: 100%"
-          >
-            登录
-          </ElButton>
-        </ElFormItem>
-        <div class="form-divider">
-          <span>或</span>
-        </div>
-        <div class="demo-buttons">
-          <ElFormItem>
-            <ElButton
-              size="large"
-              class="btn-demo-admin"
-              :loading="demoAdminLoading"
-              @click="handleAdminDemoLogin"
-              style="width: 100%"
-            >
-              <span class="demo-icon">&#9654;</span>
-              一键体验族谱管理演示
-            </ElButton>
-          </ElFormItem>
-          <ElFormItem>
-            <ElButton
-              size="large"
-              class="btn-demo-member"
-              :loading="demoMemberLoading"
-              @click="handleMemberDemoLogin"
-              style="width: 100%"
-            >
-              <span class="demo-icon">&#9679;</span>
-              一键体验族员个人页面
-            </ElButton>
-          </ElFormItem>
-        </div>
-        <ElFormItem>
-          <ElButton text @click="router.push('/register')" style="width: 100%; color: #5D4037;">
-            还没有账号？立即注册
+          <ElButton size="large" class="btn-demo-admin" :loading="demoAdminLoading" @click="handleAdminDemoLogin" style="width: 100%">
+            <span class="demo-icon">&#9654;</span>
+            一键体验族谱管理演示
           </ElButton>
         </ElFormItem>
         <ElFormItem>
-          <ElButton text @click="router.push('/')" style="width: 100%; color: #94a3b8; font-size: 13px;">
-            ← 返回首页
+          <ElButton size="large" class="btn-demo-member" :loading="demoMemberLoading" @click="handleMemberDemoLogin" style="width: 100%">
+            <span class="demo-icon">&#9679;</span>
+            一键体验族员个人页面
           </ElButton>
         </ElFormItem>
-      </ElForm>
+      </div>
+      <ElFormItem>
+        <ElButton text @click="router.push('/register')" style="width: 100%; color: #5D4037;">
+          还没有账号？立即注册
+        </ElButton>
+      </ElFormItem>
+      <ElFormItem>
+        <ElButton text @click="router.push('/')" style="width: 100%; color: #94a3b8; font-size: 13px;">
+          ← 返回首页
+        </ElButton>
+      </ElFormItem>
     </div>
   </div>
 </template>
@@ -181,7 +236,7 @@ const handleMemberDemoLogin = async () => {
 }
 
 .login-form {
-  width: 400px;
+  width: 420px;
   max-width: 100%;
   padding: 40px 36px;
   background: white;
@@ -191,7 +246,7 @@ const handleMemberDemoLogin = async () => {
 
 .form-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
 .form-header h2 {
@@ -205,6 +260,42 @@ const handleMemberDemoLogin = async () => {
   font-size: 14px;
   color: #94a3b8;
   margin: 0;
+}
+
+.login-tabs {
+  margin-bottom: 8px;
+}
+
+.login-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.login-tabs :deep(.el-tabs__item) {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.sms-code-row {
+  display: flex;
+  gap: 12px;
+}
+
+.sms-input {
+  flex: 1;
+}
+
+.sms-btn {
+  min-width: 120px;
+  background: linear-gradient(135deg, #5D4037, #8D6E63);
+  border: none;
+  color: white;
+  font-weight: 500;
+  border-radius: 8px;
+}
+
+.sms-btn:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
 }
 
 .form-divider {

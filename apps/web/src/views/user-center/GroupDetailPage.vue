@@ -1,11 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  ArrowLeft, User, ChatLineRound, Document, Plus, Setting,
-  Top, Delete, More
-} from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, User, ChatLineRound, Document, Plus, Top, Delete, More } from '@element-plus/icons-vue';import { ElMessage, ElMessageBox } from 'element-plus'
 import discussionApi from '@/api/discussion'
 import type { DiscussionGroup, GroupTopic, GroupMember, DiscussionSummary } from '@/types'
 

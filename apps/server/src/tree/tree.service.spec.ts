@@ -40,6 +40,8 @@ describe('TreeService', () => {
         death_lat: null,
         death_lng: null,
         migration_branch: null,
+        avatar_url: null,
+        thumbnail_url: null,
         created_at: new Date(),
         updated_at: new Date(),
       };
@@ -80,6 +82,8 @@ describe('TreeService', () => {
         death_lat: null,
         death_lng: null,
         migration_branch: null,
+        avatar_url: null,
+        thumbnail_url: null,
         created_at: new Date(),
         updated_at: new Date(),
       };
@@ -131,6 +135,8 @@ describe('TreeService', () => {
         death_lat: null,
         death_lng: null,
         migration_branch: null,
+        avatar_url: null,
+        thumbnail_url: null,
         created_at: new Date(),
         updated_at: new Date(),
       };

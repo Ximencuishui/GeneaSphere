@@ -109,22 +109,22 @@ export interface MemberAllocation {
 const toolboxApi = {
   // 获取额度信息
   getCredits: () => {
-    return request.get<any, CreditInfo>('/api/toolbox/credits');
+    return request.get<CreditInfo, CreditInfo>('/api/toolbox/credits');
   },
 
   // 获取次数包列表
   getPackages: () => {
-    return request.get<any, PackageConfig[]>('/api/toolbox/packages');
+    return request.get<PackageConfig[], PackageConfig[]>('/api/toolbox/packages');
   },
 
   // 购买次数包
   purchase: (data: PurchaseRequest) => {
-    return request.post<any, PurchaseResult>('/api/toolbox/purchase', data);
+    return request.post<PurchaseResult, PurchaseResult>('/api/toolbox/purchase', data);
   },
 
   // 提交图片处理
   process: (data: ProcessRequest) => {
-    return request.post<any, ProcessResult>('/api/toolbox/process', data);
+    return request.post<ProcessResult, ProcessResult>('/api/toolbox/process', data);
   },
 
   // 获取使用历史
@@ -136,12 +136,12 @@ const toolboxApi = {
 
   // 获取购买记录
   getPurchaseHistory: () => {
-    return request.get<any, any[]>('/api/toolbox/purchase-history');
+    return request.get<any[], any[]>('/api/toolbox/purchase-history');
   },
 
   // 获取家族共享包列表
   getFamilyPackages: () => {
-    return request.get<any, FamilyPackage[]>('/api/toolbox/family/packages');
+    return request.get<FamilyPackage[], FamilyPackage[]>('/api/toolbox/family/packages');
   },
 
   // 分配共享次数
@@ -155,14 +155,14 @@ const toolboxApi = {
 
   // 获取成员分配情况
   getMemberAllocations: (packageId: string) => {
-    return request.get<any, MemberAllocation[]>(
+    return request.get<MemberAllocation[], MemberAllocation[]>(
       `/api/toolbox/family/members?package_id=${packageId}`,
     );
   },
 
   // 购买家族共享包
   purchaseFamilyShared: (data: PurchaseRequest) => {
-    return request.post<any, PurchaseResult>(
+    return request.post<PurchaseResult, PurchaseResult>(
       '/api/toolbox/family/purchase-shared',
       data,
     );

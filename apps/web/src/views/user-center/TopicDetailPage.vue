@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Document, Delete, More, Refresh } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, Document, Delete } from '@element-plus/icons-vue';import { ElMessage, ElMessageBox } from 'element-plus'
 import discussionApi from '@/api/discussion'
 import type { TopicDetail, TopicReply } from '@/types'
 
