@@ -57,7 +57,9 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly tencentOcr: TencentOcrService) {}
 
   async onModuleInit() {
-    await this.selectProvider();
+    // 不在这里立即执行 selectProvider，而是等待 TencentOcrService 完成初始化
+    // NestJS 的 onModuleInit 执行顺序不保证，因此延迟 1 秒后重试
+    await this.selectProviderWithRetry();
     if (this.provider === 'tesseract') {
       try {
         await this.initTesseract();
@@ -72,35 +74,45 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * 决定使用哪个 OCR 引擎
+   * 决定使用哪个 OCR 引擎（带重试，解决 NestJS onModuleInit 执行顺序问题）
+   * TencentOcrService.onModuleInit() 可能在此之后执行，因此等待并重试
    */
-  private async selectProvider() {
+  private async selectProviderWithRetry(): Promise<void> {
     const setting = (process.env.OCR_PROVIDER || 'auto').toLowerCase();
-    if (setting === 'tencent') {
-      if (!this.tencentOcr.isReady()) {
-        throw new Error(
-          'OCR_PROVIDER=tencent 但腾讯云密钥未配置或 SDK 加载失败',
-        );
-      }
-      this.provider = 'tencent';
-      this.logger.log('OCR 引擎：腾讯云（强制配置）');
-      return;
-    }
+
+    // 非 tencent 模式不需要等待腾讯云初始化
     if (setting === 'tesseract') {
       this.provider = 'tesseract';
       this.logger.log('OCR 引擎：Tesseract.js（强制配置）');
       return;
     }
-    // auto
-    if (this.tencentOcr.isReady()) {
-      this.provider = 'tencent';
-      this.logger.log('OCR 引擎：腾讯云（自动选择）');
-    } else {
-      this.provider = 'tesseract';
-      this.logger.warn(
-        'OCR 引擎：Tesseract.js（腾讯云未配置，已自动降级）',
+
+    // tencent 或 auto 模式：等待 TencentOcrService 初始化完成（最多等 5 秒）
+    const maxRetries = 10;
+    const retryDelay = 500; // ms
+
+    for (let i = 0; i < maxRetries; i++) {
+      if (this.tencentOcr.isReady()) {
+        this.provider = 'tencent';
+        this.logger.log(`OCR 引擎：腾讯云（${setting === 'tencent' ? '强制配置' : '自动选择'}）`);
+        return;
+      }
+      if (i < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      }
+    }
+
+    // 超时：tencent 强制模式抛错，auto 模式降级
+    if (setting === 'tencent') {
+      throw new Error(
+        'OCR_PROVIDER=tencent 但腾讯云密钥未配置或 SDK 加载失败（等待 5s 超时）',
       );
     }
+    // auto 模式降级
+    this.provider = 'tesseract';
+    this.logger.warn(
+      'OCR 引擎：Tesseract.js（腾讯云未配置，已自动降级）',
+    );
   }
 
   /**
