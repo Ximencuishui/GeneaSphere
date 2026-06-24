@@ -83,6 +83,24 @@ const handleReject = async (review: any) => {
   }
 }
 
+// 设为封面（需求文档 4.3.1节）
+const handleSetCover = async (review: any) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要将此影像设为「${review.category}」聚落封面吗？`,
+      '设为封面',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    await axios.post(`/api/admin/reviews/media/${review.id}/set-cover`)
+    ElMessage.success('已设为聚落封面')
+    fetchReviews()
+  } catch (error: any) {
+    if (error !== 'cancel' && error.response?.data?.message) {
+      ElMessage.error(error.response.data.message)
+    }
+  }
+}
+
 const toggleSelection = (review: any, checked: boolean) => {
   if (checked) {
     if (!selectedReviews.value.find((r) => r.id === review.id)) {
@@ -294,6 +312,14 @@ onMounted(() => {
             </ElButton>
             <ElButton type="danger" @click="handleReject(review)">
               驳回
+            </ElButton>
+            <ElButton
+              v-if="review.category === '村寨风貌' || review.category === '祭祀活动'"
+              type="warning"
+              plain
+              @click="handleSetCover(review)"
+            >
+              设为封面
             </ElButton>
           </div>
         </ElCard>

@@ -77,6 +77,13 @@ model User {
   memory_answers          LocalMemoryAnswer[]
   memory_badges           MemoryBadge[]
   verified_locations      UserVerifiedLocation[]
+  clan_review_attachments ClanReviewAttachment[]
+
+  // ==================== 管理员后台 v2.0 ====================
+  announcements_created   ClanAnnouncement[]
+  reports_filed          ContentReport[]  @relation("ReportReporter")
+  reports_handled         ContentReport[]  @relation("ReportHandler")
+  clan_tool_usage_logs    ClanToolUsageLog[] @relation("ClanToolUsageLogUser")
 
   @@index([ban_status])
   @@index([wx_openid])
@@ -95,6 +102,9 @@ model Clan {
   register_ip              String?                  @map("register_ip")
   reviewed_at              DateTime?                @map("reviewed_at")
   reviewer_id              BigInt?                  @map("reviewer_id")
+  // ========== 家族管理员证件审核（v1.0 需求 3.3.2）==========
+  id_card_url              String?                  @map("id_card_url")
+  id_card_uploaded_at      DateTime?                @map("id_card_uploaded_at")
   audit_logs               AuditLog[]
   clan_balance             ClanBalance?
   members                  ClanMember[]
@@ -121,6 +131,13 @@ model Clan {
   relation_changes FamilyRelationChange[]
   marriages        MarriageHistory[]
   custody_records  ChildCustodyRecord[]
+  review_attachments ClanReviewAttachment[]
+
+  // ==================== 管理员后台 v2.0 ====================
+  announcements   ClanAnnouncement[]
+  reports         ContentReport[]
+  albums          ClanAlbum[]
+  clan_tool_usage_logs ClanToolUsageLog[] @relation("ClanToolUsageLogClan")
 
   @@index([status])
   @@index([register_ip])
@@ -146,6 +163,9 @@ model Person {
   migration_branch        String?                    @map("migration_branch")
   created_at              DateTime                   @default(now()) @map("created_at")
   updated_at              DateTime                   @updatedAt @map("updated_at")
+  // 软删除字段（v2.0 回收站功能）
+  deleted_at              DateTime?                  @map("deleted_at")
+  deleted_by              String?                    @map("deleted_by")
   bio_reviews             BioReview[]
   children_in             FamilyChild[]              @relation("ChildRelation")
   husband_in              FamilyUnit[]               @relation("HusbandRelation")
@@ -219,6 +239,8 @@ model MediaArchive {
   taken_year                   Int?                       @map("taken_year")
   taken_location               String?                    @map("taken_location")
   description                  String?                    @map("description")
+  category                     String?                    @map("category") // 影像分类：个人照片、村寨风貌、祭祀活动等
+  is_cover                    Boolean                    @default(false) @map("is_cover") // 是否为聚落封面
   created_at                   DateTime                   @default(now()) @map("created_at")
   updated_at                   DateTime                   @updatedAt @map("updated_at")
   file_size                    BigInt                     @default(0) @map("file_size")
@@ -226,14 +248,22 @@ model MediaArchive {
   display_url                  String?                    @map("display_url")
   thumb_url                    String?                    @map("thumb_url")
   original_key                 String?                    @map("original_key")
+  // 软删除字段（v2.0 回收站功能）
+  deleted_at                   DateTime?                  @map("deleted_at")
+  deleted_by                   String?                    @map("deleted_by")
+  // 相册关联（v2.0 影像库）
+  album_id                     BigInt?                    @map("album_id")
+  privacy_level                SpacePrivacyLevel          @default(clan) @map("privacy_level")
   clan                         Clan                       @relation(fields: [clan_id], references: [id], onDelete: Cascade)
   uploader                     User                       @relation(fields: [uploader_id], references: [id], onDelete: Cascade)
+  album                        ClanAlbum?                 @relation(fields: [album_id], references: [id])
   person_links                 MediaPersonLink[]
   reviews                      MediaReview[]
   video_material_links         VideoMaterialLink[]
   lineage_video_material_links LineageVideoMaterialLink[]
   migration_location_media     MigrationLocationMedia[]
 
+  @@index([clan_id, category])
   @@map("media_archives")
 }
 
@@ -1872,4 +1902,165 @@ model HeavyJob {
   @@index([userId])
   @@index([status, createdAt])
   @@map("heavy_jobs")
+}
+
+// ==================== 短信验证码 ====================
+
+enum SmsCodePurpose {
+  REGISTER
+  LOGIN
+  RESET_PASSWORD
+  BIND_PHONE
+}
+
+model SmsVerifyCode {
+  id         BigInt          @id @default(autoincrement()) @map("id")
+  phone      String          @map("phone")
+  code       String          @map("code")
+  purpose    SmsCodePurpose  @map("purpose")
+  ip_address String?         @map("ip_address")
+  is_used    Boolean         @default(false) @map("is_used")
+  expires_at DateTime        @map("expires_at")
+  created_at DateTime        @default(now()) @map("created_at")
+  used_at    DateTime?       @map("used_at")
+
+  @@index([phone, purpose, is_used])
+  @@index([expires_at])
+  @@index([ip_address, created_at])
+  @@map("sms_verify_codes")
+}
+
+// ==================== Admin 后台 v1.0 补缺 ====================
+
+// 登录失败计数与锁定记录（家族管理员 / 平台管理员）
+model LoginAttempt {
+  id              BigInt    @id @default(autoincrement()) @map("id")
+  subject_type    String    @map("subject_type") // USER | PLATFORM_ADMIN
+  subject_key     String    @map("subject_key")  // phone or username
+  failed_count    Int       @default(0) @map("failed_count")
+  locked_until    DateTime? @map("locked_until")
+  last_attempt_at DateTime  @default(now()) @map("last_attempt_at")
+
+  @@unique([subject_type, subject_key])
+  @@index([locked_until])
+  @@map("login_attempts")
+}
+
+// 家族注册审核附件（身份证件等）
+model ClanReviewAttachment {
+  id          BigInt   @id @default(autoincrement()) @map("id")
+  clan_id     BigInt   @map("clan_id")
+  uploader_id String   @map("uploader_id")
+  file_url    String   @map("file_url")
+  file_name   String   @map("file_name")
+  file_size   Int      @default(0) @map("file_size")
+  mime_type   String   @map("mime_type")
+  created_at  DateTime @default(now()) @map("created_at")
+  clan        Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  uploader    User     @relation(fields: [uploader_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, created_at])
+  @@map("clan_review_attachments")
+}
+
+// ==================== 管理员后台 v2.0 新增模型 ====================
+
+// 家族公告
+model ClanAnnouncement {
+  id           BigInt             @id @default(autoincrement()) @map("id")
+  clan_id      BigInt             @map("clan_id")
+  title        String             @map("title") @db.VarChar(200)
+  content      String             @map("content") @db.Text
+  cover_url   String?            @map("cover_url")
+  is_pinned   Boolean            @default(false) @map("is_pinned")
+  is_active   Boolean            @default(true) @map("is_active")
+  published_at DateTime?         @map("published_at")
+  created_by   String             @map("created_by")
+  created_at   DateTime          @default(now()) @map("created_at")
+  updated_at   DateTime          @updatedAt @map("updated_at")
+  clan         Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  creator      User              @relation(fields: [created_by], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, is_active, published_at])
+  @@index([clan_id, is_pinned])
+  @@map("clan_announcements")
+}
+
+// 内容举报
+model ContentReport {
+  id           BigInt             @id @default(autoincrement()) @map("id")
+  clan_id      BigInt             @map("clan_id")
+  reporter_id  String             @map("reporter_id")
+  target_type  ReportTargetType   @map("target_type")
+  target_id    BigInt             @map("target_id")
+  reason       String             @map("reason")
+  description  String?            @map("description")
+  status       ReportStatus       @default(PENDING) @map("status")
+  handled_by   String?            @map("handled_by")
+  handled_at   DateTime?          @map("handled_at")
+  result       String?            @map("result")
+  created_at   DateTime          @default(now()) @map("created_at")
+  reporter     User              @relation("ReportReporter", fields: [reporter_id], references: [id], onDelete: Cascade)
+  handler      User?             @relation("ReportHandler", fields: [handled_by], references: [id], onDelete: SetNull)
+  clan         Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, status])
+  @@index([target_type, target_id])
+  @@map("content_reports")
+}
+
+// 家族相册（区别于用户个人相册）
+model ClanAlbum {
+  id              BigInt            @id @default(autoincrement()) @map("id")
+  clan_id         BigInt            @map("clan_id")
+  name            String            @map("name") @db.VarChar(100)
+  description     String?           @map("description") @db.VarChar(500)
+  cover_url       String?           @map("cover_url")
+  default_privacy SpacePrivacyLevel @default(clan) @map("default_privacy")
+  photo_count     Int               @default(0) @map("photo_count")
+  creator_id      String            @map("creator_id")
+  created_at      DateTime         @default(now()) @map("created_at")
+  updated_at      DateTime         @updatedAt @map("updated_at")
+  clan            Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  media           MediaArchive[]
+
+  @@index([clan_id])
+  @@map("clan_albums")
+}
+
+// 举报目标类型枚举
+enum ReportTargetType {
+  MEDIA       // 影像
+  BIO         // 生平
+  POST        // 寻亲帖
+  MEMBER      // 成员信息
+}
+
+// 举报状态枚举
+enum ReportStatus {
+  PENDING     // 待处理
+  CONFIRMED   // 已确认违规
+  REJECTED    // 已驳回
+}
+
+// AI工具使用记录（家族维度扩展）
+model ClanToolUsageLog {
+  id             BigInt          @id @default(autoincrement()) @map("id")
+  user_id        String          @map("user_id")
+  clan_id        BigInt          @map("clan_id")
+  tool_type      ToolType        @map("tool_type")
+  media_id       BigInt?         @map("media_id")
+  credits_used   Int             @map("credits_used")
+  estimated_cost Decimal          @map("estimated_cost") @db.Decimal(10, 4)
+  status         ToolUsageStatus @default(pending) @map("status")
+  input_url      String?         @map("input_url")
+  output_url     String?         @map("output_url")
+  created_at     DateTime        @default(now()) @map("created_at")
+  completed_at   DateTime?       @map("completed_at")
+  user           User            @relation("ClanToolUsageLogUser", fields: [user_id], references: [id], onDelete: Cascade)
+  clan           Clan            @relation("ClanToolUsageLogClan", fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, created_at])
+  @@index([clan_id, tool_type])
+  @@map("clan_tool_usage_logs")
 }

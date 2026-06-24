@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue';import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TreeSelect from '@/components/TreeSelect.vue'
@@ -160,7 +159,10 @@ const nextToExecute = async () => {
   
   try {
     await ElMessageBox.confirm(
-      `确认执行归宗合并？\\n\\n挂载点：${selectedAnchor.value.fullName}\\n影响人数：${generationAlignments.value.length}`,
+      `确认执行归宗合并？\n\n` +
+      `挂载点：${selectedAnchor.value.fullName}\n` +
+      `影响人数：${generationAlignments.value.length}\n\n` +
+      `⚠️ 系统将自动创建数据快照（24小时内可回滚）`,
       '确认合并',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )

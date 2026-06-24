@@ -32,6 +32,7 @@ export class AdminController {
         children: [
           { title: '影像审核', path: '/admin/reviews/media' },
           { title: '生平审核', path: '/admin/reviews/bio' },
+          { title: '举报管理', path: '/admin/reports' },
         ],
       },
       {
@@ -52,6 +53,7 @@ export class AdminController {
         children: [
           { title: '隐私配置', path: '/admin/settings/privacy' },
           { title: '字辈管理', path: '/admin/settings/xipai' },
+          { title: '家族信息', path: '/admin/settings/clan-info' },
           { title: '云存储', path: '/admin/settings/storage' },
         ],
       },
@@ -59,6 +61,42 @@ export class AdminController {
         title: '印刷服务',
         children: [
           { title: '订单管理', path: '/admin/orders' },
+        ],
+      },
+      {
+        title: '短信通知',
+        children: [
+          { title: '发送短信', path: '/admin/sms/send' },
+          { title: '余额管理', path: '/admin/sms/balance' },
+        ],
+      },
+      {
+        title: '家族公告',
+        children: [
+          { title: '公告管理', path: '/admin/announcements' },
+        ],
+      },
+      {
+        title: '数据管理',
+        children: [
+          { title: '数据统计', path: '/admin/statistics' },
+          { title: '回收站', path: '/admin/trash' },
+          { title: '数据导出', path: '/admin/settings/export' },
+        ],
+      },
+      {
+        title: '影像管理',
+        children: [
+          { title: '影像库', path: '/admin/media/library' },
+          { title: '相册管理', path: '/admin/media/albums' },
+        ],
+      },
+      {
+        title: '工具记录',
+        children: [
+          { title: 'AI工具使用记录', path: '/admin/toolbox-usage' },
+          { title: '家庭图册', path: '/admin/family-albums' },
+          { title: 'PDF导入管理', path: '/admin/import' },
         ],
       },
       {

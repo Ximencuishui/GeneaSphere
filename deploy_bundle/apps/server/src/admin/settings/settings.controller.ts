@@ -400,4 +400,108 @@ const [photos, videos, others] = await Promise.all([
     // 返回 JSON（后续可扩展为压缩包下载）
     return exportData;
   }
+
+  // ==================== 家族信息编辑 ====================
+
+  /**
+   * 获取家族信息
+   */
+  @Get('clan-info')
+  @ApiOperation({ summary: '获取家族信息' })
+  async getClanInfo(
+    @Request() req,
+    @Query('clanId') clanIdStr: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = BigInt(clanIdStr);
+
+    await this.adminService.requireAdmin(clanId, userId);
+
+    const clan = await this.prisma.clan.findUnique({
+      where: { id: clanId },
+      include: {
+        admin_user: {
+          select: { id: true, phone: true, nickname: true },
+        },
+      },
+    });
+
+    if (!clan) {
+      throw new NotFoundException('Clan not found');
+    }
+
+    return {
+      id: clan.id.toString(),
+      name: clan.name,
+      description: clan.description,
+      admin_user: clan.admin_user ? {
+        id: clan.admin_user.id,
+        name: clan.admin_user.nickname || clan.admin_user.phone,
+      } : null,
+      created_at: clan.created_at,
+      updated_at: clan.updated_at,
+    };
+  }
+
+  /**
+   * 更新家族信息
+   */
+  @Put('clan-info')
+  @ApiOperation({ summary: '更新家族信息' })
+  async updateClanInfo(
+    @Request() req,
+    @Body() body: any,
+  ) {
+    const userId = req.user.userId;
+    const clanId = BigInt(body.clanId);
+
+    await this.adminService.requireOwner(clanId, userId);
+
+    const updateData: any = {};
+
+    if (body.name !== undefined) {
+      updateData.name = body.name;
+    }
+
+    if (body.description !== undefined) {
+      updateData.description = body.description;
+    }
+
+    if (body.cover_url !== undefined) {
+      const currentSettings = ((await this.prisma.clan.findUnique({ where: { id: clanId } }))?.settings_json || {}) as Record<string, any>;
+      updateData.settings_json = {
+        ...currentSettings,
+        cover_url: body.cover_url,
+      };
+    }
+
+    if (body.default_role !== undefined) {
+      const currentSettings = ((await this.prisma.clan.findUnique({ where: { id: clanId } }))?.settings_json || {}) as Record<string, any>;
+      updateData.settings_json = {
+        ...currentSettings,
+        default_role: body.default_role,
+      };
+    }
+
+    const updated = await this.prisma.clan.update({
+      where: { id: clanId },
+      data: updateData,
+    });
+
+    await this.adminService.logAction({
+      clanId,
+      userId,
+      action: 'UPDATE_CLAN_INFO',
+      targetType: 'Clan',
+      targetId: clanId.toString(),
+      details: `更新家族信息: ${body.name || ''}`,
+    });
+
+    return {
+      id: updated.id.toString(),
+      name: updated.name,
+      description: updated.description,
+      updated_at: updated.updated_at,
+    };
+  }
 }

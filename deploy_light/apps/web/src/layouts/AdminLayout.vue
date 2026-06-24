@@ -3,6 +3,43 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import axios from 'axios'
+import {
+  Monitor,
+  User,
+  PictureFilled,
+  Collection,
+  Connection,
+  Setting,
+  Printer,
+  Message,
+  Document,
+  HomeFilled,
+  Bell,
+  Fold,
+  Expand,
+  UserFilled,
+  Menu,
+  DataLine,
+  Warning,
+  RefreshRight,
+  Postcard,
+} from '@element-plus/icons-vue'
+
+const iconMap: Record<string, any> = {
+  Monitor,
+  User,
+  PictureFilled,
+  Collection,
+  Connection,
+  Setting,
+  Printer,
+  Message,
+  Document,
+  DataLine,
+  Warning,
+  RefreshRight,
+  Postcard,
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -12,6 +49,8 @@ const isCollapse = ref(false)
 const pendingCount = ref(0)
 // 通知面板显示状态
 const notifyVisible = ref(false)
+// 移动端侧边栏显示状态
+const sidebarVisible = ref(false)
 
 // 待办数据
 const pendingTodos = ref<{
@@ -62,6 +101,7 @@ const menuItems = ref([
       { title: '信息修改审核', path: '/admin/invite/reviews' },
       { title: '家庭关系变更审核', path: '/admin/family-relation/reviews' },
       { title: '子女归属争议', path: '/admin/family-relation/disputes' },
+      { title: 'PDF 导入管理', path: '/admin/import' },
     ],
   },
   {
@@ -70,6 +110,7 @@ const menuItems = ref([
     children: [
       { title: '影像审核', path: '/admin/reviews/media' },
       { title: '生平审核', path: '/admin/reviews/bio' },
+      { title: '举报管理', path: '/admin/reports' },
     ],
   },
   {
@@ -88,11 +129,44 @@ const menuItems = ref([
     ],
   },
   {
+    title: '家族公告',
+    icon: 'Postcard',
+    children: [
+      { title: '公告管理', path: '/admin/announcements' },
+    ],
+  },
+  {
+    title: '数据管理',
+    icon: 'DataLine',
+    children: [
+      { title: '数据统计', path: '/admin/statistics' },
+      { title: '回收站', path: '/admin/trash' },
+      { title: '数据导出', path: '/admin/settings/export' },
+    ],
+  },
+  {
+    title: '影像管理',
+    icon: 'PictureFilled',
+    children: [
+      { title: '影像库', path: '/admin/media/library' },
+      { title: '相册管理', path: '/admin/media/albums' },
+    ],
+  },
+  {
+    title: '工具记录',
+    icon: 'RefreshRight',
+    children: [
+      { title: 'AI工具使用记录', path: '/admin/toolbox-usage' },
+      { title: '家庭图册', path: '/admin/family-albums' },
+    ],
+  },
+  {
     title: '系统设置',
     icon: 'Setting',
     children: [
       { title: '隐私配置', path: '/admin/settings/privacy' },
       { title: '字辈管理', path: '/admin/settings/xipai' },
+      { title: '家族信息', path: '/admin/settings/clan-info' },
       { title: '云存储', path: '/admin/settings/storage' },
     ],
   },
@@ -175,7 +249,7 @@ const handleLogout = () => {
 <template>
   <div class="admin-layout">
     <!-- 侧边栏 -->
-    <ElAside :width="isCollapse ? '64px' : '240px'" class="sidebar">
+    <ElAside :width="isCollapse ? '64px' : '240px'" :class="['sidebar', { visible: sidebarVisible }]">
       <div class="sidebar-header">
         <h2 v-if="!isCollapse" class="logo">寻根路 · xungenlu.cn</h2>
         <h2 v-else class="logo">寻</h2>
@@ -184,16 +258,17 @@ const handleLogout = () => {
         :default-active="activeMenu"
         :default-openeds="openedMenus"
         :collapse="isCollapse"
-        background-color="#3A506B"
-        text-color="#E0E6ED"
+        background-color="#5D4037"
+        text-color="#F5E6D3"
         active-text-color="#FFFFFF"
         :collapse-transition="true"
         router
+        class="admin-menu"
       >
         <template v-for="item in menuItems" :key="item.title">
           <ElSubMenu :index="item.title">
             <template #title>
-              <ElIcon><component :is="item.icon" /></ElIcon>
+              <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
               <span>{{ item.title }}</span>
             </template>
             <ElMenuItem
@@ -214,9 +289,16 @@ const handleLogout = () => {
       <ElHeader class="top-bar">
         <div class="left-section">
           <ElButton
-            :icon="isCollapse ? 'Expand' : 'Fold'"
+            :icon="isCollapse ? Expand : Fold"
             @click="isCollapse = !isCollapse"
             text
+            class="collapse-btn"
+          />
+          <ElButton
+            :icon="Menu"
+            text
+            class="mobile-menu-btn"
+            @click="sidebarVisible = true"
           />
           <ElBreadcrumb separator="/" class="breadcrumb">
             <ElBreadcrumbItem :to="{ path: '/admin/dashboard' }">
@@ -240,7 +322,7 @@ const handleLogout = () => {
           >
             <template #reference>
               <ElBadge :value="pendingCount" :max="99" :hidden="pendingCount === 0" class="notification-badge">
-                <ElButton icon="Bell" circle />
+                <ElButton :icon="Bell" circle />
               </ElBadge>
             </template>
             <div class="notify-panel">
@@ -279,7 +361,7 @@ const handleLogout = () => {
           </ElPopover>
           <ElDropdown trigger="click">
             <span class="user-info">
-              <ElAvatar :size="32" icon="UserFilled" />
+              <ElAvatar :size="32" :icon="UserFilled" />
               <span class="username">{{ authStore.user?.phone || '管理员' }}</span>
             </span>
             <template #dropdown>
@@ -316,9 +398,10 @@ const handleLogout = () => {
 }
 
 .sidebar {
-  background-color: #3A506B;
+  background-color: #5D4037;
   transition: width 0.3s;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .sidebar-header {
@@ -326,14 +409,43 @@ const handleLogout = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 252, 248, 0.15);
+  background-color: rgba(0, 0, 0, 0.1);
 }
 
 .logo {
   color: #FFFFFF;
   margin: 0;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
+}
+
+.admin-menu :deep(.el-sub-menu__title) {
+  background-color: rgba(255, 252, 248, 0.05);
+  color: #F5E6D3;
+}
+
+.admin-menu :deep(.el-sub-menu__title:hover) {
+  background-color: rgba(255, 252, 248, 0.1);
+}
+
+.admin-menu :deep(.el-sub-menu.is-active .el-sub-menu__title) {
+  background-color: rgba(201, 169, 110, 0.3);
+  color: #FFFFFF;
+}
+
+.admin-menu :deep(.el-menu-item) {
+  background-color: rgba(0, 0, 0, 0.08);
+  color: #E8D5C4;
+}
+
+.admin-menu :deep(.el-menu-item.is-active) {
+  background-color: rgba(201, 169, 110, 0.35);
+  color: #FFFFFF;
+}
+
+.admin-menu :deep(.el-menu-item:hover) {
+  background-color: rgba(255, 252, 248, 0.1);
 }
 
 .main-area {
@@ -435,6 +547,14 @@ const handleLogout = () => {
   padding: 20px;
 }
 
+.collapse-btn {
+  display: block;
+}
+
+.mobile-menu-btn {
+  display: none;
+}
+
 /* 页面过渡动画 */
 .fade-enter-active,
 .fade-leave-active {
@@ -444,5 +564,65 @@ const handleLogout = () => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .collapse-btn {
+    display: none;
+  }
+
+  .mobile-menu-btn {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.3);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  .sidebar.visible {
+    transform: translateX(0);
+  }
+
+  .main-area {
+    width: 100%;
+  }
+
+  .top-bar {
+    padding: 0 12px;
+  }
+
+  .breadcrumb {
+    display: none;
+  }
+
+  .content-area {
+    padding: 12px;
+  }
+
+  .logo {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .sidebar {
+    width: 240px !important;
+  }
+
+  .top-bar {
+    height: 56px;
+  }
+
+  .content-area {
+    padding: 8px;
+  }
 }
 </style>
