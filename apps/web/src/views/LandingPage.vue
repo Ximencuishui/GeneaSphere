@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
@@ -14,6 +14,22 @@ const demoLoading = ref(false)
 const scrollY = ref(0)
 const currentYear = new Date().getFullYear()
 const highlightedSurname = ref<string | null>(null)
+
+// 检查用户是否为管理员（需求文档: 营销网站后台入口对接）
+const isAdmin = computed(() => {
+  const token = localStorage.getItem('geneasphere_token')
+  if (!token) return false
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return ['OWNER', 'ADMIN'].includes(payload.role)
+  } catch {
+    return false
+  }
+})
+
+const goToAdmin = () => {
+  router.push('/admin/dashboard')
+}
 
 const surnames = [
   { name: '李', color: '#C9A96E', description: '发源于陇西（今甘肃东南部）' },
@@ -93,6 +109,15 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
             @click="handleDemoLogin"
           >
             立即体验
+          </el-button>
+          <el-button
+            v-if="isAdmin"
+            type="warning"
+            plain
+            class="btn-admin-nav"
+            @click="goToAdmin"
+          >
+            进入后台
           </el-button>
         </div>
       </div>
@@ -429,6 +454,22 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
 .btn-demo-nav:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 15px rgba(201, 169, 110, 0.35);
+}
+
+.btn-admin-nav {
+  border: 1.5px solid #E6A23C;
+  color: #E6A23C;
+  background: transparent;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.btn-admin-nav:hover {
+  background: rgba(230, 162, 60, 0.1);
+  color: #E6A23C;
 }
 
 /* ====== Hero ====== */

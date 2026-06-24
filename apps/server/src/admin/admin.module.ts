@@ -14,8 +14,18 @@ import { SmsController } from './sms/sms.controller';
 import { SmsService } from './sms/sms.service';
 import { AdminFamilyRelationController } from './family-relation/admin-family-relation.controller';
 import { AdminFamilyRelationService } from './family-relation/admin-family-relation.service';
+import { AdminImportController } from './import/admin-import.controller';
 import { PrismaService } from '@geneasphere/db';
 import { NotificationService } from '../common/notification.service';
+
+// v2.0 新增 Controller
+import { AdminAnnouncementController } from './announcement/admin-announcement.controller';
+import { AdminTrashController } from './trash/admin-trash.controller';
+import { AdminReportController } from './report/admin-report.controller';
+import { AdminMediaController } from './media/admin-media.controller';
+import { AdminStatisticsController } from './statistics/admin-statistics.controller';
+import { AdminToolboxUsageController } from './toolbox-usage/admin-toolbox-usage.controller';
+import { AdminFamilyAlbumController } from './family-album/admin-family-album.controller';
 
 @Module({
   imports: [],
@@ -31,6 +41,15 @@ import { NotificationService } from '../common/notification.service';
     OrdersController,
     SmsController,
     AdminFamilyRelationController,
+    AdminImportController,
+    // v2.0 新增 Controller
+    AdminAnnouncementController,
+    AdminTrashController,
+    AdminReportController,
+    AdminMediaController,
+    AdminStatisticsController,
+    AdminToolboxUsageController,
+    AdminFamilyAlbumController,
   ],
   providers: [AdminService, MergeService, SmsService, AdminFamilyRelationService, PrismaService, NotificationService],
   exports: [AdminService, MergeService, NotificationService],

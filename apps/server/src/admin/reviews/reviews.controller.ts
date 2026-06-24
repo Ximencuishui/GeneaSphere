@@ -193,6 +193,70 @@ export class ReviewsController {
   }
 
   /**
+   * 设置影像为聚落封面
+   * 需求来源: 寻根路家谱管理员后台需求文档 v1.1 - 4.3.1节"设为封面"功能
+   * 仅当照片被标记为"村寨风貌"或"祭祀活动"时可用
+   */
+  @Post('media/:id/set-cover')
+  @ApiOperation({ summary: 'Set media as clan cover image' })
+  async setMediaAsCover(
+    @Request() req,
+    @Param('id') reviewIdStr: string,
+  ) {
+    const userId = req.user.userId;
+    const reviewId = BigInt(reviewIdStr);
+
+    const review = await this.prisma.mediaReview.findUnique({
+      where: { id: reviewId },
+      include: { media: true },
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+
+    await this.adminService.requireAdmin(review.media.clan_id, userId);
+
+    // 检查 category 是否为"村寨风貌"或"祭祀活动"
+    const allowedCategories = ['村寨风貌', '祭祀活动'];
+    if (!allowedCategories.includes(review.media.category)) {
+      throw new BadRequestException(
+        '只有标记为"村寨风貌"或"祭祀活动"的影像才能设为封面'
+      );
+    }
+
+    // 更新 media_archive 的 is_cover 字段
+    // 先将同 category 的其他影像取消封面
+    await this.prisma.mediaArchive.updateMany({
+      where: {
+        clan_id: review.media.clan_id,
+        category: review.media.category,
+        is_cover: true,
+      },
+      data: {
+        is_cover: false,
+      },
+    });
+
+    // 设置当前影像为封面
+    await this.prisma.mediaArchive.update({
+      where: { id: review.media_id },
+      data: { is_cover: true },
+    });
+
+    await this.adminService.logAction({
+      clanId: review.media.clan_id,
+      userId,
+      action: 'SET_MEDIA_COVER',
+      targetType: 'MediaArchive',
+      targetId: review.media_id.toString(),
+      details: `设置为 ${review.media.category} 封面`,
+    });
+
+    return { message: '已设为聚落封面' };
+  }
+
+  /**
    * 批量通过影像审核
    */
   @Post('media/batch-approve')

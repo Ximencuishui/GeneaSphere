@@ -19,6 +19,12 @@ import {
   Expand,
   UserFilled,
   Menu,
+  DataLine,
+  Warning,
+  RefreshRight,
+  Postcard,
+  VideoCamera,
+  Calendar,
 } from '@element-plus/icons-vue'
 
 const iconMap: Record<string, any> = {
@@ -31,6 +37,12 @@ const iconMap: Record<string, any> = {
   Printer,
   Message,
   Document,
+  DataLine,
+  Warning,
+  RefreshRight,
+  Postcard,
+  VideoCamera,
+  Calendar,
 }
 
 const route = useRoute()
@@ -93,6 +105,7 @@ const menuItems = ref([
       { title: '信息修改审核', path: '/admin/invite/reviews' },
       { title: '家庭关系变更审核', path: '/admin/family-relation/reviews' },
       { title: '子女归属争议', path: '/admin/family-relation/disputes' },
+      { title: 'PDF 导入管理', path: '/admin/import' },
     ],
   },
   {
@@ -101,6 +114,7 @@ const menuItems = ref([
     children: [
       { title: '影像审核', path: '/admin/reviews/media' },
       { title: '生平审核', path: '/admin/reviews/bio' },
+      { title: '举报管理', path: '/admin/reports' },
     ],
   },
   {
@@ -119,11 +133,44 @@ const menuItems = ref([
     ],
   },
   {
+    title: '家族公告',
+    icon: 'Postcard',
+    children: [
+      { title: '公告管理', path: '/admin/announcements' },
+    ],
+  },
+  {
+    title: '数据管理',
+    icon: 'DataLine',
+    children: [
+      { title: '数据统计', path: '/admin/statistics' },
+      { title: '回收站', path: '/admin/trash' },
+      { title: '数据导出', path: '/admin/settings/export' },
+    ],
+  },
+  {
+    title: '影像管理',
+    icon: 'PictureFilled',
+    children: [
+      { title: '影像库', path: '/admin/media/library' },
+      { title: '相册管理', path: '/admin/media/albums' },
+    ],
+  },
+  {
+    title: '工具记录',
+    icon: 'RefreshRight',
+    children: [
+      { title: 'AI工具使用记录', path: '/admin/toolbox-usage' },
+      { title: '家庭图册', path: '/admin/family-albums' },
+    ],
+  },
+  {
     title: '系统设置',
     icon: 'Setting',
     children: [
       { title: '隐私配置', path: '/admin/settings/privacy' },
       { title: '字辈管理', path: '/admin/settings/xipai' },
+      { title: '家族信息', path: '/admin/settings/clan-info' },
       { title: '云存储', path: '/admin/settings/storage' },
     ],
   },
@@ -132,6 +179,30 @@ const menuItems = ref([
     icon: 'Printer',
     children: [
       { title: '订单管理', path: '/admin/orders' },
+    ],
+  },
+  {
+    title: '族谱生成',
+    icon: 'Document',
+    children: [
+      { title: '生成族谱', path: '/admin/genealogy/generate' },
+      { title: '历史版本', path: '/admin/genealogy/history' },
+    ],
+  },
+  {
+    title: '视频中心',
+    icon: 'VideoCamera',
+    children: [
+      { title: '迁徙历史视频', path: '/admin/video/migration' },
+      { title: '大事件视频', path: '/admin/video/event' },
+    ],
+  },
+  {
+    title: '事件管理',
+    icon: 'Calendar',
+    children: [
+      { title: '大事件列表', path: '/admin/family-events' },
+      { title: '迁徙管理', path: '/admin/migration' },
     ],
   },
   {

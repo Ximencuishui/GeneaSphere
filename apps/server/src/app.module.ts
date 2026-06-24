@@ -28,6 +28,10 @@ import { FamilyRelationModule } from './family-relation/family-relation.module';
 import { CosModule } from './cos/cos.module';
 import { MemoryModule } from './memory/memory.module';
 import { JobsModule } from './jobs/jobs.module';
+import { FamilyEventModule } from './family-event/family-event.module';
+import { GenealogyDocumentModule } from './genealogy-document/genealogy-document.module';
+import { ClanMigrationVideoModule } from './clan-migration-video/clan-migration-video.module';
+import { ClanEventVideoModule } from './clan-event-video/clan-event-video.module';
 
 @Module({
   imports: [
@@ -58,6 +62,10 @@ import { JobsModule } from './jobs/jobs.module';
     FamilyRelationModule,
     MemoryModule,
     JobsModule,
+    FamilyEventModule,
+    GenealogyDocumentModule,
+    ClanMigrationVideoModule,
+    ClanEventVideoModule,
   ],
   controllers: [AppController],
   providers: [
