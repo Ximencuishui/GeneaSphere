@@ -149,13 +149,16 @@
         </div>
 
         <!-- Close Button -->
-        <el-button
-          class="close-panel"
-          :icon="Close"
-          circle
-          size="large"
-          @click="closeDetail"
-        />
+        <div class="panel-header-actions">
+          <el-button
+            class="close-panel-btn"
+            :icon="Close"
+            circle
+            size="default"
+            @click="closeDetail"
+            title="关闭详情面板"
+          />
+        </div>
       </div>
     </transition>
   </div>
@@ -323,27 +326,28 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 20px;
-  background: rgba(255, 252, 248, 0.95);
-  border-bottom: 1px solid rgba(201, 169, 110, 0.2);
-  backdrop-filter: blur(8px);
+  background: rgba(255, 255, 255, 0.98);
+  border-bottom: 1px solid rgba(201, 169, 110, 0.25);
+  backdrop-filter: blur(12px);
   z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .breadcrumb-path {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #5D4037;
+  color: var(--color-text-secondary);
   font-size: 14px;
 }
 
 .breadcrumb-label {
   font-weight: 600;
-  color: #C9A96E;
+  color: var(--color-accent);
 }
 
 .breadcrumb-count {
-  color: #7F8C8D;
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -365,7 +369,7 @@ onMounted(() => {
 /* Detail Panel with Enhanced Styling */
 .detail-panel {
   width: 420px;
-  background: white;
+  background: var(--color-bg-primary);
   border-left: 2px solid rgba(201, 169, 110, 0.3);
   overflow-y: auto;
   position: relative;
@@ -476,7 +480,7 @@ onMounted(() => {
 /* Info Section */
 .person-info-section {
   padding: 24px;
-  border-bottom: 1px solid #EBEEF5;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .section-title {
@@ -485,12 +489,12 @@ onMounted(() => {
   gap: 8px;
   font-size: 16px;
   font-weight: 600;
-  color: #2C3E50;
+  color: var(--color-text-primary);
   margin: 0 0 16px 0;
 }
 
 .section-title .el-icon {
-  color: #C9A96E;
+  color: var(--color-accent);
 }
 
 .info-cards {
@@ -504,14 +508,14 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  background: #FAFAFA;
+  background: var(--color-bg-secondary);
   border-radius: 8px;
-  border: 1px solid #EBEEF5;
+  border: 1px solid var(--color-border);
   transition: all 0.2s ease;
 }
 
 .info-card:hover {
-  background: #F5F5F5;
+  background: var(--color-bg-tertiary);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
@@ -531,13 +535,13 @@ onMounted(() => {
 }
 
 .card-label {
-  color: #999;
+  color: var(--color-text-muted);
   font-size: 12px;
   margin-bottom: 4px;
 }
 
 .card-value {
-  color: #333;
+  color: var(--color-text-primary);
   font-size: 16px;
   font-weight: 500;
 }
@@ -545,7 +549,7 @@ onMounted(() => {
 /* Actions Section */
 .person-actions {
   padding: 24px;
-  border-bottom: 1px solid #EBEEF5;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .action-buttons {
@@ -615,20 +619,25 @@ onMounted(() => {
   opacity: 1;
 }
 
-/* Close Button */
-.close-panel {
+/* Panel Header Actions */
+.panel-header-actions {
   position: absolute;
   top: 16px;
-  left: -56px;
-  background: white;
-  border: 2px solid rgba(201, 169, 110, 0.3);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  right: 16px;
   z-index: 10;
 }
 
-.close-panel:hover {
-  background: #FAF8F5;
+.close-panel-btn {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(201, 169, 110, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.close-panel-btn:hover {
+  background: rgba(255, 255, 255, 1);
   border-color: #C9A96E;
+  transform: scale(1.05);
 }
 
 /* Responsive Design */
@@ -641,23 +650,77 @@ onMounted(() => {
 @media (max-width: 768px) {
   .tree-page {
     flex-direction: column;
+    height: 100vh;
+  }
+  
+  .tree-canvas-container {
+    flex: 1;
+    min-height: 40vh;
   }
   
   .detail-panel {
     width: 100%;
-    max-height: 50vh;
+    max-height: 60vh;
     border-left: none;
     border-top: 2px solid rgba(201, 169, 110, 0.3);
+    position: relative;
   }
   
-  .close-panel {
-    top: -20px;
-    left: 50%;
-    transform: translateX(-50%);
+  .panel-header-actions {
+    top: 12px;
+    right: 12px;
+  }
+  
+  .close-panel-btn {
+    width: 36px;
+    height: 36px;
   }
   
   .media-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .person-header {
+    padding: 32px 16px 24px;
+  }
+  
+  .person-avatar {
+    width: 70px !important;
+    height: 70px !important;
+    font-size: 28px !important;
+  }
+  
+  .person-name {
+    font-size: 20px;
+  }
+  
+  .person-info-section,
+  .person-actions,
+  .related-media {
+    padding: 16px;
+  }
+  
+  .action-buttons .el-button {
+    padding: 10px 16px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .media-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  
+  .person-meta {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .action-buttons .el-button {
+    padding: 8px 12px;
+    font-size: 12px;
   }
 }
 </style>

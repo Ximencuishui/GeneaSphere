@@ -37,6 +37,7 @@ const layoutDirection = ref<'TB' | 'LR'>('TB');
 const filterGender = ref<'all' | 'male' | 'female'>('all');
 const highlightNodeIds = ref<Set<string>>(new Set());
 const showOnlyWithPhotos = ref(false);
+const searchResultCount = ref(0);
 
 // ==================== View Mode Configuration ====================
 
@@ -174,7 +175,7 @@ const initGraph = (data: GenealogyNode) => {
     height,
     autoFit: 'view',
     autoResize: true,
-    behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
+    behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element', 'tooltip'],
     layout: {
       type: 'compact-box',
       direction: layoutDirection.value,
@@ -218,23 +219,29 @@ const initGraph = (data: GenealogyNode) => {
           return 1.5;
         },
         shadowColor: (d: any) => {
-          if (genealogyStore.selectedNode?.id === Number(d.id)) return 'rgba(201, 169, 110, 0.3)';
+          if (genealogyStore.selectedNode?.id === Number(d.id)) return 'rgba(201, 169, 110, 0.4)';
           if (d.data?.is_main_lineage) return 'rgba(201, 169, 110, 0.2)';
           return 'transparent';
         },
         shadowBlur: (d: any) => {
-          if (genealogyStore.selectedNode?.id === Number(d.id)) return 12;
+          if (genealogyStore.selectedNode?.id === Number(d.id)) return 16;
           if (d.data?.is_main_lineage) return 8;
           return 0;
         },
         shadowOffsetX: 0,
-        shadowOffsetY: 2,
+        shadowOffsetY: 4,
+        cursor: 'pointer',
+        opacity: (d: any) => {
+          if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
+            return 0.4;
+          }
+          return 1;
+        },
 
         // Avatar image
         iconSrc: (d: any) => {
           if (config.avatarSize === 0) return undefined;
           if (d.data?.thumbnail_url) return d.data.thumbnail_url;
-          // Generate initial avatar if no photo
           return generateAvatarSvg(
             d.label || d.data?.original?.full_name || '',
             d.data?.gender || 'male',
@@ -328,6 +335,50 @@ const initGraph = (data: GenealogyNode) => {
     }
   });
 
+  // Tooltip configuration using G6 v5 API
+  g6Graph.on('node:mouseenter', (e: any) => {
+    const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
+    if (nodeModel?.data?.original) {
+      const data = nodeModel.data;
+      const name = data.original.full_name || data.original.label || '未知';
+      const gender = data.gender === 'male' ? '男' : '女';
+      const birthYear = data.birth_year ? `出生: ${data.birth_year}` : '';
+      const deathYear = data.death_year ? `去世: ${data.death_year}` : '';
+      const status = data.is_living ? '在世' : '已故';
+      
+      const tooltipContent = `
+        <div style="padding: 8px 12px; min-width: 140px; background: rgba(255, 255, 255, 0.98); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid rgba(201, 169, 110, 0.2);">
+          <div style="font-weight: 600; color: #5D4037; margin-bottom: 4px;">${name}</div>
+          <div style="display: flex; gap: 8px; font-size: 12px; color: #7F8C8D;">
+            <span>${gender}</span>
+            <span>${status}</span>
+          </div>
+          ${birthYear && `<div style="font-size: 12px; color: #999; margin-top: 4px;">${birthYear} ${deathYear}</div>`}
+        </div>
+      `;
+      
+      const event = e.originalEvent as MouseEvent;
+      const tooltip = document.createElement('div');
+      tooltip.innerHTML = tooltipContent;
+      tooltip.style.position = 'fixed';
+      tooltip.style.left = `${event.clientX + 15}px`;
+      tooltip.style.top = `${event.clientY + 15}px`;
+      tooltip.style.zIndex = '1000';
+      tooltip.style.pointerEvents = 'none';
+      tooltip.id = 'g6-tooltip';
+      document.body.appendChild(tooltip);
+      
+      const removeTooltip = () => {
+        const el = document.getElementById('g6-tooltip');
+        if (el) el.remove();
+      };
+      
+      g6Graph.once('node:mouseleave', removeTooltip);
+      
+      document.addEventListener('click', removeTooltip, { once: true });
+    }
+  });
+
   g6Graph.setData(graphData);
   g6Graph.render();
   graph.value = g6Graph;
@@ -338,10 +389,13 @@ const initGraph = (data: GenealogyNode) => {
 const handleSearch = () => {
   if (!graph.value || !genealogyStore.treeData) return;
   highlightNodeIds.value.clear();
+  
   if (searchKeyword.value) {
+    let count = 0;
     const findAllMatches = (node: any) => {
       if (matchesSearch(node)) {
         highlightNodeIds.value.add(String(node.id));
+        count++;
       }
       if (node.children) {
         node.children.forEach(findAllMatches);
@@ -349,6 +403,25 @@ const handleSearch = () => {
     };
     const treeData = transformToG6Data(genealogyStore.treeData);
     findAllMatches(treeData);
+    searchResultCount.value = count;
+    
+    if (count > 0) {
+      ElMessage.info(`找到 ${count} 个匹配结果`);
+      const firstMatchId = highlightNodeIds.value.values().next().value;
+      if (firstMatchId) {
+        setTimeout(() => {
+          try {
+            graph.value.focusElement(firstMatchId, { duration: 500 });
+          } catch {
+            console.log('Focus element failed');
+          }
+        }, 300);
+      }
+    } else {
+      ElMessage.warning('未找到匹配结果');
+    }
+  } else {
+    searchResultCount.value = 0;
   }
   refreshGraph();
 };
@@ -466,26 +539,31 @@ defineExpose({
   <div class="genealogy-tree-container">
     <!-- Enhanced Warm-Toned Toolbar -->
     <div class="tree-toolbar">
-      <div class="toolbar-left">
+      <!-- Search Section -->
+      <div class="toolbar-section">
+        <div class="section-label">搜索</div>
         <div class="toolbar-search">
           <el-input
             v-model="searchKeyword"
-            placeholder="搜索姓名..."
+            :placeholder="searchResultCount > 0 ? `找到 ${searchResultCount} 个结果` : '搜索姓名...'"
             :prefix-icon="Search"
+            :suffix-icon="searchResultCount > 0 ? 'Check' : undefined"
             clearable
             @keyup.enter="handleSearch"
             @clear="clearSearch"
+            @input="handleSearch"
             size="default"
-            style="width: 160px"
+            style="width: 200px"
+            :class="{ 'has-search-result': searchResultCount > 0 }"
           />
-          <el-button type="primary" @click="handleSearch" :icon="Search" size="small">
-            搜索
-          </el-button>
         </div>
+      </div>
 
-        <el-divider direction="vertical" />
+      <el-divider direction="vertical" />
 
-        <!-- View Mode Switcher -->
+      <!-- View Mode Section -->
+      <div class="toolbar-section">
+        <div class="section-label">视图</div>
         <div class="view-mode-switcher">
           <el-button-group>
             <el-button
@@ -495,6 +573,7 @@ defineExpose({
               title="紧凑视图"
             >
               <el-icon><List /></el-icon>
+              <span class="btn-text">紧凑</span>
             </el-button>
             <el-button
               :type="genealogyStore.viewMode === 'detailed' ? 'primary' : 'default'"
@@ -503,6 +582,7 @@ defineExpose({
               title="详细视图"
             >
               <el-icon><Grid /></el-icon>
+              <span class="btn-text">详细</span>
             </el-button>
             <el-button
               :type="genealogyStore.viewMode === 'portrait' ? 'primary' : 'default'"
@@ -511,50 +591,61 @@ defineExpose({
               title="肖像视图"
             >
               <el-icon><User /></el-icon>
+              <span class="btn-text">肖像</span>
             </el-button>
           </el-button-group>
         </div>
       </div>
 
-      <div class="toolbar-center">
-        <el-select
-          v-model="filterGender"
-          placeholder="性别"
-          @change="handleGenderFilterChange"
-          size="small"
-          style="width: 100px"
-        >
-          <el-option label="全部" value="all" />
-          <el-option label="男" value="male">
-            <el-icon><Male /></el-icon>
-            <span> 男</span>
-          </el-option>
-          <el-option label="女" value="female">
-            <el-icon><Female /></el-icon>
-            <span> 女</span>
-          </el-option>
-        </el-select>
+      <el-divider direction="vertical" />
 
-        <el-checkbox
-          v-model="showOnlyWithPhotos"
-          @change="refreshGraph"
-          size="small"
-        >
-          仅显示有照片
-        </el-checkbox>
+      <!-- Filter Section -->
+      <div class="toolbar-section">
+        <div class="section-label">筛选</div>
+        <div class="filter-group">
+          <el-select
+            v-model="filterGender"
+            placeholder="全部"
+            @change="handleGenderFilterChange"
+            size="small"
+            style="width: 80px"
+          >
+            <el-option label="全部" value="all" />
+            <el-option label="男" value="male" />
+            <el-option label="女" value="female" />
+          </el-select>
 
+          <el-checkbox
+            v-model="showOnlyWithPhotos"
+            @change="refreshGraph"
+            size="small"
+          >
+            仅照片
+          </el-checkbox>
+        </div>
+      </div>
+
+      <el-divider direction="vertical" />
+
+      <!-- Layout Section -->
+      <div class="toolbar-section">
+        <div class="section-label">布局</div>
         <el-button
           @click="toggleLayout"
           :icon="layoutDirection === 'TB' ? Grid : Rank"
           size="small"
+          :type="layoutDirection === 'TB' ? 'primary' : 'default'"
           title="切换布局方向"
         >
           {{ layoutDirection === 'TB' ? '纵向' : '横向' }}
         </el-button>
       </div>
 
-      <div class="toolbar-right">
-        <el-button-group>
+      <div class="toolbar-spacer"></div>
+
+      <!-- Actions Section -->
+      <div class="toolbar-section actions-section">
+        <el-button-group class="zoom-controls">
           <el-button @click="zoomIn" size="small" title="放大">
             <el-icon><ZoomIn /></el-icon>
           </el-button>
@@ -573,6 +664,7 @@ defineExpose({
           :type="genealogyStore.mainLineage.length ? 'warning' : 'default'"
         >
           <el-icon><Connection /></el-icon>
+          <span class="btn-text">传承</span>
         </el-button>
 
         <el-button @click="refreshGraph" :icon="Refresh" size="small" title="刷新" />
@@ -631,29 +723,54 @@ defineExpose({
   z-index: 10;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
   background: rgba(255, 252, 248, 0.95);
   backdrop-filter: blur(12px);
-  padding: 10px 16px;
+  padding: 12px 16px;
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(93, 64, 55, 0.1);
   border: 1px solid rgba(201, 169, 110, 0.25);
 }
 
-.toolbar-left,
-.toolbar-center,
-.toolbar-right {
+.toolbar-section {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8D6E63;
+  min-width: 36px;
+  text-align: right;
+}
+
 .toolbar-search {
   display: flex;
   align-items: center;
-  gap: 6px;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.actions-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoom-controls {
+  background: rgba(201, 169, 110, 0.1);
+  border-radius: 8px;
 }
 
 .view-mode-switcher .el-button.is-primary {
@@ -664,6 +781,16 @@ defineExpose({
 .view-mode-switcher .el-button.is-primary:hover {
   background: #B8944E;
   border-color: #B8944E;
+}
+
+.btn-text {
+  display: inline-block;
+  font-size: 12px;
+}
+
+.has-search-result {
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
+  border-color: #4CAF50 !important;
 }
 
 .tree-stats {

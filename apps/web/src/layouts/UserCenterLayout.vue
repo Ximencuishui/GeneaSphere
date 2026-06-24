@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserCenterStore } from '@/stores/userCenter'
 import { useAuthStore } from '@/stores/auth'
+import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, Folder } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,24 +16,68 @@ const mobileSidebarVisible = ref(false)
 // 通知面板
 const notifyVisible = ref(false)
 
-const menuItems = [
-  { title: '个人资料', icon: 'User', path: '/user-center/profile' },
-  { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
-  { title: '我的验证', icon: 'CircleCheck', path: '/user-center/verify' },
-  { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
-  { title: '验证记录', icon: 'Tickets', path: '/user-center/verify/records' },
-  { title: '我的时光', icon: 'PictureFilled', path: '/user-center/timeline' },
-  { title: '我的工具箱', icon: 'Tools', path: '/user-center/toolbox' },
-  { title: '家庭图册', icon: 'Notebook', path: '/user-center/family-book' },
-  { title: '我的订单', icon: 'List', path: '/user-center/orders' },
-  { title: '我的小组', icon: 'ChatLineRound', path: '/user-center/groups' },
-  { title: '寻找小伙伴', icon: 'UserFilled', path: '/user-center/buddies' },
-  { title: '我的标注', icon: 'EditPen', path: '/user-center/annotations' },
-  { title: '我的记忆贡献', icon: 'Collection', path: '/user-center/memory-contributions' },
-  { title: '我的音像墙', icon: 'VideoCamera', path: '/user-center/videos' },
-  { title: '直系血缘视频', icon: 'VideoPlay', path: '/user-center/lineage-video' },
-  { title: '个人空间', icon: 'House', path: '/user-center/personal-space/albums' },
-  { title: '设置', icon: 'Setting', path: '/user-center/settings' },
+const iconMap: Record<string, any> = {
+  User,
+  OfficeBuilding,
+  CircleCheck,
+  Connection,
+  Tickets,
+  PictureFilled,
+  Tools,
+  Notebook,
+  List,
+  ChatLineRound,
+  UserFilled,
+  EditPen,
+  Collection,
+  VideoCamera,
+  VideoPlay,
+  House,
+  Setting,
+  Folder,
+}
+
+const menuGroups = [
+  {
+    name: '个人管理',
+    icon: 'User',
+    children: [
+      { title: '个人资料', icon: 'User', path: '/user-center/profile' },
+      { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
+      { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
+    ],
+  },
+  {
+    name: '验证管理',
+    icon: 'CircleCheck',
+    children: [
+      { title: '我的验证', icon: 'CircleCheck', path: '/user-center/verify' },
+      { title: '验证记录', icon: 'Tickets', path: '/user-center/verify/records' },
+    ],
+  },
+  {
+    name: '内容管理',
+    icon: 'Folder',
+    children: [
+      { title: '我的时光', icon: 'PictureFilled', path: '/user-center/timeline' },
+      { title: '家庭图册', icon: 'Notebook', path: '/user-center/family-book' },
+      { title: '我的标注', icon: 'EditPen', path: '/user-center/annotations' },
+      { title: '我的记忆贡献', icon: 'Collection', path: '/user-center/memory-contributions' },
+      { title: '我的音像墙', icon: 'VideoCamera', path: '/user-center/videos' },
+    ],
+  },
+  {
+    name: '工具中心',
+    icon: 'Tools',
+    children: [
+      { title: '我的工具箱', icon: 'Tools', path: '/user-center/toolbox' },
+      { title: '我的订单', icon: 'List', path: '/user-center/orders' },
+      { title: '我的小组', icon: 'ChatLineRound', path: '/user-center/groups' },
+      { title: '寻找小伙伴', icon: 'UserFilled', path: '/user-center/buddies' },
+      { title: '直系血缘视频', icon: 'VideoPlay', path: '/user-center/lineage-video' },
+      { title: '个人空间', icon: 'House', path: '/user-center/personal-space/albums' },
+    ],
+  },
 ]
 
 const activeMenu = computed(() => {
@@ -42,15 +87,22 @@ const activeMenu = computed(() => {
   }
   return route.path
 })
-const currentMenu = computed(
-  () => {
-    // 个人空间子页面匹配
-    if (route.path.startsWith('/user-center/personal-space')) {
-      return menuItems.find((m) => m.path === '/user-center/personal-space/albums') || menuItems[0]
-    }
-    return menuItems.find((m) => m.path === route.path) || menuItems[0]
-  },
-)
+
+const findMenuItem = (path: string) => {
+  for (const group of menuGroups) {
+    const item = group.children.find((m) => m.path === path)
+    if (item) return item
+  }
+  return null
+}
+
+const currentMenu = computed(() => {
+  // 个人空间子页面匹配
+  if (route.path.startsWith('/user-center/personal-space')) {
+    return findMenuItem('/user-center/personal-space/albums') || menuGroups[0].children[0]
+  }
+  return findMenuItem(route.path) || menuGroups[0].children[0]
+})
 
 const roleTagType = computed(() => {
   const role = userStore.profile?.primary_clan?.role
@@ -179,15 +231,26 @@ watch(
           :default-active="activeMenu"
           class="side-menu"
           @select="handleMenuSelect"
+          mode="vertical"
         >
-          <ElMenuItem
-            v-for="item in menuItems"
-            :key="item.path"
-            :index="item.path"
+          <ElSubMenu
+            v-for="group in menuGroups"
+            :key="group.name"
+            :index="group.name"
           >
-            <ElIcon><component :is="item.icon" /></ElIcon>
-            <span>{{ item.title }}</span>
-          </ElMenuItem>
+            <template #title>
+              <ElIcon><component :is="iconMap[group.icon]" /></ElIcon>
+              <span>{{ group.name }}</span>
+            </template>
+            <ElMenuItem
+              v-for="item in group.children"
+              :key="item.path"
+              :index="item.path"
+            >
+              <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
+              <span>{{ item.title }}</span>
+            </ElMenuItem>
+          </ElSubMenu>
         </ElMenu>
 
         <div v-if="userStore.isFamilyAdmin" class="admin-entry">
@@ -199,6 +262,20 @@ watch(
           >
             <ElIcon><Management /></ElIcon>
             <span>家族管理后台</span>
+          </ElButton>
+        </div>
+
+        <!-- 独立设置入口 -->
+        <div class="settings-entry">
+          <ElButton
+            text
+            style="width: 100%"
+            class="settings-btn"
+            :class="{ active: route.path === '/user-center/settings' }"
+            @click="handleMenuSelect('/user-center/settings')"
+          >
+            <ElIcon><Setting /></ElIcon>
+            <span>设置</span>
           </ElButton>
         </div>
       </aside>
@@ -242,15 +319,26 @@ watch(
             :default-active="activeMenu"
             class="side-menu"
             @select="handleMenuSelect"
+            mode="vertical"
           >
-            <ElMenuItem
-              v-for="item in menuItems"
-              :key="item.path"
-              :index="item.path"
+            <ElSubMenu
+              v-for="group in menuGroups"
+              :key="group.name"
+              :index="group.name"
             >
-              <ElIcon><component :is="item.icon" /></ElIcon>
-              <span>{{ item.title }}</span>
-            </ElMenuItem>
+              <template #title>
+                <ElIcon><component :is="iconMap[group.icon]" /></ElIcon>
+                <span>{{ group.name }}</span>
+              </template>
+              <ElMenuItem
+                v-for="item in group.children"
+                :key="item.path"
+                :index="item.path"
+              >
+                <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
+                <span>{{ item.title }}</span>
+              </ElMenuItem>
+            </ElSubMenu>
           </ElMenu>
           <div v-if="userStore.isFamilyAdmin" class="admin-entry">
             <ElButton
@@ -261,6 +349,20 @@ watch(
             >
               <ElIcon><Management /></ElIcon>
               <span>家族管理后台</span>
+            </ElButton>
+          </div>
+
+          <!-- 独立设置入口 -->
+          <div class="settings-entry">
+            <ElButton
+              text
+              style="width: 100%"
+              class="settings-btn"
+              :class="{ active: route.path === '/user-center/settings' }"
+              @click="handleMenuSelect('/user-center/settings')"
+            >
+              <ElIcon><Setting /></ElIcon>
+              <span>设置</span>
             </ElButton>
           </div>
         </aside>
@@ -475,11 +577,69 @@ watch(
 .side-menu {
   flex: 1;
   border-right: none;
+  overflow-y: auto;
+}
+
+.side-menu :deep(.el-sub-menu__title) {
+  font-weight: 600;
+  color: #5D4037;
+  background-color: rgba(201, 169, 110, 0.08);
+}
+
+.side-menu :deep(.el-sub-menu__title:hover) {
+  background-color: rgba(201, 169, 110, 0.15);
+}
+
+.side-menu :deep(.el-sub-menu.is-active .el-sub-menu__title) {
+  background-color: rgba(201, 169, 110, 0.15);
+  color: #5D4037;
+}
+
+.side-menu :deep(.el-menu-item) {
+  padding-left: 48px !important;
+}
+
+.side-menu :deep(.el-menu-item.is-active) {
+  background-color: rgba(201, 169, 110, 0.12);
+  color: #5D4037;
+}
+
+.side-menu :deep(.el-menu-item:hover) {
+  background-color: rgba(201, 169, 110, 0.08);
 }
 
 .admin-entry {
   padding: 16px 20px;
   border-top: 1px solid #f0f2f5;
+}
+
+.settings-entry {
+  padding: 12px 20px;
+  border-top: 1px solid #f0f2f5;
+  background-color: #fafafa;
+}
+
+.settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  color: #606266;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.settings-btn:hover {
+  background-color: rgba(201, 169, 110, 0.1);
+  color: #5D4037;
+}
+
+.settings-btn.active {
+  background-color: rgba(201, 169, 110, 0.15);
+  color: #5D4037;
+  font-weight: 500;
 }
 
 .main-area {
