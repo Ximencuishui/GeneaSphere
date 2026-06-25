@@ -1,10 +1,10 @@
-﻿import { Controller, Post, Get, Body, Param, Patch, Query } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Patch, Query } from '@nestjs/common';
 import { TreeService, TreeNode, ClanTreeResponse } from './tree.service';
 import { CreatePersonDto } from './dto/create-person.dto';
 import { MoveSubTreeDto } from './dto/move-subtree.dto';
 import { Person } from '@prisma/client';
 
-@Controller('tree')
+@Controller('api/tree')
 export class TreeController {
   constructor(private readonly treeService: TreeService) {}
 
