@@ -265,8 +265,10 @@ server {
     gzip_min_length 1000;
 
     # API 反向代理
+    # 注意：proxy_pass 末尾不要带 /，否则会剥离 /api/ 前缀，导致
+    # @Controller('api/xxx') 形式的接口全部 404。
     location /api/ {
-        proxy_pass http://127.0.0.1:${API_PORT}/;
+        proxy_pass http://127.0.0.1:${API_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -276,7 +278,7 @@ server {
 
     # 上传文件
     location /uploads/ {
-        proxy_pass http://127.0.0.1:${API_PORT}/;
+        proxy_pass http://127.0.0.1:${API_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }

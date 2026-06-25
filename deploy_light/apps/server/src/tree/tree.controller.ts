@@ -3,7 +3,14 @@ import { TreeService, TreeNode, ClanTreeResponse } from './tree.service';
 import { CreatePersonDto } from './dto/create-person.dto';
 import { MoveSubTreeDto } from './dto/move-subtree.dto';
 import { Person } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
+/**
+ * 族谱树 API
+ * - GET 端点（subtree、clan full）允许公开访问：族谱树本身是家族公开信息
+ * - 写操作（创建/移动人员）需要登录，由全局 JwtAuthGuard 拦截
+ */
+@Public()
 @Controller('api/tree')
 export class TreeController {
   constructor(private readonly treeService: TreeService) {}

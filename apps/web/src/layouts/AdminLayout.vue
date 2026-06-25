@@ -165,16 +165,6 @@ const menuItems = ref([
     ],
   },
   {
-    title: '系统设置',
-    icon: 'Setting',
-    children: [
-      { title: '隐私配置', path: '/admin/settings/privacy' },
-      { title: '字辈管理', path: '/admin/settings/xipai' },
-      { title: '家族信息', path: '/admin/settings/clan-info' },
-      { title: '云存储', path: '/admin/settings/storage' },
-    ],
-  },
-  {
     title: '印刷服务',
     icon: 'Printer',
     children: [
@@ -218,6 +208,16 @@ const menuItems = ref([
     icon: 'Document',
     children: [
       { title: '操作日志', path: '/admin/logs' },
+    ],
+  },
+  {
+    title: '系统设置',
+    icon: 'Setting',
+    children: [
+      { title: '隐私配置', path: '/admin/settings/privacy' },
+      { title: '字辈管理', path: '/admin/settings/xipai' },
+      { title: '家族信息', path: '/admin/settings/clan-info' },
+      { title: '云存储', path: '/admin/settings/storage' },
     ],
   },
 ])

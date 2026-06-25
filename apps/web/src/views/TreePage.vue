@@ -196,7 +196,9 @@ import type { MediaArchive } from '@/types';
 const route = useRoute();
 const genealogyStore = useGenealogyStore();
 const treeRef = ref();
-const showDetail = ref(true);
+// 详情面板默认收起：避免 420px 详情面板在小屏下挤压树画布；
+// 选节点时再展开（已由 watch 逻辑负责）
+const showDetail = ref(false);
 const relatedMedia = ref<MediaArchive[]>([]);
 
 const clanId = computed(() => route.params.clanId as string);

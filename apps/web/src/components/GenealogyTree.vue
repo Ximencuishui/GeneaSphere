@@ -2,11 +2,11 @@
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
 import { Graph, treeToGraphData } from '@antv/g6';
 import { ElMessage } from 'element-plus';
-import { 
-  ZoomIn, 
-  ZoomOut, 
-  ScaleToOriginal, 
-  Plus, 
+import {
+  ZoomIn,
+  ZoomOut,
+  ScaleToOriginal,
+  Plus,
   Loading,
   Search,
   Refresh,
@@ -16,7 +16,9 @@ import {
   Female,
   User,
   Connection,
-  List
+  List,
+  Warning,
+  CircleClose,
 } from '@element-plus/icons-vue';
 import { useGenealogyStore } from '@/stores/genealogy';
 import type { ViewMode } from '@/stores/genealogy';
@@ -32,12 +34,126 @@ const container = ref<HTMLDivElement | null>(null);
 const graph = ref<any>(null);
 const genealogyStore = useGenealogyStore();
 const loading = ref(false);
+/** 画布内错误占位状态：null 表示无错误 */
+const errorState = ref<{ code: number; message: string } | null>(null);
 const searchKeyword = ref('');
 const layoutDirection = ref<'TB' | 'LR'>('TB');
 const filterGender = ref<'all' | 'male' | 'female'>('all');
 const highlightNodeIds = ref<Set<string>>(new Set());
 const showOnlyWithPhotos = ref(false);
 const searchResultCount = ref(0);
+
+// ==================== Loading Stage Progress ====================
+/**
+ * 加载阶段：
+ * - fetch   ：向后端拉取家族数据（最重的一步，可能因为大族谱而耗时较长）
+ * - parse   ：将原始数据转换为 G6 节点格式
+ * - render  ：G6 创建图实例、设置布局、渲染节点与连线
+ * - finalize：自适应缩放 / 滚动归位 / 清理临时态
+ *
+ * 设计要点：
+ * 1. 每个阶段都有目标百分比，定时器以 30ms 步长平滑增长，给人「有进度」的感觉
+ * 2. 进入下一阶段时百分比会跳到该阶段起点附近，再平滑增长，避免视觉上「回退」
+ * 3. 完成后进度条快速到 100% 并延迟 220ms 关闭，给用户一个「完成」的视觉确认
+ * 4. 报错时进度条直接停在该阶段，由错误占位 UI 接管
+ */
+type LoadingStage = 'fetch' | 'parse' | 'render' | 'finalize';
+const loadingStage = ref<LoadingStage | null>(null);
+const loadingPercent = ref(0);
+/** 阶段对应百分比上限（含平滑缓冲），避免阶段切换时进度倒退 */
+const STAGE_TARGETS: Record<LoadingStage, number> = {
+  fetch: 32,
+  parse: 60,
+  render: 88,
+  finalize: 100,
+};
+/** 阶段起点：进入该阶段时进度条先跳到这里的最小值，再向上增长 */
+const STAGE_STARTS: Record<LoadingStage, number> = {
+  fetch: 0,
+  parse: 30,
+  render: 58,
+  finalize: 86,
+};
+let progressTimer: number | null = null;
+let hideTimer: number | null = null;
+
+const stageLabelMap: Record<LoadingStage, string> = {
+  fetch: '正在拉取家族数据…',
+  parse: '正在解析谱系结构…',
+  render: '正在渲染族谱树…',
+  finalize: '正在适配画布…',
+};
+const loadingMessage = computed(() =>
+  loadingStage.value ? stageLabelMap[loadingStage.value] : '正在加载族谱树…',
+);
+
+function clearProgressTimer() {
+  if (progressTimer !== null) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+
+function clearHideTimer() {
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+}
+
+/**
+ * 切换加载阶段，并平滑增长进度到该阶段目标值
+ * - 同阶段重复调用：忽略（避免重复启动定时器）
+ * - 跨阶段调用：先跳到该阶段起点附近，再平滑增长
+ */
+function setLoadingStage(stage: LoadingStage) {
+  if (loadingStage.value === stage) return;
+  loadingStage.value = stage;
+  const target = STAGE_TARGETS[stage];
+  const start = Math.max(STAGE_STARTS[stage], loadingPercent.value);
+  // 立刻把进度拉到阶段起点（不会回退），再开定时器增长到 target
+  if (loadingPercent.value < start) loadingPercent.value = start;
+  clearProgressTimer();
+  progressTimer = window.setInterval(() => {
+    if (loadingPercent.value >= target) {
+      clearProgressTimer();
+      return;
+    }
+    // 距离目标越远，步长越大；临近目标时放缓，给用户「接近完成」的视觉感
+    const remaining = target - loadingPercent.value;
+    const step = remaining > 20 ? 3 : remaining > 5 ? 1.5 : 0.6;
+    loadingPercent.value = Math.min(target, +(loadingPercent.value + step).toFixed(1));
+  }, 30);
+}
+
+/** 开始加载：清空进度，进入 fetch 阶段 */
+function startLoading() {
+  clearHideTimer();
+  loading.value = true;
+  loadingPercent.value = 0;
+  loadingStage.value = null;
+  setLoadingStage('fetch');
+}
+
+/** 加载成功：快速跑到 100%，再延迟关闭，让用户看到「完成」 */
+function finishLoading() {
+  clearProgressTimer();
+  loadingPercent.value = 100;
+  loadingStage.value = 'finalize';
+  clearHideTimer();
+  hideTimer = window.setTimeout(() => {
+    loading.value = false;
+    loadingStage.value = null;
+    loadingPercent.value = 0;
+  }, 240);
+}
+
+/** 加载失败：停在当前进度，由错误占位 UI 接管（保留 progressTimer 已停止） */
+function failLoading() {
+  clearProgressTimer();
+  clearHideTimer();
+  loading.value = false;
+}
 
 // ==================== View Mode Configuration ====================
 
@@ -73,24 +189,68 @@ const viewModeConfig = computed(() => ({
 
 // ==================== Data Fetching ====================
 
+/**
+ * 族谱树错误处理辅助
+ * - 401：未登录（族谱可公开，但有些家族可能要求登录；保留为可重试场景）
+ * - 403：无权限
+ * - 404：家族不存在
+ * - 5xx：服务器内部错误
+ */
+function describeError(status: number, fallback: string): string {
+  if (status === 401) return '登录已过期，请重新登录后再访问族谱';
+  if (status === 403) return '当前账号无权查看此族谱';
+  if (status === 404) return '未找到该家族，可能已被删除';
+  if (status >= 500) return '服务器开小差了，请稍后重试';
+  return fallback;
+}
+
 const fetchTreeData = async (rootId: string = '1') => {
-  loading.value = true;
+  // 拉取阶段：进入 fetch，progressTimer 会驱动 0→32% 平滑增长
+  startLoading();
+  errorState.value = null;
   try {
     if (props.clanId) {
       const response: any = await treeApi.getClanFullTree(props.clanId);
+      // API 完成：进入 parse 阶段，进度条会跳到 30 附近再平滑增长到 60%
+      setLoadingStage('parse');
       if (response?.rootNode) {
         genealogyStore.setMainLineage(response.mainLineage || []);
         genealogyStore.totalPersons = response.totalPersons || 0;
         return response.rootNode;
       }
     }
+    setLoadingStage('parse');
     const data = await treeApi.getSubTree(rootId);
     return data;
   } catch (error: any) {
-    ElMessage.error(error.message || '获取族谱树失败');
-    return null;
-  } finally {
-    loading.value = false;
+    // request 拦截器会同时弹出顶部 toast
+    const status: number = error?.status || error?.response?.status || 0;
+    const message: string = error?.message || String(error);
+    errorState.value = {
+      code: status || 500,
+      message: describeError(status, message),
+    };
+    // 报错：停止定时器，进度条冻结在当前位置，错误占位接管
+    failLoading();
+    // 不再吞错：抛出以便外层可观察
+    throw error;
+  }
+  // 注意：成功路径不在这里 finally 关闭 loading，因为后续还要经过 parse→render→finalize
+};
+
+/** 重试入口：清除错误态并重新拉取 */
+const retryLoad = async () => {
+  errorState.value = null;
+  const rootId = props.rootPersonId || '1';
+  try {
+    const data = await fetchTreeData(rootId);
+    if (data) {
+      const treeData = (data as any).data || data;
+      genealogyStore.setTreeData(treeData);
+      initGraph(treeData);
+    }
+  } catch {
+    // 错误已由 fetchTreeData 内设置到 errorState，无需再处理
   }
 };
 
@@ -165,6 +325,9 @@ const initGraph = (data: GenealogyNode) => {
   const width = container.value.offsetWidth;
   const height = container.value.offsetHeight;
   const config = viewModeConfig.value[genealogyStore.viewMode];
+
+  // 数据转换发生在 initGraph 之前的调用点（见 onMounted/retryLoad），这里直接进入 render 阶段
+  setLoadingStage('render');
 
   const treeData = transformToG6Data(data);
   const graphData = treeToGraphData(treeData);
@@ -382,6 +545,8 @@ const initGraph = (data: GenealogyNode) => {
   g6Graph.setData(graphData);
   g6Graph.render();
   graph.value = g6Graph;
+  // 渲染完成：进度条快速跑满到 100% 再延迟关闭
+  finishLoading();
 };
 
 // ==================== Search Handler ====================
@@ -510,15 +675,22 @@ watch(
 onMounted(async () => {
   await nextTick();
   const rootId = props.rootPersonId || '1';
-  const data = await fetchTreeData(rootId);
-  if (data) {
-    const treeData = data.data || data;
-    genealogyStore.setTreeData(treeData);
-    initGraph(treeData);
+  try {
+    const data = await fetchTreeData(rootId);
+    if (data) {
+      const treeData = (data as any).data || data;
+      genealogyStore.setTreeData(treeData);
+      initGraph(treeData);
+    }
+  } catch {
+    // 错误已在 fetchTreeData 中设置到 errorState，画布将展示错误占位
   }
 });
 
 onUnmounted(() => {
+  // 清理进度定时器，避免组件卸载后定时器还在跑
+  clearProgressTimer();
+  clearHideTimer();
   if (graph.value) {
     graph.value.destroy();
     graph.value = null;
@@ -693,16 +865,46 @@ defineExpose({
       </span>
     </div>
 
-    <!-- Loading -->
+    <!-- Loading with staged progress -->
     <div v-if="loading" class="tree-loading">
       <div class="loading-content">
-        <el-icon class="is-loading" :size="48"><Loading /></el-icon>
-        <p class="loading-text">正在加载族谱树...</p>
+        <div class="loading-icon-wrapper">
+          <el-icon class="is-loading" :size="44"><Loading /></el-icon>
+        </div>
+        <p class="loading-text">{{ loadingMessage }}</p>
+        <el-progress
+          :percentage="Math.floor(loadingPercent)"
+          :stroke-width="6"
+          :show-text="false"
+          :duration="0"
+          color="#C9A96E"
+          class="loading-progress"
+        />
+        <div class="loading-meta">
+          <span class="loading-percent">{{ Math.floor(loadingPercent) }}%</span>
+          <span class="loading-stage-hint" v-if="loadingStage">
+            {{ stageLabelMap[loadingStage] }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 错误占位：族谱树加载失败时显示，并提供重试入口 -->
+    <div v-else-if="errorState" class="tree-error-placeholder">
+      <div class="error-card">
+        <el-icon :size="56" color="#C9A96E"><Warning /></el-icon>
+        <h3 class="error-title">族谱树暂不可用</h3>
+        <p class="error-message">{{ errorState.message }}</p>
+        <p class="error-code" v-if="errorState.code">错误码：{{ errorState.code }}</p>
+        <div class="error-actions">
+          <el-button type="primary" :icon="Refresh" @click="retryLoad">重新加载</el-button>
+          <el-button :icon="User" @click="$router?.push?.('/login')" v-if="errorState.code === 401">重新登录</el-button>
+        </div>
       </div>
     </div>
 
     <!-- Graph Container -->
-    <div ref="container" class="genealogy-tree-canvas"></div>
+    <div ref="container" class="genealogy-tree-canvas" v-show="!loading && !errorState"></div>
   </div>
 </template>
 
@@ -836,7 +1038,7 @@ defineExpose({
   display: flex;
   justify-content: center;
   align-items: center;
-  background: rgba(250, 248, 245, 0.9);
+  background: rgba(250, 248, 245, 0.92);
   backdrop-filter: blur(4px);
   z-index: 20;
 }
@@ -845,14 +1047,127 @@ defineExpose({
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
+  padding: 32px 40px;
+  min-width: 320px;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid rgba(201, 169, 110, 0.25);
+  box-shadow: 0 8px 32px rgba(93, 64, 55, 0.12);
+}
+
+.loading-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(201, 169, 110, 0.08);
+  color: #C9A96E;
 }
 
 .loading-text {
   color: #5D4037;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   margin: 0;
+  letter-spacing: 0.5px;
+}
+
+.loading-progress {
+  width: 280px;
+  margin: 0;
+}
+
+/* Element Plus 进度条内部颜色统一为金色 */
+.loading-progress :deep(.el-progress-bar__inner) {
+  background: linear-gradient(90deg, #E8C887 0%, #C9A96E 100%);
+  transition: width 80ms linear;
+}
+
+.loading-progress :deep(.el-progress-bar__outer) {
+  background-color: rgba(201, 169, 110, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.loading-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 280px;
+  font-size: 12px;
+  color: #8D6E63;
+}
+
+.loading-percent {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-weight: 600;
+  color: #C9A96E;
+}
+
+.loading-stage-hint {
+  font-size: 11px;
+  color: #B0A18F;
+}
+
+/* 错误占位：族谱树加载失败时居中显示 */
+.tree-error-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(250, 248, 245, 0.95);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+
+.error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 48px;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid rgba(201, 169, 110, 0.3);
+  box-shadow: 0 8px 32px rgba(93, 64, 55, 0.12);
+  max-width: 420px;
+  text-align: center;
+}
+
+.error-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #5D4037;
+}
+
+.error-message {
+  margin: 0;
+  font-size: 14px;
+  color: #5D4037;
+  line-height: 1.6;
+}
+
+.error-code {
+  margin: 0;
+  font-size: 12px;
+  color: #8D6E63;
+  font-family: monospace;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .genealogy-tree-canvas {

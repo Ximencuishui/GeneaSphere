@@ -405,6 +405,31 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/DataExportPage.vue'),
         meta: { title: '数据导出', requiresAuth: true, requiresAdmin: true },
       },
+      // 邀请验证子模块
+      {
+        path: 'invite/qrcodes',
+        name: 'admin-invite-qrcodes',
+        component: () => import('@/views/admin/invite/QrcodeListPage.vue'),
+        meta: { title: '邀请二维码', requiresAuth: true, requiresAdmin: true },
+      },
+      {
+        path: 'invite/records',
+        name: 'admin-invite-records',
+        component: () => import('@/views/admin/invite/VerificationRecordsPage.vue'),
+        meta: { title: '验证记录', requiresAuth: true, requiresAdmin: true },
+      },
+      {
+        path: 'invite/records/:id',
+        name: 'admin-invite-record-detail',
+        component: () => import('@/views/admin/invite/VerificationRecordDetailPage.vue'),
+        meta: { title: '验证详情', requiresAuth: true, requiresAdmin: true },
+      },
+      {
+        path: 'invite/reviews',
+        name: 'admin-invite-reviews',
+        component: () => import('@/views/admin/invite/ModificationReviewPage.vue'),
+        meta: { title: '信息修改审核', requiresAuth: true, requiresAdmin: true },
+      },
     ],
   },
   // 用户中心路由
@@ -599,31 +624,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '我的记忆贡献', requiresAuth: true },
       },
     ],
-  },
-  // 管理员后台 - 邀请验证子模块
-  {
-    path: '/admin/invite/qrcodes',
-    name: 'admin-invite-qrcodes',
-    component: () => import('@/views/admin/invite/QrcodeListPage.vue'),
-    meta: { title: '邀请二维码', requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: '/admin/invite/records',
-    name: 'admin-invite-records',
-    component: () => import('@/views/admin/invite/VerificationRecordsPage.vue'),
-    meta: { title: '验证记录', requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: '/admin/invite/records/:id',
-    name: 'admin-invite-record-detail',
-    component: () => import('@/views/admin/invite/VerificationRecordDetailPage.vue'),
-    meta: { title: '验证详情', requiresAuth: true, requiresAdmin: true },
-  },
-  {
-    path: '/admin/invite/reviews',
-    name: 'admin-invite-reviews',
-    component: () => import('@/views/admin/invite/ModificationReviewPage.vue'),
-    meta: { title: '信息修改审核', requiresAuth: true, requiresAdmin: true },
   },
   // 地方记忆拼图路由
   {

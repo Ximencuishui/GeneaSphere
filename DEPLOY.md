@@ -142,15 +142,17 @@ server {
     root /opt/geneasphere/apps/web/dist;
     index index.html;
 
+    # ⚠ proxy_pass 末尾不要带 /，否则会剥离 /api/ 前缀，
+    # 导致 @Controller('api/xxx') 形式的接口全部 404。
     location /api/ {
-        proxy_pass http://127.0.0.1:3001/;
+        proxy_pass http://127.0.0.1:3001;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     location /uploads/ {
-        proxy_pass http://127.0.0.1:3001/;
+        proxy_pass http://127.0.0.1:3001;
     }
 
     location / {

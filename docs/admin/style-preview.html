@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>族谱排版风格 - 效果图预览</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #F5F7FA;
+    padding: 24px;
+    color: #303133;
+  }
+  h1 {
+    font-size: 22px;
+    margin-bottom: 8px;
+  }
+  .desc {
+    color: #909399;
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    max-width: 1400px;
+  }
+  .card {
+    background: #FAFBFC;
+    border: 2px solid #E4E7ED;
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+  .card.active {
+    border-color: #5D4037;
+    background: #FBF6EC;
+    box-shadow: 0 4px 16px rgba(93,64,55,.18);
+  }
+  .badge {
+    align-self: flex-start;
+    background: #67C23A;
+    color: #FFF;
+    border-radius: 10px;
+    padding: 2px 10px;
+    font-size: 11px;
+    margin-bottom: 8px;
+    display: inline-block;
+  }
+  .preview {
+    background: #FFF;
+    border-radius: 4px;
+    border: 1px solid #E4E7ED;
+    overflow: hidden;
+    aspect-ratio: 1 / 1;
+  }
+  .preview svg { width: 100%; height: 100%; display: block; }
+  .info { margin-top: 12px; }
+  .info-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .info-label { font-size: 16px; font-weight: 600; }
+  .info-sub {
+    font-size: 12px;
+    color: #909399;
+    background: #F0F2F5;
+    padding: 1px 8px;
+    border-radius: 10px;
+  }
+  .info-desc {
+    font-size: 12px;
+    color: #606266;
+    margin-top: 6px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+  <h1>族谱排版风格 · 三种风格横排并列效果图</h1>
+  <p class="desc">点击卡片可切换选中状态。SVG 矢量预览，点击生成后将以同样的版式渲染为 PDF。</p>
+
+  <div class="grid">
+    <!-- 传统悬挂式 -->
+    <div class="card active">
+      <span class="badge">✓ 已选中</span>
+      <div class="preview">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="2" width="196" height="196" fill="#FBF6EC" stroke="#8D6E63" stroke-width="2" />
+          <rect x="6" y="6" width="188" height="188" fill="none" stroke="#8D6E63" stroke-width="0.5" />
+          <rect x="80" y="20" width="40" height="22" fill="#FFF" stroke="#5D4037" stroke-width="1.5" rx="2" />
+          <text x="100" y="34" text-anchor="middle" font-size="9" fill="#5D4037" font-weight="bold">始祖</text>
+          <line x1="100" y1="42" x2="100" y2="52" stroke="#5D4037" stroke-width="1" />
+          <line x1="50" y1="52" x2="150" y2="52" stroke="#5D4037" stroke-width="1" />
+          <line x1="50" y1="52" x2="50" y2="62" stroke="#5D4037" stroke-width="1" />
+          <line x1="150" y1="52" x2="150" y2="62" stroke="#5D4037" stroke-width="1" />
+          <rect x="30" y="62" width="40" height="22" fill="#FFF" stroke="#5D4037" stroke-width="1.2" rx="2" />
+          <text x="50" y="76" text-anchor="middle" font-size="9" fill="#5D4037">二世</text>
+          <rect x="130" y="62" width="40" height="22" fill="#FFF" stroke="#5D4037" stroke-width="1.2" rx="2" />
+          <text x="150" y="76" text-anchor="middle" font-size="9" fill="#5D4037">二世</text>
+          <line x1="50" y1="84" x2="50" y2="94" stroke="#5D4037" stroke-width="1" />
+          <line x1="150" y1="84" x2="150" y2="94" stroke="#5D4037" stroke-width="1" />
+          <line x1="20" y1="94" x2="80" y2="94" stroke="#5D4037" stroke-width="1" />
+          <line x1="120" y1="94" x2="180" y2="94" stroke="#5D4037" stroke-width="1" />
+          <rect x="10" y="94" width="30" height="20" fill="#FFF" stroke="#5D4037" stroke-width="1" rx="2" />
+          <text x="25" y="107" text-anchor="middle" font-size="8" fill="#5D4037">三</text>
+          <rect x="45" y="94" width="30" height="20" fill="#FFF" stroke="#5D4037" stroke-width="1" rx="2" />
+          <text x="60" y="107" text-anchor="middle" font-size="8" fill="#5D4037">三</text>
+          <rect x="120" y="94" width="30" height="20" fill="#FFF" stroke="#5D4037" stroke-width="1" rx="2" />
+          <text x="135" y="107" text-anchor="middle" font-size="8" fill="#5D4037">三</text>
+          <rect x="155" y="94" width="30" height="20" fill="#FFF" stroke="#5D4037" stroke-width="1" rx="2" />
+          <text x="170" y="107" text-anchor="middle" font-size="8" fill="#5D4037">三</text>
+          <line x1="20" y1="130" x2="180" y2="130" stroke="#C9A96E" stroke-width="0.5" />
+          <text x="100" y="150" text-anchor="middle" font-size="10" fill="#8D6E63" font-weight="bold" letter-spacing="4">朱氏世系</text>
+          <text x="100" y="170" text-anchor="middle" font-size="7" fill="#A1887F">传承有序·源远流长</text>
+          <text x="100" y="185" text-anchor="middle" font-size="6" fill="#A1887F">—  二〇二六年  —</text>
+        </svg>
+      </div>
+      <div class="info">
+        <div class="info-title">
+          <span class="info-label">传统悬挂式</span>
+          <span class="info-sub">世系图 / 挂轴</span>
+        </div>
+        <div class="info-desc">适合大幅挂轴，显示父子、夫妻关系。古朴典雅、中轴对称。</div>
+      </div>
+    </div>
+
+    <!-- 现代图文混排 -->
+    <div class="card">
+      <span class="badge" style="background:#909399;">未选中</span>
+      <div class="preview">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <rect x="6" y="6" width="188" height="188" fill="#FFFFFF" stroke="#E4E7ED" stroke-width="1" />
+          <rect x="6" y="6" width="188" height="36" fill="#409EFF" />
+          <text x="100" y="22" text-anchor="middle" font-size="10" fill="#FFFFFF" font-weight="bold" letter-spacing="2">家族纪念册</text>
+          <text x="100" y="34" text-anchor="middle" font-size="6" fill="#C0D8F5">Family Album · 2026</text>
+          <rect x="14" y="50" width="84" height="60" fill="#F5F7FA" stroke="#E4E7ED" stroke-width="0.5" rx="2" />
+          <circle cx="34" cy="72" r="11" fill="#409EFF" opacity="0.85" />
+          <text x="34" y="76" text-anchor="middle" font-size="9" fill="#FFFFFF" font-weight="bold">张</text>
+          <text x="50" y="70" font-size="6" fill="#303133" font-weight="bold">张三</text>
+          <text x="50" y="78" font-size="4" fill="#909399">1892-1965</text>
+          <line x1="18" y1="86" x2="94" y2="86" stroke="#E4E7ED" stroke-width="0.5" />
+          <text x="18" y="95" font-size="4" fill="#606266">字辈：明德</text>
+          <text x="18" y="103" font-size="4" fill="#909399">配李氏·子二</text>
+          <rect x="104" y="50" width="84" height="60" fill="#F5F7FA" stroke="#E4E7ED" stroke-width="0.5" rx="2" />
+          <circle cx="124" cy="72" r="11" fill="#67C23A" opacity="0.85" />
+          <text x="124" y="76" text-anchor="middle" font-size="9" fill="#FFFFFF" font-weight="bold">李</text>
+          <text x="140" y="70" font-size="6" fill="#303133" font-weight="bold">李四</text>
+          <text x="140" y="78" font-size="4" fill="#909399">1895-1972</text>
+          <line x1="108" y1="86" x2="184" y2="86" stroke="#E4E7ED" stroke-width="0.5" />
+          <text x="108" y="95" font-size="4" fill="#606266">字辈：明德</text>
+          <text x="108" y="103" font-size="4" fill="#909399">配王氏·子一</text>
+          <rect x="14" y="118" width="84" height="60" fill="#F5F7FA" stroke="#E4E7ED" stroke-width="0.5" rx="2" />
+          <circle cx="34" cy="140" r="11" fill="#E6A23C" opacity="0.85" />
+          <text x="34" y="144" text-anchor="middle" font-size="9" fill="#FFFFFF" font-weight="bold">王</text>
+          <text x="50" y="138" font-size="6" fill="#303133" font-weight="bold">王五</text>
+          <text x="50" y="146" font-size="4" fill="#909399">1920-1998</text>
+          <line x1="18" y1="154" x2="94" y2="154" stroke="#E4E7ED" stroke-width="0.5" />
+          <text x="18" y="163" font-size="4" fill="#606266">字辈：世昌</text>
+          <text x="18" y="171" font-size="4" fill="#909399">配赵氏·子三</text>
+          <rect x="104" y="118" width="84" height="60" fill="#F5F7FA" stroke="#E4E7ED" stroke-width="0.5" rx="2" />
+          <circle cx="124" cy="140" r="11" fill="#F56C6C" opacity="0.85" />
+          <text x="124" y="144" text-anchor="middle" font-size="9" fill="#FFFFFF" font-weight="bold">赵</text>
+          <text x="140" y="138" font-size="6" fill="#303133" font-weight="bold">赵六</text>
+          <text x="140" y="146" font-size="4" fill="#909399">1923-2010</text>
+          <line x1="108" y1="154" x2="184" y2="154" stroke="#E4E7ED" stroke-width="0.5" />
+          <text x="108" y="163" font-size="4" fill="#606266">字辈：世昌</text>
+          <text x="108" y="171" font-size="4" fill="#909399">配孙氏·子二</text>
+          <text x="100" y="190" text-anchor="middle" font-size="5" fill="#909399">— 第 1 页 —</text>
+        </svg>
+      </div>
+      <div class="info">
+        <div class="info-title">
+          <span class="info-label">现代图文混排</span>
+          <span class="info-sub">A4 册子</span>
+        </div>
+        <div class="info-desc">照片+文字的现代纪念册格式，适合作为家族纪念品。</div>
+      </div>
+    </div>
+
+    <!-- 简约列表式 -->
+    <div class="card">
+      <span class="badge" style="background:#909399;">未选中</span>
+      <div class="preview">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <rect x="10" y="10" width="180" height="180" fill="#FFFFFF" stroke="#303133" stroke-width="0.8" />
+          <rect x="10" y="10" width="180" height="22" fill="#303133" />
+          <text x="100" y="25" text-anchor="middle" font-size="9" fill="#FFFFFF" font-weight="bold" letter-spacing="2">成员清单</text>
+          <rect x="10" y="32" width="180" height="14" fill="#F0F2F5" />
+          <line x1="10" y1="32" x2="190" y2="32" stroke="#303133" stroke-width="0.5" />
+          <line x1="10" y1="46" x2="190" y2="46" stroke="#303133" stroke-width="0.5" />
+          <text x="24" y="42" font-size="6" fill="#303133" font-weight="bold">序号</text>
+          <text x="60" y="42" font-size="6" fill="#303133" font-weight="bold">姓名</text>
+          <text x="100" y="42" font-size="6" fill="#303133" font-weight="bold">世代</text>
+          <text x="135" y="42" font-size="6" fill="#303133" font-weight="bold">生年</text>
+          <text x="170" y="42" font-size="6" fill="#303133" font-weight="bold">卒年</text>
+          <line x1="40" y1="32" x2="40" y2="186" stroke="#E4E7ED" stroke-width="0.3" />
+          <line x1="80" y1="32" x2="80" y2="186" stroke="#E4E7ED" stroke-width="0.3" />
+          <line x1="120" y1="32" x2="120" y2="186" stroke="#E4E7ED" stroke-width="0.3" />
+          <line x1="150" y1="32" x2="150" y2="186" stroke="#E4E7ED" stroke-width="0.3" />
+          <g>
+            <line x1="10" y1="60" x2="190" y2="60" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="56" font-size="5.5" fill="#606266">1</text>
+            <text x="48" y="56" font-size="5.5" fill="#303133">始祖公</text>
+            <text x="100" y="56" font-size="5.5" fill="#606266" text-anchor="middle">一</text>
+            <text x="135" y="56" font-size="5.5" fill="#606266" text-anchor="middle">1860</text>
+            <text x="170" y="56" font-size="5.5" fill="#606266" text-anchor="middle">1928</text>
+            <rect x="10" y="60" width="180" height="14" fill="#FAFBFC" />
+            <line x1="10" y1="74" x2="190" y2="74" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="70" font-size="5.5" fill="#606266">2</text>
+            <text x="48" y="70" font-size="5.5" fill="#303133">张大</text>
+            <text x="100" y="70" font-size="5.5" fill="#606266" text-anchor="middle">二</text>
+            <text x="135" y="70" font-size="5.5" fill="#606266" text-anchor="middle">1882</text>
+            <text x="170" y="70" font-size="5.5" fill="#606266" text-anchor="middle">1955</text>
+            <line x1="10" y1="88" x2="190" y2="88" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="84" font-size="5.5" fill="#606266">3</text>
+            <text x="48" y="84" font-size="5.5" fill="#303133">张二</text>
+            <text x="100" y="84" font-size="5.5" fill="#606266" text-anchor="middle">二</text>
+            <text x="135" y="84" font-size="5.5" fill="#606266" text-anchor="middle">1885</text>
+            <text x="170" y="84" font-size="5.5" fill="#606266" text-anchor="middle">1960</text>
+            <rect x="10" y="88" width="180" height="14" fill="#FAFBFC" />
+            <line x1="10" y1="102" x2="190" y2="102" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="98" font-size="5.5" fill="#606266">4</text>
+            <text x="48" y="98" font-size="5.5" fill="#303133">张明</text>
+            <text x="100" y="98" font-size="5.5" fill="#606266" text-anchor="middle">三</text>
+            <text x="135" y="98" font-size="5.5" fill="#606266" text-anchor="middle">1908</text>
+            <text x="170" y="98" font-size="5.5" fill="#606266" text-anchor="middle">1982</text>
+            <line x1="10" y1="116" x2="190" y2="116" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="112" font-size="5.5" fill="#606266">5</text>
+            <text x="48" y="112" font-size="5.5" fill="#303133">张德</text>
+            <text x="100" y="112" font-size="5.5" fill="#606266" text-anchor="middle">三</text>
+            <text x="135" y="112" font-size="5.5" fill="#606266" text-anchor="middle">1912</text>
+            <text x="170" y="112" font-size="5.5" fill="#606266" text-anchor="middle">1990</text>
+            <rect x="10" y="116" width="180" height="14" fill="#FAFBFC" />
+            <line x1="10" y1="130" x2="190" y2="130" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="126" font-size="5.5" fill="#606266">6</text>
+            <text x="48" y="126" font-size="5.5" fill="#303133">张昌</text>
+            <text x="100" y="126" font-size="5.5" fill="#606266" text-anchor="middle">四</text>
+            <text x="135" y="126" font-size="5.5" fill="#606266" text-anchor="middle">1935</text>
+            <text x="170" y="126" font-size="5.5" fill="#606266" text-anchor="middle">2008</text>
+            <line x1="10" y1="144" x2="190" y2="144" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="140" font-size="5.5" fill="#606266">7</text>
+            <text x="48" y="140" font-size="5.5" fill="#303133">张盛</text>
+            <text x="100" y="140" font-size="5.5" fill="#606266" text-anchor="middle">四</text>
+            <text x="135" y="140" font-size="5.5" fill="#606266" text-anchor="middle">1938</text>
+            <text x="170" y="140" font-size="5.5" fill="#606266" text-anchor="middle">2015</text>
+            <rect x="10" y="144" width="180" height="14" fill="#FAFBFC" />
+            <line x1="10" y1="158" x2="190" y2="158" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="154" font-size="5.5" fill="#606266">8</text>
+            <text x="48" y="154" font-size="5.5" fill="#303133">张华</text>
+            <text x="100" y="154" font-size="5.5" fill="#606266" text-anchor="middle">五</text>
+            <text x="135" y="154" font-size="5.5" fill="#606266" text-anchor="middle">1965</text>
+            <text x="170" y="154" font-size="5.5" fill="#606266" text-anchor="middle">—</text>
+            <line x1="10" y1="172" x2="190" y2="172" stroke="#E4E7ED" stroke-width="0.3" />
+            <text x="24" y="168" font-size="5.5" fill="#606266">9</text>
+            <text x="48" y="168" font-size="5.5" fill="#303133">张辉</text>
+            <text x="100" y="168" font-size="5.5" fill="#606266" text-anchor="middle">五</text>
+            <text x="135" y="168" font-size="5.5" fill="#606266" text-anchor="middle">1968</text>
+            <text x="170" y="168" font-size="5.5" fill="#606266" text-anchor="middle">—</text>
+            <rect x="10" y="172" width="180" height="14" fill="#FAFBFC" />
+            <text x="24" y="182" font-size="5.5" fill="#606266">10</text>
+            <text x="48" y="182" font-size="5.5" fill="#303133">张小</text>
+            <text x="100" y="182" font-size="5.5" fill="#606266" text-anchor="middle">五</text>
+            <text x="135" y="182" font-size="5.5" fill="#606266" text-anchor="middle">1972</text>
+            <text x="170" y="182" font-size="5.5" fill="#606266" text-anchor="middle">—</text>
+          </g>
+        </svg>
+      </div>
+      <div class="info">
+        <div class="info-title">
+          <span class="info-label">简约列表式</span>
+          <span class="info-sub">表格清单</span>
+        </div>
+        <div class="info-desc">快速查看所有成员的表格清单，信息密集、便于检索。</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

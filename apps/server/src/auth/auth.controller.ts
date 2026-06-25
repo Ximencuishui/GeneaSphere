@@ -4,7 +4,7 @@ import { SmsService } from './sms.service';
 import { RegisterDto, LoginDto, SendSmsCodeDto } from './dto/auth.dto';
 import { Public } from './public.decorator';
 
-@Controller('auth')
+@Controller('api/auth')
 export class AuthController {
   constructor(
     private authService: AuthService,

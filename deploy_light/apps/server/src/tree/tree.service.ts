@@ -1,12 +1,12 @@
-import { Injectable } from '@nestjs/common';
-import { Prisma, PrismaClient, Person, Gender } from '@prisma/client';
+import { Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Prisma, PrismaService, Person, Gender } from '@geneasphere/db';
 
 export interface TreeNode {
   id: string;
   name: string;
   gender: string;
-  birth_date?: Date;
-  death_date?: Date;
+  birth_date?: Date | string;
+  death_date?: Date | string;
   is_living: boolean;
   children?: TreeNode[];
   marriages_history?: any[];
@@ -23,7 +23,8 @@ export interface ClanTreeResponse {
 
 @Injectable()
 export class TreeService {
-  constructor(private readonly prisma: PrismaClient = new PrismaClient()) {}
+  constructor(private readonly prisma: PrismaService) {}
+
   async createPerson(
     data: {
       clan_id: bigint;
@@ -79,141 +80,163 @@ export class TreeService {
   }
 
   async getSubTree(rootPersonId: bigint, includeHistoricalMarriages = false): Promise<TreeNode> {
-    const descendants = await this.prisma.personAncestry.findMany({
+    const ancestries = await this.prisma.personAncestry.findMany({
       where: { ancestor_id: rootPersonId },
-      include: {
-        descendant: true,
-      },
+      include: { descendant: true },
       orderBy: { depth: 'asc' },
     });
 
-    if (descendants.length === 0) {
-      const person = await this.prisma.person.findUnique({
-        where: { id: rootPersonId },
-      });
+    if (ancestries.length === 0) {
+      const person = await this.prisma.person.findUnique({ where: { id: rootPersonId } });
       if (!person) {
-        throw new Error(`Person with id ${rootPersonId} not found`);
+        throw new NotFoundException(`Person with id ${rootPersonId} not found`);
       }
-      return await this.toTreeNode(person);
+      const avatar = await this.findPersonAvatar(person.id);
+      return this.toTreeNode(person, avatar);
+    }
+
+    const personIds: bigint[] = [];
+    const seenIds = new Set<string>();
+    for (const record of ancestries) {
+      const idStr = record.descendant_id.toString();
+      if (seenIds.has(idStr)) continue;
+      seenIds.add(idStr);
+      personIds.push(record.descendant_id);
+    }
+
+    const avatarMap = await this.batchFindPersonAvatars(personIds);
+
+    const directRelations = await this.prisma.personAncestry.findMany({
+      where: {
+        ancestor_id: rootPersonId,
+        depth: 1,
+      },
+      select: { ancestor_id: true, descendant_id: true },
+    });
+    const childMap = new Map<string, string[]>();
+    for (const rel of directRelations) {
+      const parentKey = rel.ancestor_id.toString();
+      if (!childMap.has(parentKey)) childMap.set(parentKey, []);
+      childMap.get(parentKey)!.push(rel.descendant_id.toString());
     }
 
     const nodeMap = new Map<string, TreeNode>();
-    const childMap = new Map<string, string[]>();
-
-    for (const record of descendants) {
-      const person = record.descendant;
-      const node = await this.toTreeNode(person);
-      nodeMap.set(person.id.toString(), node);
-
-      if (record.depth > 0) {
-        const directParent = await this.getDirectParent(record.descendant_id);
-        if (directParent) {
-          const parentIdStr = directParent.toString();
-          if (!childMap.has(parentIdStr)) {
-            childMap.set(parentIdStr, []);
-          }
-          childMap.get(parentIdStr)!.push(record.descendant_id.toString());
-        }
-      }
+    for (const record of ancestries) {
+      const idStr = record.descendant_id.toString();
+      if (nodeMap.has(idStr)) continue;
+      const avatar = avatarMap.get(idStr) || { has_photo: false };
+      nodeMap.set(idStr, this.toTreeNode(record.descendant, avatar));
     }
 
     for (const [parentId, childIds] of childMap) {
       const parentNode = nodeMap.get(parentId);
-      if (parentNode) {
-        const uniqueChildIds = [...new Set(childIds)];
-        parentNode.children = uniqueChildIds
-          .map((id) => nodeMap.get(id))
-          .filter((node): node is TreeNode => node !== undefined);
-      }
+      if (!parentNode) continue;
+      const uniqueChildIds = [...new Set(childIds)];
+      parentNode.children = uniqueChildIds
+        .map((id) => nodeMap.get(id))
+        .filter((n): n is TreeNode => n !== undefined);
     }
 
-    const rootNode = nodeMap.get(rootPersonId.toString());
+    let rootNode = nodeMap.get(rootPersonId.toString());
     if (!rootNode) {
-      throw new Error(`Root person with id ${rootPersonId} not found`);
+      // 兼容闭包表数据不完整（如种子脚本未写入 self-record）的情况：
+      // 退化为直接查 person 表补一个根节点，并将其与已有 descendants 拼成子树
+      const fallbackPerson = await this.prisma.person.findUnique({ where: { id: rootPersonId } });
+      if (!fallbackPerson) {
+        throw new NotFoundException(`Root person with id ${rootPersonId} not found`);
+      }
+      const fallbackAvatar = await this.findPersonAvatar(fallbackPerson.id);
+      rootNode = this.toTreeNode(fallbackPerson, fallbackAvatar);
+      nodeMap.set(rootNode.id, rootNode);
+      const directChildIds = childMap.get(rootNode.id) || [];
+      rootNode.children = directChildIds
+        .map((id) => nodeMap.get(id))
+        .filter((n): n is TreeNode => n !== undefined);
+      console.warn(
+        `[TreeService] getSubTree: missing self-record for ancestor ${rootPersonId}; used person.findUnique fallback. Please run the self-record fix script to repair the closure table.`,
+      );
     }
 
-    // 如果需要历史婚姻信息，附加到每个节点
     if (includeHistoricalMarriages) {
-      for (const [, node] of nodeMap) {
-        const marriages = await this.prisma.marriageHistory.findMany({
-          where: { person_id: BigInt(node.id) },
-          include: { spouse: { select: { id: true, full_name: true } } },
-          orderBy: { start_date: 'desc' },
-        });
-        node.marriages_history = marriages.map((m) => ({
+      const marriages = await this.prisma.marriageHistory.findMany({
+        where: { person_id: { in: personIds } },
+        include: { spouse: { select: { id: true, full_name: true } } },
+        orderBy: { start_date: 'desc' },
+      });
+      const marriageMap = new Map<string, any[]>();
+      for (const m of marriages) {
+        const key = m.person_id.toString();
+        if (!marriageMap.has(key)) marriageMap.set(key, []);
+        marriageMap.get(key)!.push({
           spouse_name: m.spouse.full_name,
           marriage_type: m.marriage_type,
           is_current: m.is_current,
           start_date: m.start_date,
           end_date: m.end_date,
           end_reason: m.end_reason,
-        }));
+        });
+      }
+      for (const [, node] of nodeMap) {
+        node.marriages_history = marriageMap.get(node.id) || [];
       }
     }
 
     return rootNode;
   }
 
-  /**
-   * Get full clan tree data with avatar info and main lineage path
-   */
   async getClanFullTree(clanId: bigint, userId?: string): Promise<ClanTreeResponse> {
-    // Find the root person(s) of this clan
     const rootPerson = await this.findClanRootPerson(clanId);
     if (!rootPerson) {
-      throw new Error(`No root person found for clan ${clanId}`);
+      throw new NotFoundException(`No root person found for clan ${clanId}`);
     }
 
-    // Get subtree from root
     const rootNode = await this.getSubTree(rootPerson.id);
 
-    // Find main lineage: from root to the user's linked person
     let mainLineage: string[] = [];
     if (userId) {
       mainLineage = await this.findMainLineagePath(clanId, rootPerson.id, userId);
     }
 
-    // Count total persons
     const totalPersons = await this.prisma.person.count({
       where: { clan_id: clanId },
     });
 
     return {
-      rootNode,
+      rootNode: this.serializeBigInt(rootNode),
       mainLineage,
       totalPersons,
     };
   }
 
-  /**
-   * Find the clan root person (the one with no parents, depth 0 self-reference)
-   */
   private async findClanRootPerson(clanId: bigint): Promise<Person | null> {
     const persons = await this.prisma.person.findMany({
       where: { clan_id: clanId },
       orderBy: { id: 'asc' },
     });
+    if (persons.length === 0) return null;
+
+    const directDescendantIds = await this.prisma.personAncestry.findMany({
+      where: {
+        depth: 1,
+        descendant_id: { in: persons.map((p) => p.id) },
+      },
+      select: { descendant_id: true },
+    });
+    const hasParentSet = new Set(directDescendantIds.map((d) => d.descendant_id.toString()));
 
     for (const person of persons) {
-      const hasParent = await this.prisma.personAncestry.findFirst({
-        where: {
-          descendant_id: person.id,
-          depth: 1,
-        },
-      });
-      if (!hasParent) {
+      if (!hasParentSet.has(person.id.toString())) {
         return person;
       }
     }
-
-    return persons.length > 0 ? persons[0] : null;
+    return persons[0];
   }
 
-  /**
-   * Find the main lineage path from the clan root to the user-linked person
-   */
-  private async findMainLineagePath(clanId: bigint, rootPersonId: bigint, userId: string): Promise<string[]> {
-    // Find the person linked to this user within this clan
+  private async findMainLineagePath(
+    clanId: bigint,
+    rootPersonId: bigint,
+    userId: string,
+  ): Promise<string[]> {
     const userLink = await this.prisma.personUserLink.findFirst({
       where: {
         user_id: userId,
@@ -223,81 +246,81 @@ export class TreeService {
     });
 
     if (!userLink) {
-      // Fallback: use the last descendant in the root's ancestry tree
       const lastDescendant = await this.prisma.personAncestry.findFirst({
         where: { ancestor_id: rootPersonId },
         orderBy: { depth: 'desc' },
         select: { descendant_id: true },
       });
       if (!lastDescendant) return [rootPersonId.toString()];
-
-      // Trace back from the last descendant to root
       return this.buildLineagePath(lastDescendant.descendant_id, rootPersonId);
     }
 
-    // Build path from user's linked person up to root
     return this.buildLineagePath(userLink.person.id, rootPersonId);
   }
 
-  /**
-   * Build a lineage path from a person up to a specific ancestor
-   */
-  private async buildLineagePath(fromPersonId: bigint, toAncestorId: bigint): Promise<string[]> {
+  private async buildLineagePath(
+    fromPersonId: bigint,
+    toAncestorId: bigint,
+  ): Promise<string[]> {
     const path: string[] = [];
-    let currentId = fromPersonId;
-
-    // Add the starting person
+    let currentId: bigint = fromPersonId;
     path.push(currentId.toString());
-
-    // Maximum iterations to prevent infinite loops
     let safety = 100;
 
     while (currentId !== toAncestorId && safety > 0) {
       safety--;
-
       const directParent = await this.getDirectParent(currentId);
       if (!directParent) break;
-
       path.unshift(directParent.toString());
       currentId = directParent;
     }
-
     return path;
   }
 
-  /**
-   * Find avatar URL for a person via MediaPersonLink
-   */
-  private async findPersonAvatar(personId: bigint): Promise<{ avatar_url?: string; thumbnail_url?: string; has_photo: boolean }> {
+  private async batchFindPersonAvatars(
+    personIds: bigint[],
+  ): Promise<Map<string, { avatar_url?: string; thumbnail_url?: string; has_photo: boolean }>> {
+    const map = new Map<string, { avatar_url?: string; thumbnail_url?: string; has_photo: boolean }>();
+    if (personIds.length === 0) return map;
+
     try {
-      const mediaLink = await this.prisma.mediaPersonLink.findFirst({
-        where: { person_id: personId },
-        include: { media: { select: { file_url: true } } },
+      const links = await this.prisma.mediaPersonLink.findMany({
+        where: { person_id: { in: personIds } },
+        include: { media: { select: { file_url: true, created_at: true } } },
         orderBy: { media: { created_at: 'desc' } },
       });
 
-      if (mediaLink) {
-        // Build thumbnail URL from original file URL
-        const fileUrl = mediaLink.media.file_url;
-        const thumbnailUrl = fileUrl.replace('/media/', '/media/thumbnails/');
-        // Extract filename and try to construct thumbnail path
+      const perPersonFirst = new Map<string, (typeof links)[number]>();
+      for (const link of links) {
+        const key = link.person_id.toString();
+        if (!perPersonFirst.has(key)) {
+          perPersonFirst.set(key, link);
+        }
+      }
+      for (const [personIdStr, link] of perPersonFirst) {
+        const fileUrl = link.media.file_url;
         const parts = fileUrl.split('/');
         const filename = parts[parts.length - 1];
         const extIndex = filename.lastIndexOf('.');
         const basename = extIndex > -1 ? filename.substring(0, extIndex) : filename;
         const ext = extIndex > -1 ? filename.substring(extIndex) : '.jpg';
-
-        return {
+        map.set(personIdStr, {
           avatar_url: fileUrl,
           thumbnail_url: `/media/thumbnails/${basename}_80w${ext}`,
           has_photo: true,
-        };
+        });
       }
-
-      return { has_photo: false };
-    } catch {
-      return { has_photo: false };
+    } catch (err) {
+      console.warn('[TreeService] batchFindPersonAvatars failed:', err);
     }
+    return map;
+  }
+
+  private async findPersonAvatar(
+    personId: bigint,
+  ): Promise<{ avatar_url?: string; thumbnail_url?: string; has_photo: boolean }> {
+    const map = await this.batchFindPersonAvatars([personId]);
+    return map.get(personId.toString()) || { has_photo: false };
   }
 
   private async getDirectParent(personId: bigint): Promise<bigint | null> {
@@ -311,8 +334,10 @@ export class TreeService {
     return parentAncestry?.ancestor_id ?? null;
   }
 
-  private async toTreeNode(person: Person): Promise<TreeNode> {
-    const avatarInfo = await this.findPersonAvatar(person.id);
+  private toTreeNode(
+    person: Person,
+    avatarInfo: { avatar_url?: string; thumbnail_url?: string; has_photo: boolean } = { has_photo: false },
+  ): TreeNode {
     return {
       id: person.id.toString(),
       name: person.full_name,
@@ -327,6 +352,22 @@ export class TreeService {
     };
   }
 
+  private serializeBigInt<T>(value: T): T {
+    if (typeof value === 'bigint') return value.toString() as unknown as T;
+    if (value === null || value === undefined) return value;
+    if (Array.isArray(value)) {
+      return value.map((v) => this.serializeBigInt(v)) as unknown as T;
+    }
+    if (typeof value === 'object') {
+      const out: any = {};
+      for (const [k, v] of Object.entries(value)) {
+        out[k] = this.serializeBigInt(v);
+      }
+      return out as T;
+    }
+    return value;
+  }
+
   async moveSubTree(subtreeRootId: bigint, newParentId: bigint): Promise<void> {
     return await this.prisma.$transaction(async (tx) => {
       const subtreeDescendants = await tx.personAncestry.findMany({
@@ -337,7 +378,7 @@ export class TreeService {
       const allSubtreeIds = subtreeDescendants.map((d) => d.descendant_id);
 
       if (allSubtreeIds.includes(newParentId)) {
-        throw new Error('Cannot move subtree to itself or a descendant');
+        throw new InternalServerErrorException('Cannot move subtree to itself or a descendant');
       }
 
       const oldPaths = await tx.personAncestry.findMany({
@@ -365,7 +406,7 @@ export class TreeService {
 
       for (const subtreeId of allSubtreeIds) {
         const selfRecord = oldPaths.find(
-          (p) => p.ancestor_id === subtreeId && p.descendant_id === subtreeId
+          (p) => p.ancestor_id === subtreeId && p.descendant_id === subtreeId,
         );
 
         if (selfRecord) {
@@ -380,7 +421,7 @@ export class TreeService {
           (p) =>
             p.descendant_id === subtreeId &&
             allSubtreeIds.includes(p.ancestor_id) &&
-            p.ancestor_id !== subtreeId
+            p.ancestor_id !== subtreeId,
         );
 
         for (const internalPath of subtreeInternalPaths) {
@@ -391,9 +432,10 @@ export class TreeService {
           });
         }
 
-        const subtreeRootDepth = oldPaths.find(
-          (p) => p.ancestor_id === subtreeRootId && p.descendant_id === subtreeId
-        )?.depth ?? 0;
+        const subtreeRootDepth =
+          oldPaths.find(
+            (p) => p.ancestor_id === subtreeRootId && p.descendant_id === subtreeId,
+          )?.depth ?? 0;
 
         for (const parentAncestry of newParentAncestries) {
           newAncestryRecords.push({

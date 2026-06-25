@@ -17,12 +17,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // 所有 /api/* 直接代理到后端，保留 /api 前缀（与生产环境 Nginx 行为一致）。
+      // 不再为 auth 模块做特殊重写：所有 Controller 已统一为 @Controller('api/xxx')。
       '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/auth/, '/auth'),
-      },
-      '/auth': {
         target: 'http://localhost:3001',
         changeOrigin: true,
       },

@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import { TreeController } from './tree.controller';
 import { TreeService } from './tree.service';
 
 @Module({
   controllers: [TreeController],
-  providers: [TreeService, { provide: PrismaClient, useValue: new PrismaClient() }],
+  // PrismaService 来自 @geneasphere/db 的 PrismaModule（已 @Global），可直接注入
+  providers: [TreeService],
   exports: [TreeService],
 })
 export class TreeModule {}
