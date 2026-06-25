@@ -93,7 +93,7 @@ export class AuthService {
 
     // 查找演示家族
     const demoClan = await this.prisma.clan.findFirst({
-      where: { name: '李氏宗族（演示）' },
+      where: { name: '朱熹族谱（演示）' },
       select: { id: true },
     });
 
@@ -134,7 +134,7 @@ export class AuthService {
 
     // 查找演示家族
     const demoClan = await this.prisma.clan.findFirst({
-      where: { name: '李氏宗族（演示）' },
+      where: { name: '朱熹族谱（演示）' },
       select: { id: true },
     });
 
