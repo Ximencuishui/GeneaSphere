@@ -27,18 +27,18 @@
 
           <el-form-item label="打印模板">
             <el-radio-group v-model="printTemplate">
-              <el-radio label="classic">经典宣纸风格</el-radio>
-              <el-radio label="modern">现代精装风格</el-radio>
-              <el-radio label="simple">简约风格</el-radio>
+              <el-radio value="classic">经典宣纸风格</el-radio>
+              <el-radio value="modern">现代精装风格</el-radio>
+              <el-radio value="simple">简约风格</el-radio>
             </el-radio-group>
           </el-form-item>
 
           <el-form-item label="包含内容">
             <el-checkbox-group v-model="printOptions">
-              <el-checkbox label="tree">族谱树图</el-checkbox>
-              <el-checkbox label="persons">人员名录</el-checkbox>
-              <el-checkbox label="photos">照片墙</el-checkbox>
-              <el-checkbox label="timeline">时光轴</el-checkbox>
+              <el-checkbox value="tree">族谱树图</el-checkbox>
+              <el-checkbox value="persons">人员名录</el-checkbox>
+              <el-checkbox value="photos">照片墙</el-checkbox>
+              <el-checkbox value="timeline">时光轴</el-checkbox>
             </el-checkbox-group>
           </el-form-item>
 
