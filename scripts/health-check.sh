@@ -30,9 +30,17 @@ echo ""
 
 # 1. 前端资源
 echo "── 前端资源 ──"
-[ -f /opt/geneasphere/apps/web/dist/index.html ] && check "dist/index.html 存在" "OK" || check "dist/index.html 存在" "缺失"
+if [ -f /opt/geneasphere/apps/web/dist/index.html ]; then
+    check "dist/index.html 存在" "OK"
+else
+    check "dist/index.html 存在" "缺失"
+fi
 COUNT=$(ls /opt/geneasphere/apps/web/dist/assets/ 2>/dev/null | wc -l)
-[ "$COUNT" -gt 100 ] && check "静态文件数量 ($COUNT)" "OK" || check "静态文件数量 ($COUNT)" "异常(少于100)"
+if [ "$COUNT" -gt 100 ]; then
+    check "静态文件数量 ($COUNT)" "OK"
+else
+    check "静态文件数量 ($COUNT)" "异常(少于100)"
+fi
 
 # 2. Nginx
 echo "── Nginx ──"
