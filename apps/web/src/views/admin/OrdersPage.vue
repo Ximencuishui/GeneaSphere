@@ -15,7 +15,7 @@ const statusLabels: Record<string, string> = {
   CANCELLED: '已取消',
 }
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const orders = ref<any[]>([])
 const total = ref(0)
@@ -28,7 +28,7 @@ const fetchOrders = async () => {
   try {
     const res = await axios.get('/api/admin/orders', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: activeTab.value || undefined,
@@ -77,7 +77,7 @@ const handleReorder = async (order: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchOrders()
 })
 </script>

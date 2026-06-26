@@ -5,7 +5,7 @@ import axios from 'axios'
 
 const route = useRoute()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const storageInfo = ref({
   used_bytes: 0,
@@ -18,7 +18,7 @@ const fetchStorage = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/storage', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     storageInfo.value = res.data
   } catch (error) {
@@ -29,7 +29,7 @@ const fetchStorage = async () => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchStorage()
 })
 </script>

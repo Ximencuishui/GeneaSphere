@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const posts = ref<any[]>([])
 const total = ref(0)
@@ -27,7 +27,7 @@ const fetchPosts = async () => {
   try {
     const res = await axios.get('/api/admin/merge/posts', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: currentPage.value,
         pageSize: pageSize.value,
       },
@@ -84,7 +84,7 @@ const handleDelete = async (post: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchPosts()
 })
 </script>

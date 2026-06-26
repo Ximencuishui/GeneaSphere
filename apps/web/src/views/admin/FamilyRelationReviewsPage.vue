@@ -141,7 +141,7 @@ function formatStateBrief(s: any) {
 async function fetchData() {
   loading.value = true
   try {
-    const clanId = new URLSearchParams(location.search).get('clanId') || '1'
+    const clanSlug = new URLSearchParams(location.search).get('clanId') || '1'
     const res: any = await familyRelationApi.admin.listChanges({
       clanId,
       status: filterStatus.value || undefined,

@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
 const route = useRoute()
-const clanId = computed(() => String(route.query.clanId ?? '1'))
+const clanSlug = computed(() => String(route.params.slug ?? '1'))
 
 const form = reactive({
   title: '家族大事件·精选回顾',
@@ -196,7 +196,7 @@ onMounted(() => {
           </ElDescriptions>
           <div v-if="previewData.event_count === 0" class="empty-hint">
             当前筛选条件下无大事件
-            <ElLink type="primary" @click="$router.push('/admin/family-events')">去添加事件 →</ElLink>
+            <ElLink type="primary" @click="$router.push(`/zupu/${clanSlug}//admin/family-events`)">去添加事件 →</ElLink>
           </div>
         </div>
       </ElCard>

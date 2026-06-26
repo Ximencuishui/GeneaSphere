@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 // 家族信息
 const clanInfo = ref<any>({
@@ -35,7 +35,7 @@ const fetchData = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/clan-info', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     const data = res.data
     clanInfo.value = {
@@ -81,7 +81,7 @@ const handleSave = async () => {
       logo_url: clanInfo.value.logo_url,
       settings_json: extraInfo.value,
     }, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('保存成功')
   } catch (e: any) {

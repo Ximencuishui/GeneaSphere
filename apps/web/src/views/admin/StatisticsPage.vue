@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 const overview = ref<any>(null)
 const demographics = ref<any>(null)
@@ -17,7 +17,7 @@ const activeTab = ref('overview')
 const fetchOverview = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/overview', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     overview.value = res.data
   } catch (e: any) {
@@ -28,7 +28,7 @@ const fetchOverview = async () => {
 const fetchDemographics = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/demographics', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     demographics.value = res.data
   } catch (e: any) {
@@ -39,7 +39,7 @@ const fetchDemographics = async () => {
 const fetchMediaStats = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/media', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     mediaStats.value = res.data
   } catch (e: any) {
@@ -50,7 +50,7 @@ const fetchMediaStats = async () => {
 const fetchMigrationStats = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/migration', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     migrationStats.value = res.data
   } catch (e: any) {

@@ -51,8 +51,8 @@ function formatState(s: any) { return s ? JSON.stringify(s, null, 2) : '无' }
 async function fetchData() {
   loading.value = true
   try {
-    const clanId = new URLSearchParams(location.search).get('clanId') || '1'
-    disputes.value = await familyRelationApi.admin.listDisputes(clanId) as any[]
+    const clanSlug = new URLSearchParams(location.search).get('clanId') || '1'
+    disputes.value = await familyRelationApi.admin.listDisputes(clanSlug) as any[]
   } catch (err) {
     console.error(err)
   } finally {

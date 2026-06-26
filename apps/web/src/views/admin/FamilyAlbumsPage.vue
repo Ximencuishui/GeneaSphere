@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 // 数据列表
 const albums = ref<any[]>([])
@@ -39,7 +39,7 @@ const fetchData = async () => {
   try {
     const res = await axios.get('/api/admin/family-albums', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
       },
@@ -60,7 +60,7 @@ const handleViewDetail = async (row: any) => {
   detailVisible.value = true
   try {
     const res = await axios.get(`/api/admin/family-albums/${row.id}`, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     photos.value = res.data.photos || []
   } catch (e: any) {
@@ -91,7 +91,7 @@ const handleSave = async () => {
   }
   try {
     await axios.put(`/api/admin/family-albums/${editingAlbum.value.id}`, editForm.value, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('保存成功')
     editDialogVisible.value = false
@@ -106,7 +106,7 @@ const handleDelete = async (id: string) => {
   try {
     await ElMessageBox.confirm('确定要删除该图册吗？', '提示', { type: 'warning' })
     await axios.delete(`/api/admin/family-albums/${id}`, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('删除成功')
     fetchData()

@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 // 导出选项
 const exportOptions = ref({

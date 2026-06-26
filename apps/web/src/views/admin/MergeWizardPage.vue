@@ -200,12 +200,12 @@ const executeMerge = async () => {
 
 // 返回申请列表
 const goBack = () => {
-  router.push('/admin/merge/applications')
+  router.push(`/zupu/${clanSlug}//admin/merge/applications`)
 }
 
 // 完成
 const finish = () => {
-  router.push('/admin/merge/applications')
+  router.push(`/zupu/${clanSlug}//admin/merge/applications`)
 }
 
 // 初始化

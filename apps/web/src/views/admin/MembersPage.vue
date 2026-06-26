@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const members = ref<any[]>([])
 const total = ref(0)
@@ -47,7 +47,7 @@ const fetchMembers = async () => {
   try {
     const res = await axios.get('/api/admin/members', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         role: filterRole.value || undefined,
@@ -136,7 +136,7 @@ const confirmTransferOwnership = async () => {
     await axios.patch('/api/admin/members/transfer-ownership', {
       targetUserId: transferTargetPhone.value,
       password: transferConfirmPassword.value,
-      clanId: clanId.value,
+      clanSlug: clanId.value,
     })
     ElMessage.success('所有权已转让')
     transferDialogVisible.value = false
@@ -195,7 +195,7 @@ const handleSelectionChange = (val: any[]) => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchMembers()
 
   if (route.query.tab === 'roles') {

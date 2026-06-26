@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 
 const statistics = ref({
@@ -65,7 +65,7 @@ const fetchDashboard = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/dashboard', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     statistics.value = res.data.statistics
     todos.value = res.data.todos || {
@@ -99,16 +99,16 @@ const formatDate = (iso: string) => {
   }
 }
 
-const goMediaReviews = () => router.push('/admin/reviews/media')
-const goBioReviews = () => router.push('/admin/reviews/bio')
-const goMergeApplications = () => router.push('/admin/merge/applications')
+const goMediaReviews = () => router.push(`/zupu/${clanSlug}//admin/reviews/media`)
+const goBioReviews = () => router.push(`/zupu/${clanSlug}//admin/reviews/bio`)
+const goMergeApplications = () => router.push(`/zupu/${clanSlug}//admin/merge/applications`)
 
 const navigateTo = (link: string) => {
   if (link) router.push(link)
 }
 
 onMounted(() => {
-  clanId.value = (route.query.clanId as string) || '1'
+  clanId.value = (route.params.slug as string) || '1'
   fetchDashboard()
 })
 
@@ -127,7 +127,7 @@ const userName = computed(() => {
             <h2>欢迎回来，{{ userName }}</h2>
             <p class="welcome-date">{{ new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) }}</p>
           </div>
-          <ElButton type="primary" size="large" @click="$router.push('/admin/members')">
+          <ElButton type="primary" size="large" @click="$router.push(`/zupu/${clanSlug}//admin/members`)">
             管理成员
           </ElButton>
         </div>
@@ -155,7 +155,7 @@ const userName = computed(() => {
     <!-- 统计卡片 -->
     <ElRow :gutter="20" class="stats-row">
       <ElCol :xs="12" :sm="6">
-        <ElCard class="stat-card" shadow="hover" @click="$router.push('/tree/' + clanId)">
+        <ElCard class="stat-card" shadow="hover" @click="$router.push('/tree/' + clanSlug)">
           <div class="stat-content">
             <div class="stat-icon" style="background: linear-gradient(135deg, #409EFF, #337ECC);">
               <ElIcon :size="28"><UserFilled /></ElIcon>
@@ -247,13 +247,13 @@ const userName = computed(() => {
             <span>快速入口</span>
           </template>
           <div class="quick-grid">
-            <div class="quick-item" @click="$router.push('/admin/settings/privacy')">
+            <div class="quick-item" @click="$router.push(`/zupu/${clanSlug}//admin/settings/privacy`)">
               <div class="quick-icon" style="background: #ECF5FF; color: #409EFF;">
                 <ElIcon :size="22"><Lock /></ElIcon>
               </div>
               <span class="quick-text">隐私配置</span>
             </div>
-            <div class="quick-item" @click="$router.push('/admin/settings/xipai')">
+            <div class="quick-item" @click="$router.push(`/zupu/${clanSlug}//admin/settings/xipai`)">
               <div class="quick-icon" style="background: #FDF6EC; color: #E6A23C;">
                 <ElIcon :size="22"><EditPen /></ElIcon>
               </div>
@@ -273,25 +273,25 @@ const userName = computed(() => {
               </div>
               <span class="quick-text">寻亲申请</span>
             </div>
-            <div class="quick-item" @click="$router.push('/admin/settings/storage')">
+            <div class="quick-item" @click="$router.push(`/zupu/${clanSlug}//admin/settings/storage`)">
               <div class="quick-icon" style="background: #F4F4F5; color: #909399;">
                 <ElIcon :size="22"><FolderOpened /></ElIcon>
               </div>
               <span class="quick-text">云存储</span>
             </div>
-            <div class="quick-item" @click="$router.push('/admin/orders')">
+            <div class="quick-item" @click="$router.push(`/zupu/${clanSlug}//admin/orders`)">
               <div class="quick-icon" style="background: #F4F4F5; color: #909399;">
                 <ElIcon :size="22"><Printer /></ElIcon>
               </div>
               <span class="quick-text">印刷订单</span>
             </div>
-            <div class="quick-item" @click="$router.push('/admin/sms/send')">
+            <div class="quick-item" @click="$router.push(`/zupu/${clanSlug}//admin/sms/send`)">
               <div class="quick-icon" style="background: #F0F9EB; color: #67C23A;">
                 <ElIcon :size="22"><Message /></ElIcon>
               </div>
               <span class="quick-text">发送短信</span>
             </div>
-            <div class="quick-item" @click="$router.push('/admin/sms/balance')">
+            <div class="quick-item" @click="$router.push(`/zupu/${clanSlug}//admin/sms/balance`)">
               <div class="quick-icon" style="background: #FEF0F0; color: #E6A23C;">
                 <ElIcon :size="22"><Wallet /></ElIcon>
               </div>

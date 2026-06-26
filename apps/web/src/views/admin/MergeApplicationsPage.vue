@@ -7,7 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const route = useRoute()
 const router = useRouter()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const applications = ref<any[]>([])
 const total = ref(0)
@@ -29,7 +29,7 @@ const fetchApplications = async () => {
   try {
     const res = await axios.get('/api/admin/merge/applications', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: activeTab.value,
@@ -101,7 +101,7 @@ const rollbackLoading = ref(false)
 const fetchSnapshots = async () => {
   try {
     const res = await axios.get('/api/admin/merge/merge-snapshots', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     snapshots.value = res.data.data
   } catch (error) {
@@ -146,7 +146,7 @@ const handleMarkManual = async (app: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchApplications()
 })
 </script>
@@ -246,7 +246,7 @@ onMounted(() => {
             <ElButton
               type="info"
               size="small"
-              @click="router.push('/admin/merge/applications/' + row.id)"
+              @click="router.push(`/zupu/${clanSlug}//admin/merge/applications/` + row.id)"
             >
               查看详情
             </ElButton>

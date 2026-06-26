@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 // 数据列表
 const mediaList = ref<any[]>([])
@@ -46,7 +46,7 @@ const fetchData = async () => {
   try {
     const res = await axios.get('/api/admin/media/list', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
         keyword: filters.value.keyword || undefined,
@@ -98,7 +98,7 @@ const handleViewDetail = (row: any) => {
 const handleSaveEdit = async () => {
   try {
     await axios.put(`/api/admin/media/${currentMedia.value.id}`, editForm.value, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('保存成功')
     detailVisible.value = false
@@ -113,7 +113,7 @@ const handleDelete = async (id: string) => {
   try {
     await ElMessageBox.confirm('确定要删除该影像吗？', '提示', { type: 'warning' })
     await axios.delete(`/api/admin/media/${id}`, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('删除成功')
     fetchData()
@@ -128,7 +128,7 @@ const handleDelete = async (id: string) => {
 const handleSetCover = async (id: string) => {
   try {
     await axios.post(`/api/admin/media/${id}/set-cover`, {}, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('已设为封面')
     fetchData()
@@ -144,7 +144,7 @@ const handleBatchUpdate = async () => {
       ids: selectedItems.value,
       ...editForm.value,
     }, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('批量更新成功')
     batchDialogVisible.value = false
@@ -162,7 +162,7 @@ const handleBatchDelete = async () => {
     await axios.post('/api/admin/media/batch-delete', {
       ids: selectedItems.value,
     }, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('批量删除成功')
     batchDialogVisible.value = false

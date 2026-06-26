@@ -308,10 +308,10 @@ watch(selectedClanId, async (id) => {
   }));
 });
 
-async function loadEvents(clanId: string) {
+async function loadEvents(clanSlug: string) {
   loading.value = true;
   try {
-    events.value = await migrationApi.getEvents(clanId);
+    events.value = await migrationApi.getEvents(clanSlug);
   } catch (e: any) {
     ElMessage.error('加载迁徙事件失败：' + (e?.message || ''));
   } finally {
@@ -319,17 +319,17 @@ async function loadEvents(clanId: string) {
   }
 }
 
-async function loadBranches(clanId: string) {
+async function loadBranches(clanSlug: string) {
   try {
-    branches.value = await migrationApi.getBranches(clanId);
+    branches.value = await migrationApi.getBranches(clanSlug);
   } catch (e) {
     branches.value = [];
   }
 }
 
-async function loadMissingLocations(clanId: string) {
+async function loadMissingLocations(clanSlug: string) {
   try {
-    const list = await migrationApi.getMissingCoords(clanId);
+    const list = await migrationApi.getMissingCoords(clanSlug);
     missingLocations.value = list.map((x) => ({
       name: x.name,
       lat: x.lat,

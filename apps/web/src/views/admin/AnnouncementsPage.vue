@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 // 数据列表
 const announcements = ref<any[]>([])
@@ -33,7 +33,7 @@ const fetchData = async () => {
   try {
     const res = await axios.get('/api/admin/announcements', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
       },
@@ -77,13 +77,13 @@ const handleSubmit = async () => {
     if (editingId.value) {
       await axios.put(`/api/admin/announcements/${editingId.value}`, {
         ...formData.value,
-        clanId: clanId.value,
+        clanSlug: clanId.value,
       })
       ElMessage.success('更新成功')
     } else {
       await axios.post('/api/admin/announcements', {
         ...formData.value,
-        clanId: clanId.value,
+        clanSlug: clanId.value,
       })
       ElMessage.success('发布成功')
     }
@@ -101,7 +101,7 @@ const handleDelete = async (id: string) => {
       type: 'warning',
     })
     await axios.delete(`/api/admin/announcements/${id}`, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success('删除成功')
     fetchData()
@@ -118,7 +118,7 @@ const handleTogglePin = async (row: any) => {
     await axios.patch(`/api/admin/announcements/${row.id}/pin`, {
       isPinned: !row.is_pinned,
     }, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success(row.is_pinned ? '已取消置顶' : '已置顶')
     fetchData()
@@ -133,7 +133,7 @@ const handleToggleStatus = async (row: any) => {
     await axios.patch(`/api/admin/announcements/${row.id}/status`, {
       isActive: !row.is_active,
     }, {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ElMessage.success(row.is_active ? '已下架' : '已发布')
     fetchData()

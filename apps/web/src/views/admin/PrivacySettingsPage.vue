@@ -6,7 +6,7 @@ import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const saving = ref(false)
 
@@ -30,7 +30,7 @@ const fetchSettings = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/privacy', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     settings.value = res.data
   } catch (error) {
@@ -44,7 +44,7 @@ const handleSave = async () => {
   saving.value = true
   try {
     await axios.put('/api/admin/settings/privacy', {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       ...settings.value,
     })
     ElMessage.success('隐私配置已保存')
@@ -59,7 +59,7 @@ const handleExportData = async () => {
   try {
     ElMessage.info('正在导出数据...')
     const res = await axios.get('/api/admin/settings/export', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     // 导出为 JSON 文件
     const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
@@ -78,7 +78,7 @@ const handleExportData = async () => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchSettings()
 })
 </script>

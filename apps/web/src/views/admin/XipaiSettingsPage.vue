@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const xipaiList = ref<any[]>([])
@@ -18,7 +18,7 @@ const fetchXipai = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/xipai', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     xipaiList.value = res.data
   } catch (error) {
@@ -36,7 +36,7 @@ const handleAdd = async () => {
   saving.value = true
   try {
     await axios.post('/api/admin/settings/xipai', {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       generation: newXipai.value.generation,
       character: newXipai.value.character,
       note: newXipai.value.note,
@@ -96,7 +96,7 @@ const handleDelete = async (item: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchXipai()
 })
 </script>

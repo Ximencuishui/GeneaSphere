@@ -6,7 +6,7 @@ import { CircleCheckFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const route = useRoute()
-const clanId = computed(() => String(route.query.clanId ?? '1'))
+const clanSlug = computed(() => String(route.params.slug ?? '1'))
 
 const form = reactive({
   version_name: '族谱·2026版',

@@ -11,7 +11,7 @@ import { Document, VideoPlay, List, DataAnalysis } from '@element-plus/icons-vue
 
 const route = useRoute()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const activeTab = ref('logs')
 
@@ -35,7 +35,7 @@ const statsLoading = ref(false)
 
 // 初始化
 onMounted(() => {
-  clanId.value = (route.query.clanId as string) || localStorage.getItem('current_clan_id') || '1'
+  clanId.value = (route.params.slug as string) || localStorage.getItem('current_clan_id') || '1'
   fetchOcrStats()
 })
 
@@ -45,7 +45,7 @@ const fetchImportLogs = async () => {
   try {
     const res = await axios.get('/api/admin/import/logs', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: logStatusFilter.value || undefined,
@@ -66,7 +66,7 @@ const fetchActiveTasks = async () => {
   taskLoading.value = true
   try {
     const res = await axios.get('/api/admin/import/tasks/active', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     activeTasks.value = res.data.data
   } catch (error) {
@@ -82,7 +82,7 @@ const fetchOcrStats = async () => {
   statsLoading.value = true
   try {
     const res = await axios.get('/api/admin/import/ocr-stats', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     ocrStats.value = res.data
   } catch (error) {

@@ -6,7 +6,7 @@ import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 
-const clanId = ref('')
+const clanSlug = ref('')
 const loading = ref(false)
 const logs = ref<any[]>([])
 const total = ref(0)
@@ -36,7 +36,7 @@ const fetchLogs = async () => {
   try {
     const res = await axios.get('/api/admin/logs', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         action: filterAction.value || undefined,
@@ -58,7 +58,7 @@ const handleExport = async () => {
   try {
     const res = await axios.get('/api/admin/logs/export', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         startDate: filterStartDate.value || undefined,
         endDate: filterEndDate.value || undefined,
       },
@@ -80,7 +80,7 @@ const handleExport = async () => {
 }
 
 onMounted(() => {
-  clanId.value = route.query.clanId as string || '1'
+  clanId.value = route.params.slug as string || '1'
   fetchLogs()
 })
 </script>

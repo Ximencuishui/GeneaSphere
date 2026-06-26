@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 // 数据
 const usageList = ref<any[]>([])
@@ -30,7 +30,7 @@ const fetchList = async () => {
   try {
     const res = await axios.get('/api/admin/toolbox-usage/list', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
         tool: filters.value.tool || undefined,
@@ -51,7 +51,7 @@ const fetchList = async () => {
 const fetchStats = async () => {
   try {
     const res = await axios.get('/api/admin/toolbox-usage/stats', {
-      params: { clanId: clanId.value },
+      params: { clanSlug: clanId.value },
     })
     stats.value = res.data
   } catch (e: any) {

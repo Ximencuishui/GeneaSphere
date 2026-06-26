@@ -5,7 +5,7 @@ import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
-const clanId = computed(() => route.query.clanId || '1')
+const clanSlug = computed(() => route.params.slug || '1')
 
 const reports = ref<any[]>([])
 const loading = ref(false)
@@ -16,7 +16,7 @@ const fetchData = async () => {
   loading.value = true
   try {
     const params: any = {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       page: pagination.value.page,
       pageSize: pagination.value.pageSize,
     }
@@ -40,7 +40,7 @@ const handleConfirm = async (id: string) => {
   try {
     await ElMessageBox.confirm('确认该举报内容违规并处理？', '提示', { type: 'warning' })
     await axios.post(`/api/admin/reports/${id}/confirm`, {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       result: '已确认违规并处理',
     })
     ElMessage.success('已确认处理')
@@ -56,7 +56,7 @@ const handleReject = async (id: string) => {
   try {
     await ElMessageBox.confirm('驳回该举报？', '提示', { type: 'info' })
     await axios.post(`/api/admin/reports/${id}/reject`, {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       result: '举报已驳回',
     })
     ElMessage.success('已驳回')

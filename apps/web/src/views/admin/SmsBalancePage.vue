@@ -49,7 +49,7 @@ const thresholdDialogVisible = ref(false)
 const newThreshold = ref(20)
 
 // 获取家族ID
-const clanId = computed(() => (route.query.clanId as string) || '1')
+const clanSlug = computed(() => (route.params.slug as string) || '1')
 
 // 初始化
 onMounted(async () => {
@@ -69,7 +69,7 @@ onMounted(async () => {
 const fetchBalance = async () => {
   try {
     const res = await axios.get('/api/admin/sms/balance', {
-      params: { clanId: clanId.value }
+      params: { clanSlug: clanId.value }
     })
     balanceInfo.value = res.data
     newThreshold.value = res.data.low_balance_threshold
@@ -82,7 +82,7 @@ const fetchBalance = async () => {
 const fetchCostStats = async () => {
   try {
     const res = await axios.get('/api/admin/sms/balance/stats', {
-      params: { clanId: clanId.value }
+      params: { clanSlug: clanId.value }
     })
     costStats.value = res.data
   } catch {
@@ -111,7 +111,7 @@ const handleRecharge = async () => {
   rechargeLoading.value = true
   try {
     const res = await axios.post('/api/admin/sms/recharge', {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       amount,
       paymentMethod: paymentMethod.value,
     })
@@ -138,7 +138,7 @@ const fetchRechargeRecords = async () => {
   try {
     const res = await axios.get('/api/admin/sms/recharge-records', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: rechargePage.value,
         pageSize: 10,
       }
@@ -155,7 +155,7 @@ const fetchCostLogs = async () => {
   try {
     const res = await axios.get('/api/admin/sms/cost-logs', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: costLogsPage.value,
         pageSize: 10,
       }
@@ -176,7 +176,7 @@ const fetchSendRecords = async () => {
   try {
     const res = await axios.get('/api/admin/sms/records', {
       params: {
-        clanId: clanId.value,
+        clanSlug: clanId.value,
         page: sendRecordsPage.value,
         pageSize: 10,
       }
@@ -192,7 +192,7 @@ const fetchSendRecords = async () => {
 const handleSetThreshold = async () => {
   try {
     await axios.put('/api/admin/sms/balance/threshold', {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       threshold: newThreshold.value,
     })
     ElMessage.success('阈值设置成功')
@@ -385,7 +385,7 @@ const getStatusText = (status: string) => {
           </template>
           
           <div class="quick-actions">
-            <ElButton type="primary" @click="router.push({ path: '/admin/sms/send', query: { clanId: clanId } })">
+            <ElButton type="primary" @click="router.push({ path: `/zupu/${clanSlug}//admin/sms/send`, query: { clanSlug: clanId } })">
               发送短信
             </ElButton>
             <ElButton @click="activeTab = 'records'; handleTabChange('records')">

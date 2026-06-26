@@ -35,7 +35,7 @@ const scheduledDate = ref('')
 const scheduledTime = ref('')
 
 // 获取家族ID
-const clanId = computed(() => (route.query.clanId as string) || '1')
+const clanSlug = computed(() => (route.params.slug as string) || '1')
 
 // 预估费用
 const recipientCount = computed(() => {
@@ -67,7 +67,7 @@ const canSend = computed(() => {
 const fetchBalance = async () => {
   try {
     const res = await axios.get('/api/admin/sms/balance', {
-      params: { clanId: clanId.value }
+      params: { clanSlug: clanId.value }
     })
     balance.value = res.data.balance
   } catch {
@@ -79,7 +79,7 @@ const fetchBalance = async () => {
 const fetchMembers = async () => {
   try {
     const res = await axios.get('/api/admin/members', {
-      params: { clanId: clanId.value, pageSize: 1000 }
+      params: { clanSlug: clanId.value, pageSize: 1000 }
     })
     memberList.value = res.data.members || []
   } catch {
@@ -102,7 +102,7 @@ const handleSend = async () => {
           '余额不足',
           { confirmButtonText: '立即充值', cancelButtonText: '取消', type: 'warning' }
         )
-        router.push({ path: '/admin/sms/balance', query: { clanId: clanId.value } })
+        router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanId.value } })
       } catch {
         // 用户取消
       }
@@ -137,7 +137,7 @@ const handleSend = async () => {
     }
 
     await axios.post('/api/admin/sms/send', {
-      clanId: clanId.value,
+      clanSlug: clanId.value,
       content: signName.value + smsContent.value,
       recipientIds,
       signName: signName.value,
@@ -165,7 +165,7 @@ const handleSend = async () => {
           '余额不足',
           { confirmButtonText: '立即充值', cancelButtonText: '取消', type: 'warning' }
         )
-        router.push({ path: '/admin/sms/balance', query: { clanId: clanId.value } })
+        router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanId.value } })
       } catch {
         // 用户取消
       }
@@ -179,7 +179,7 @@ const handleSend = async () => {
 
 // 前往充值
 const goToRecharge = () => {
-  router.push({ path: '/admin/sms/balance', query: { clanId: clanId.value } })
+  router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanId.value } })
 }
 </script>
 
