@@ -35,7 +35,7 @@ const statsLoading = ref(false)
 
 // 初始化
 onMounted(() => {
-  clanId.value = (route.params.slug as string) || localStorage.getItem('current_clan_id') || '1'
+  clanSlug.value = (route.params.slug as string) || localStorage.getItem('demo_clan_slug') || 'zhuxi-demo'
   fetchOcrStats()
 })
 
@@ -45,7 +45,7 @@ const fetchImportLogs = async () => {
   try {
     const res = await axios.get('/api/admin/import/logs', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: logStatusFilter.value || undefined,
@@ -66,7 +66,7 @@ const fetchActiveTasks = async () => {
   taskLoading.value = true
   try {
     const res = await axios.get('/api/admin/import/tasks/active', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     activeTasks.value = res.data.data
   } catch (error) {
@@ -82,7 +82,7 @@ const fetchOcrStats = async () => {
   statsLoading.value = true
   try {
     const res = await axios.get('/api/admin/import/ocr-stats', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ocrStats.value = res.data
   } catch (error) {
