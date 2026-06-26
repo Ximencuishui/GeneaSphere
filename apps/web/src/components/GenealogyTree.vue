@@ -51,10 +51,14 @@ let g6RuntimePromise: Promise<G6Runtime> | null = null;
 
 async function loadG6Runtime(): Promise<G6Runtime> {
   // 1) Graph / treeToGraphData / register 从 G6 子路径取，绕过主入口的 preset
-  const [{ Graph }, treeMod, { register }] = await Promise.all([
+  //    themes/light 是必需的：G6 默认 theme='light'（见 Graph.defaultOptions），
+  //    绕过 preset 后若不显式注册，themeOf() 会 warn "The theme of light is not registered"
+  //    并返回空对象，导致 node 的 fill/palette 退化（节点背景变白、palette 失效）
+  const [{ Graph }, treeMod, { register }, { light }] = await Promise.all([
     import('@antv/g6/esm/runtime/graph'),
     import('@antv/g6/esm/utils/tree'),
     import('@antv/g6/esm/registry/register'),
+    import('@antv/g6/esm/themes/light'),
   ]);
   const treeToGraphData = treeMod.treeToGraphData as G6TreeToGraphData;
 
@@ -106,6 +110,10 @@ async function loadG6Runtime(): Promise<G6Runtime> {
   register('transform', 'collapse-expand-node', CollapseExpandNode);
   register('transform', 'get-edge-actual-ends', GetEdgeActualEnds);
   register('transform', 'update-related-edges', UpdateRelatedEdge);
+
+  // theme：注册 light 主题（G6 默认 theme='light'）
+  // 仅注册 light，dark 暂未使用，待需要深色模式时再补 register('theme', 'dark', dark)
+  register('theme', 'light', light);
 
   return { Graph, treeToGraphData };
 }

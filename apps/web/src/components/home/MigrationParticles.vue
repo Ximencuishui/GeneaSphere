@@ -1,18 +1,26 @@
 <template>
   <div class="migration-particles-container">
     <!-- Leaflet 真实地图底图 -->
-    <div ref="mapContainer" class="leaflet-bg" />
+    <div ref="mapContainer" class="leaflet-bg" :class="{ 'leaflet-bg--failed': tilesFailed }" />
+    <!-- 本地静态中国轮廓 fallback（仅在瓦片几乎全部加载失败时显示） -->
+    <img
+      v-show="tilesFailed"
+      src="/geojson/china-outline-fallback.svg"
+      class="china-fallback"
+      alt="中国疆域示意"
+    />
     <!-- 粒子动画 Canvas 叠加层（透明背景） -->
     <canvas
       ref="canvasRef"
       class="migration-particles-canvas"
+      :style="{ opacity: tilesFailed ? 0.7 : 1 }"
       @mousemove="handleMouseMove"
       @mouseleave="emit('surnameHover', null); mouseX = -1000; mouseY = -1000"
       @click="handleCanvasClick"
     />
     <!-- 地图图源归属（极简，匹配暗色主题） -->
     <div class="map-attribution">
-      &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>
+      &copy; <a :href="attributionUrl" target="_blank" rel="noopener">{{ attributionLabel }}</a>
     </div>
   </div>
 </template>
@@ -39,6 +47,34 @@ let animationId = 0;
 let particles: ParticleState[] = [];
 let mouseX = -1000;
 let mouseY = -1000;
+
+// ==================== 瓦片源与降级策略 ====================
+// 1. 优先尝试高德矢量瓦片（国内可直连，无 token）。
+//    通过 CSS invert+hue-rotate 滤镜转成暗色，保持与品牌调性一致
+// 2. 若指定阈值（>80%）的瓦片加载失败，切换到本地 SVG fallback
+// 3. attribution 链接也会跟随瓦片源动态变化
+const TILE_PROVIDER: {
+  url: string;
+  subdomains: string[];
+  attributionUrl: string;
+  attributionLabel: string;
+} = {
+  url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+  subdomains: ['1', '2', '3', '4'],
+  attributionUrl: 'https://www.amap.com/',
+  attributionLabel: '高德地图',
+};
+const attributionUrl = ref<string>(TILE_PROVIDER.attributionUrl);
+const attributionLabel = ref<string>(TILE_PROVIDER.attributionLabel);
+/** 当前已请求瓦片数（每次 tileerror 或 tileload 都会递增） */
+const tileRequested = ref(0);
+/** 当前已加载成功瓦片数 */
+const tileLoaded = ref(0);
+/** 加载失败瓦片数 */
+const tileErrored = ref(0);
+/** 是否启用 fallback（错误率超阈值或长时间无加载） */
+const tilesFailed = ref(false);
+let fallbackTimer: number | null = null;
 
 // ==================== 姓氏迁徙数据 ====================
 
@@ -451,14 +487,61 @@ onMounted(() => {
     keyboard: false,
   });
 
-  // CartoDB Dark Matter 底图（暗色主题，与 Hero 背景匹配）
-  L.tileLayer(
-    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {
-      subdomains: 'abcd',
-      maxZoom: 19,
-    },
-  ).addTo(map);
+  // 高德矢量底图（暗色风格通过 CSS 滤镜实现）
+  // 原本使用 CartoDB Dark Matter，但该 CDN 在国内连接不稳定，
+  // 大量瓦片 ERR_CONNECTION_TIMED_OUT 会出现白块占位
+  const tileLayer = L.tileLayer(TILE_PROVIDER.url, {
+    subdomains: TILE_PROVIDER.subdomains,
+    maxZoom: 19,
+    crossOrigin: true,
+  }).addTo(map);
+
+  // 瓦片加载状态统计：超过 80% 失败 或 5 秒内一片未成功加载 -> 切到 SVG fallback
+  const FAILURE_RATIO_THRESHOLD = 0.8;
+  const STALL_TIMEOUT_MS = 5000;
+  let stallCheckTriggered = false;
+
+  tileLayer.on('tileloadstart', () => {
+    tileRequested.value += 1;
+  });
+  tileLayer.on('tileload', () => {
+    tileLoaded.value += 1;
+  });
+  tileLayer.on('tileerror', () => {
+    tileRequested.value += 1;
+    tileErrored.value += 1;
+    checkFallback();
+  });
+
+  function checkFallback() {
+    if (tilesFailed.value) return;
+    const requested = tileRequested.value;
+    const errored = tileErrored.value;
+    if (requested >= 6 && errored / requested >= FAILURE_RATIO_THRESHOLD) {
+      activateFallback();
+    }
+  }
+
+  function activateFallback() {
+    tilesFailed.value = true;
+    // 隐藏 attribution
+    attributionUrl.value = '#';
+    attributionLabel.value = '本地示意图';
+    // 隐藏瓦片层、保留容器避免画布尺寸变化
+    if (map) {
+      map.eachLayer((layer) => {
+        if (layer instanceof L.TileLayer) map!.removeLayer(layer);
+      });
+    }
+  }
+
+  // 启动后 5 秒若一片瓦片都没加载成功（说明 CDN 完全连不上），也切到 fallback
+  fallbackTimer = window.setTimeout(() => {
+    if (!stallCheckTriggered && tileLoaded.value === 0) {
+      stallCheckTriggered = true;
+      activateFallback();
+    }
+  }, STALL_TIMEOUT_MS);
 
   // 等地图瓦片容器就绪后初始化 Canvas
   map.whenReady(() => {
@@ -472,6 +555,10 @@ onMounted(() => {
 onUnmounted(() => {
   cancelAnimationFrame(animationId);
   window.removeEventListener('resize', resizeCanvas);
+  if (fallbackTimer !== null) {
+    clearTimeout(fallbackTimer);
+    fallbackTimer = null;
+  }
   map?.remove();
   map = null;
 });
@@ -490,8 +577,31 @@ onUnmounted(() => {
   z-index: 1;
 }
 
+/* 高德彩色矢量底图反色为暗色（与品牌色一致） */
+.leaflet-bg :deep(.leaflet-tile-pane) {
+  filter: invert(0.92) hue-rotate(180deg) brightness(0.95) contrast(0.85);
+  transition: filter 0.4s ease;
+}
+
+/* fallback 启用时隐藏瓦片层（保留容器避免 Canvas resize） */
+.leaflet-bg--failed :deep(.leaflet-tile-pane) {
+  visibility: hidden;
+  opacity: 0;
+}
+
 .leaflet-bg :deep(.leaflet-control-container) {
   display: none;
+}
+
+.china-fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.95;
 }
 
 .migration-particles-canvas {
@@ -501,6 +611,7 @@ onUnmounted(() => {
   display: block;
   cursor: default;
   pointer-events: auto;
+  transition: opacity 0.4s ease;
 }
 
 .map-attribution {
