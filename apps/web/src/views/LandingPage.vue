@@ -28,6 +28,13 @@ const isAdmin = computed(() => {
 })
 
 const goToAdmin = () => {
+  // 一键体验/演示用户走 slug 直接进入家族后台，避免 /admin/* 重定向到
+  // /select-family 后触发 /api/auth/me/admin-clans 返回 401 被踢回登录页
+  const demoSlug = localStorage.getItem('demo_clan_slug')
+  if (demoSlug) {
+    router.push(`/zupu/${demoSlug}/dashboard`)
+    return
+  }
   router.push('/admin/dashboard')
 }
 
@@ -52,7 +59,7 @@ const handleDemoLogin = async () => {
   demoLoading.value = true
   try {
     const response = await axios.post('/api/auth/demo-login')
-    const { access_token, demoClanId } = response.data
+    const { access_token, demoClanId, demoClanSlug } = response.data
     localStorage.setItem('geneasphere_token', access_token)
     axios.defaults.headers.common['Authorization'] = 'Bearer ' + access_token
     authStore.token = access_token
@@ -61,8 +68,17 @@ const handleDemoLogin = async () => {
       phone: response.data.user.phone,
       role: 'OWNER',
     }
+
+    // 记住 demo slug，让顶部“进入后台”按钮也能走 slug 跳转路径
+    if (demoClanSlug) {
+      localStorage.setItem('demo_clan_slug', demoClanSlug)
+    }
+
     ElMessage.success('欢迎体验寻根路！')
-    if (demoClanId) {
+    // 优先跳 demo 家族后台，避免 /admin/* 重定向路径产生 401
+    if (demoClanSlug) {
+      router.push(`/zupu/${demoClanSlug}/dashboard`)
+    } else if (demoClanId) {
       router.push(`/tree/${demoClanId}`)
     } else {
       router.push('/clans')

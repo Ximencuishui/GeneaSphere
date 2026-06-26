@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
-import { useAuthStore } from '@/stores/auth'
+import request from '@/utils/request'
 
 interface AdminClan {
   id: string
@@ -13,21 +12,21 @@ interface AdminClan {
 }
 
 const router = useRouter()
-const auth = useAuthStore()
 const clans = ref<AdminClan[]>([])
 const loading = ref(false)
 
 const fetchAdminClans = async () => {
   loading.value = true
   try {
-    const res = await axios.get('/api/auth/me/admin-clans')
-    clans.value = res.data.clans || []
-  } catch (error: any) {
+    // 走封装的 request 实例：拦截器每次都从 localStorage 读 token，
+    // 不依赖全局 axios.defaults，避免 LoginView/旧 logout 等路径误删
+    // Authorization header 后导致 401。
+    const data = await request.get<unknown, { clans: AdminClan[] }>('/api/auth/me/admin-clans')
+    clans.value = data.clans || []
+  } catch (error) {
+    // 401 由 request 拦截器统一处理：清 token + 跳 /login + ElMessage 提示
+    // 业务层无需重复 logout，避免与拦截器跳转冲突
     console.error('Failed to fetch admin clans:', error)
-    // 401 表明 token 过期 / 无效：触发退出走路由跳到 /login
-    if (error?.response?.status === 401) {
-      auth.logout()
-    }
   } finally {
     loading.value = false
   }

@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { SmsService } from './sms.service';
 import { LoginLockService } from '../common/login-lock.service';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @Injectable()
 export class AuthService {
@@ -14,6 +15,7 @@ export class AuthService {
     private jwtService: JwtService,
     private smsService: SmsService,
     private loginLockService: LoginLockService,
+    private clanResolver: ClanResolverService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -91,11 +93,24 @@ export class AuthService {
     // 演示账号不参与锁定计数：清空失败记录以避免历史错误数据影响
     await this.loginLockService.clearFailures('USER', phone);
 
-    // 查找演示家族
-    const demoClan = await this.prisma.clan.findFirst({
+    // 查找演示家族，附带 slug 用于前端直接跳家族后台
+    let demoClan = await this.prisma.clan.findFirst({
       where: { name: '朱熹族谱（演示）' },
-      select: { id: true },
+      select: { id: true, slug: true },
     });
+
+    // 老版本 seed 未生成 slug：遇此情况自动补齐，避免 SelectFamilyPage 误跳到 login
+    if (demoClan && !demoClan.slug) {
+      const newSlug = await this.clanResolver.generateUniqueSlug(
+        'zhuxi-demo',
+        'zhuxi-demo',
+      );
+      demoClan = await this.prisma.clan.update({
+        where: { id: demoClan.id },
+        data: { slug: newSlug },
+        select: { id: true, slug: true },
+      });
+    }
 
     // 获取用户在家族中的角色
     const memberRole = await this.prisma.clanMember.findFirst({
@@ -110,6 +125,7 @@ export class AuthService {
       access_token: token,
       user: { id: user.id, phone: user.phone, role: memberRole?.role || 'VIEWER' },
       demoClanId: demoClan ? String(demoClan.id) : null,
+      demoClanSlug: demoClan?.slug ?? null,
     };
   }
 
@@ -132,11 +148,23 @@ export class AuthService {
 
     await this.loginLockService.clearFailures('USER', phone);
 
-    // 查找演示家族
-    const demoClan = await this.prisma.clan.findFirst({
+    // 查找演示家族，附带 slug 用于前端直接跳家族后台
+    let demoClan = await this.prisma.clan.findFirst({
       where: { name: '朱熹族谱（演示）' },
-      select: { id: true },
+      select: { id: true, slug: true },
     });
+
+    if (demoClan && !demoClan.slug) {
+      const newSlug = await this.clanResolver.generateUniqueSlug(
+        'zhuxi-demo',
+        'zhuxi-demo',
+      );
+      demoClan = await this.prisma.clan.update({
+        where: { id: demoClan.id },
+        data: { slug: newSlug },
+        select: { id: true, slug: true },
+      });
+    }
 
     // 获取用户在家族中的角色
     const memberRole = await this.prisma.clanMember.findFirst({
@@ -151,6 +179,7 @@ export class AuthService {
       access_token: token,
       user: { id: user.id, phone: user.phone, role: memberRole?.role || 'EDITOR' },
       demoClanId: demoClan ? String(demoClan.id) : null,
+      demoClanSlug: demoClan?.slug ?? null,
     };
   }
 

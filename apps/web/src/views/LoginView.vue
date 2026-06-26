@@ -81,7 +81,7 @@ const handleAdminDemoLogin = async () => {
   demoAdminLoading.value = true
   try {
     const response = await axios.post('/api/auth/demo-login')
-    const { access_token, demoClanId, user } = response.data
+    const { access_token, demoClanId, demoClanSlug, user } = response.data
 
     localStorage.setItem('geneasphere_token', access_token)
     axios.defaults.headers.common['Authorization'] = 'Bearer ' + access_token
@@ -93,12 +93,21 @@ const handleAdminDemoLogin = async () => {
       role: user.role,
     }
 
+    // 记住 demo 家族 slug，供 LandingPage “进入后台”按钮直接使用，
+    // 避免再次访问 /admin/* 重定向到 /select-family 触发 admin-clans 接口 401
+    if (demoClanSlug) {
+      localStorage.setItem('demo_clan_slug', demoClanSlug)
+    }
+
     ElMessage.success('欢迎体验族谱管理后台！')
 
-    if (demoClanId) {
+    // 优先用 slug 跳 demo 家族后台（跳过 select-family / admin-clans）
+    if (demoClanSlug) {
+      router.push(`/zupu/${demoClanSlug}/dashboard`)
+    } else if (demoClanId) {
       router.push(`/tree/${demoClanId}`)
     } else {
-      router.push('/admin/dashboard')
+      router.push('/clans')
     }
   } catch (error: any) {
     const msg = error.response?.data?.message || '演示服务暂不可用'
@@ -113,7 +122,7 @@ const handleMemberDemoLogin = async () => {
   demoMemberLoading.value = true
   try {
     const response = await axios.post('/api/auth/demo-member-login')
-    const { access_token, demoClanId, user } = response.data
+    const { access_token, demoClanId, demoClanSlug, user } = response.data
 
     localStorage.setItem('geneasphere_token', access_token)
     axios.defaults.headers.common['Authorization'] = 'Bearer ' + access_token
@@ -125,10 +134,17 @@ const handleMemberDemoLogin = async () => {
       role: user.role,
     }
 
+    if (demoClanSlug) {
+      localStorage.setItem('demo_clan_slug', demoClanSlug)
+    }
+
     ElMessage.success('欢迎体验族员个人页面！')
 
-    if (demoClanId) {
-      router.push(`/user-center/families`)
+    // demo 成员也优先用 slug 进入家族后台，体验路径与管理员一致
+    if (demoClanSlug) {
+      router.push(`/zupu/${demoClanSlug}/dashboard`)
+    } else if (demoClanId) {
+      router.push(`/tree/${demoClanId}`)
     } else {
       router.push('/dashboard')
     }
