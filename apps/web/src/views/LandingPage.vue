@@ -7,10 +7,11 @@ import axios from 'axios'
 import MigrationParticles from '@/components/home/MigrationParticles.vue'
 import SurnameLegend from '@/components/home/SurnameLegend.vue'
 import QuickSearchBar from '@/components/home/QuickSearchBar.vue'
+import DemoRoleModal from '@/components/landing/DemoRoleModal.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const demoLoading = ref(false)
+const demoModalVisible = ref(false)
 const scrollY = ref(0)
 const currentYear = new Date().getFullYear()
 const highlightedSurname = ref<string | null>(null)
@@ -55,39 +56,30 @@ const handleScroll = () => {
   scrollY.value = window.scrollY
 }
 
-const handleDemoLogin = async () => {
-  demoLoading.value = true
-  try {
-    const response = await axios.post('/api/auth/demo-login')
-    const { access_token, demoClanId, demoClanSlug } = response.data
-    localStorage.setItem('geneasphere_token', access_token)
-    axios.defaults.headers.common['Authorization'] = 'Bearer ' + access_token
-    authStore.token = access_token
-    authStore.user = {
-      sub: response.data.user.id,
-      phone: response.data.user.phone,
-      role: 'OWNER',
-    }
+/**
+ * 打开演示账号选择弹窗（营销网页统一入口）。
+ * 真实登录逻辑由 DemoRoleModal 组件内部处理。
+ */
+const openDemoModal = () => {
+  demoModalVisible.value = true
+}
 
-    // 记住 demo slug，让顶部“进入后台”按钮也能走 slug 跳转路径
-    if (demoClanSlug) {
-      localStorage.setItem('demo_clan_slug', demoClanSlug)
-    }
-
-    ElMessage.success('欢迎体验寻根路！')
-    // 优先跳 demo 家族后台，避免 /admin/* 重定向路径产生 401
-    if (demoClanSlug) {
-      router.push(`/zupu/${demoClanSlug}/dashboard`)
-    } else if (demoClanId) {
-      router.push(`/tree/${demoClanId}`)
-    } else {
-      router.push('/clans')
-    }
-  } catch (error: any) {
-    const msg = error.response?.data?.message || '演示服务暂不可用，请稍后再试'
-    ElMessage.error(msg)
-  } finally {
-    demoLoading.value = false
+/**
+ * 弹窗内登录成功回调：根据角色跳转到对应落地页。
+ * - admin：跳 /zupu/:slug/dashboard（家族管理后台）
+ * - member：直接跳 /user-center/families（族员个人中心，无需中转 dashboard）
+ */
+const onDemoLoginSuccess = async (role: 'admin' | 'member') => {
+  demoModalVisible.value = false
+  if (role === 'member') {
+    await router.push('/user-center/families')
+    return
+  }
+  const slug = localStorage.getItem('demo_clan_slug')
+  if (slug) {
+    await router.push(`/zupu/${slug}/dashboard`)
+  } else {
+    await router.push('/clans')
   }
 }
 
@@ -121,8 +113,7 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
             type="primary"
             size="large"
             class="btn-demo-nav"
-            :loading="demoLoading"
-            @click="handleDemoLogin"
+            @click="openDemoModal"
           >
             立即体验
           </el-button>
@@ -169,8 +160,7 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
               type="primary"
               size="large"
               class="btn-demo-hero"
-              :loading="demoLoading"
-              @click="handleDemoLogin"
+              @click="openDemoModal"
             >
               <span class="btn-icon">&#9654;</span>
               一键体验演示账号
@@ -322,8 +312,7 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
           type="primary"
           size="large"
           class="btn-demo-hero"
-          :loading="demoLoading"
-          @click="handleDemoLogin"
+          @click="openDemoModal"
         >
           <span class="btn-icon">&#9654;</span>
           开始体验
@@ -341,8 +330,7 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
             type="primary"
             size="large"
             class="btn-demo-hero"
-            :loading="demoLoading"
-            @click="handleDemoLogin"
+            @click="openDemoModal"
           >
             <span class="btn-icon">&#9654;</span>
             一键体验演示
@@ -381,6 +369,9 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
         </div>
       </div>
     </footer>
+
+    <!-- 演示账号一键登录弹窗（PC 居中 Modal + 移动端底部 Drawer 内部自动切换） -->
+    <DemoRoleModal v-model:visible="demoModalVisible" @success="onDemoLoginSuccess" />
   </div>
 </template>
 

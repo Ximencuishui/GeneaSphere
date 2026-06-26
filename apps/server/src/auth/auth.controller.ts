@@ -58,6 +58,20 @@ export class AuthController {
   }
 
   /**
+   * 获取当前演示账号关联的 Person 记录（族员视角的朱小小身份）。
+   *
+   * - 管理员演示账号 → person=null, role='OWNER'
+   * - 族员演示账号   → person=朱小小 Person 数据, role='EDITOR'
+   * - 其他用户       → 403 Forbidden
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('me/demo-person')
+  async myDemoPerson(@Req() req: any) {
+    const userId = req.user.userId;
+    return await this.authService.getDemoPerson(userId);
+  }
+
+  /**
    * 多家族 SaaS：把家族 slug 解析为元数据（id / name），
    * 前端路由守卫用来在进入 /zupu/:slug/* 前校验家族存在且可用。
    * 公开端点：避免先登录才能看到正确的家族信息。

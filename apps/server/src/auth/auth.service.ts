@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '@geneasphere/db';
 import { Role } from '@prisma/client';
@@ -70,14 +70,35 @@ export class AuthService {
   }
 
   /**
-   * 演示账号登录（绕过锁定）
-   *
-   * 演示账号（13800000000 / 13800000001）的密码是固定的 demo123，理论上不会失败。
-   * 但为了避免有人误用此接口触发锁定，这里 demo 登录路径不调用 LoginLockService。
-   * 同时，每次 demo 登录成功后清空对应主体的失败计数，防止历史脏数据影响演示。
+   * 查找演示家族（朱熹族谱（演示）），附带 slug 用于前端直接跳家族后台。
+   * 老版本 seed 未生成 slug 时自动补齐，避免 SelectFamilyPage 误跳到 login。
    */
-  async demoLogin() {
-    const phone = '13800000000';
+  private async getDemoClanWithSlug() {
+    let demoClan = await this.prisma.clan.findFirst({
+      where: { name: '朱熹族谱（演示）' },
+      select: { id: true, slug: true },
+    });
+    if (demoClan && !demoClan.slug) {
+      const newSlug = await this.clanResolver.generateUniqueSlug(
+        'zhuxi-demo',
+        'zhuxi-demo',
+      );
+      demoClan = await this.prisma.clan.update({
+        where: { id: demoClan.id },
+        data: { slug: newSlug },
+        select: { id: true, slug: true },
+      });
+    }
+    return demoClan;
+  }
+
+  /**
+   * 演示账号登录内部逻辑（封装重复代码）。
+   *
+   * @param phone 演示账号手机号（13800000000 管理员 / 13800000001 族员）
+   * @param defaultRole 查不到 clan 成员记录时使用的默认角色
+   */
+  private async demoLoginInternal(phone: string, defaultRole: 'OWNER' | 'EDITOR') {
     const password = 'demo123';
 
     const user = await this.prisma.user.findUnique({ where: { phone } });
@@ -93,94 +114,39 @@ export class AuthService {
     // 演示账号不参与锁定计数：清空失败记录以避免历史错误数据影响
     await this.loginLockService.clearFailures('USER', phone);
 
-    // 查找演示家族，附带 slug 用于前端直接跳家族后台
-    let demoClan = await this.prisma.clan.findFirst({
-      where: { name: '朱熹族谱（演示）' },
-      select: { id: true, slug: true },
-    });
+    const demoClan = await this.getDemoClanWithSlug();
 
-    // 老版本 seed 未生成 slug：遇此情况自动补齐，避免 SelectFamilyPage 误跳到 login
-    if (demoClan && !demoClan.slug) {
-      const newSlug = await this.clanResolver.generateUniqueSlug(
-        'zhuxi-demo',
-        'zhuxi-demo',
-      );
-      demoClan = await this.prisma.clan.update({
-        where: { id: demoClan.id },
-        data: { slug: newSlug },
-        select: { id: true, slug: true },
-      });
-    }
-
-    // 获取用户在家族中的角色
     const memberRole = await this.prisma.clanMember.findFirst({
       where: { user_id: user.id, clan_id: demoClan?.id },
       select: { role: true },
     });
 
-    const payload = { sub: user.id, phone: user.phone, role: memberRole?.role || 'VIEWER' };
+    const role = memberRole?.role || defaultRole;
+    const payload = { sub: user.id, phone: user.phone, role };
     const token = this.jwtService.sign(payload);
 
     return {
       access_token: token,
-      user: { id: user.id, phone: user.phone, role: memberRole?.role || 'VIEWER' },
+      user: { id: user.id, phone: user.phone, role },
       demoClanId: demoClan ? String(demoClan.id) : null,
       demoClanSlug: demoClan?.slug ?? null,
     };
   }
 
   /**
-   * 族员演示登录（普通成员角色）
+   * 演示账号登录（绕过锁定）—— 管理员视角（13800000000）。
+   * 演示账号的密码是固定的 demo123，理论上不会失败。
+   * demo 登录路径不调用 LoginLockService，每次成功后清空失败计数。
+   */
+  async demoLogin() {
+    return this.demoLoginInternal('13800000000', 'OWNER');
+  }
+
+  /**
+   * 族员演示登录（13800000001）—— 族员视角。
    */
   async demoMemberLogin() {
-    const phone = '13800000001';
-    const password = 'demo123';
-
-    const user = await this.prisma.user.findUnique({ where: { phone } });
-    if (!user) {
-      throw new UnauthorizedException('演示账号尚未初始化，请稍后再试');
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('演示账号尚未初始化，请稍后再试');
-    }
-
-    await this.loginLockService.clearFailures('USER', phone);
-
-    // 查找演示家族，附带 slug 用于前端直接跳家族后台
-    let demoClan = await this.prisma.clan.findFirst({
-      where: { name: '朱熹族谱（演示）' },
-      select: { id: true, slug: true },
-    });
-
-    if (demoClan && !demoClan.slug) {
-      const newSlug = await this.clanResolver.generateUniqueSlug(
-        'zhuxi-demo',
-        'zhuxi-demo',
-      );
-      demoClan = await this.prisma.clan.update({
-        where: { id: demoClan.id },
-        data: { slug: newSlug },
-        select: { id: true, slug: true },
-      });
-    }
-
-    // 获取用户在家族中的角色
-    const memberRole = await this.prisma.clanMember.findFirst({
-      where: { user_id: user.id, clan_id: demoClan?.id },
-      select: { role: true },
-    });
-
-    const payload = { sub: user.id, phone: user.phone, role: memberRole?.role || 'EDITOR' };
-    const token = this.jwtService.sign(payload);
-
-    return {
-      access_token: token,
-      user: { id: user.id, phone: user.phone, role: memberRole?.role || 'EDITOR' },
-      demoClanId: demoClan ? String(demoClan.id) : null,
-      demoClanSlug: demoClan?.slug ?? null,
-    };
+    return this.demoLoginInternal('13800000001', 'EDITOR');
   }
 
   private async loginByPassword(phone: string, password: string) {
@@ -244,6 +210,127 @@ export class AuthService {
       role: m.role,
       is_owner: m.clan.admin_user_id === userId,
     }));
+  }
+
+  /**
+   * 获取当前演示账号关联的 Person 记录（朱小小）。
+   *
+   * 仅供演示账号使用：
+   * - 13800000000（管理员）→ 返回 null（管理员视角不绑定具体 Person）
+   * - 13800000001（族员）   → 返回"朱小小"Person 数据（族谱真实身份）
+   * - 其他用户              → 403 Forbidden
+   *
+   * 关联关系通过 person_user_links 表维护，由 DemoSeedService 自动建立。
+   */
+  async getDemoPerson(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { phone: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException('用户不存在');
+    }
+
+    // 管理员视角：不关联具体 Person
+    if (user.phone === '13800000000') {
+      return { person: null, role: 'OWNER' as const };
+    }
+
+    // 非演示账号：拒绝访问
+    if (user.phone !== '13800000001') {
+      throw new ForbiddenException('该接口仅供演示账号使用');
+    }
+
+    // 族员视角：查询 PersonUserLink 关联的 Person 记录
+    const link = await this.prisma.personUserLink.findFirst({
+      where: { user_id: userId, relation_role: 'self' },
+      include: {
+        person: {
+          select: {
+            id: true,
+            full_name: true,
+            gender: true,
+            birth_date: true,
+            birth_place: true,
+            migration_branch: true,
+            avatar_url: true,
+            clan: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!link) {
+      // 兜底：按姓名 + 演示家族查找（兼容 seed 失败导致 link 未建立的情况）
+      // 限定 clan 避免误返回其他家族同名 Person
+      const person = await this.prisma.person.findFirst({
+        where: {
+          full_name: '朱小小',
+          clan: { name: '朱熹族谱（演示）' },
+        },
+        select: {
+          id: true,
+          full_name: true,
+          gender: true,
+          birth_date: true,
+          birth_place: true,
+          migration_branch: true,
+          avatar_url: true,
+          clan: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+        },
+      });
+      if (!person) {
+        throw new UnauthorizedException('演示族员身份尚未初始化，请联系管理员');
+      }
+      return {
+        person: {
+          id: person.id.toString(),
+          full_name: person.full_name,
+          gender: person.gender,
+          birth_date: person.birth_date,
+          birth_place: person.birth_place,
+          migration_branch: person.migration_branch,
+          avatar_url: person.avatar_url,
+          clan: {
+            id: person.clan.id.toString(),
+            name: person.clan.name,
+            slug: person.clan.slug,
+          },
+        },
+        role: 'EDITOR' as const,
+      };
+    }
+
+    const p = link.person;
+    return {
+      person: {
+        id: p.id.toString(),
+        full_name: p.full_name,
+        gender: p.gender,
+        birth_date: p.birth_date,
+        birth_place: p.birth_place,
+        migration_branch: p.migration_branch,
+        avatar_url: p.avatar_url,
+        clan: {
+          id: p.clan.id.toString(),
+          name: p.clan.name,
+          slug: p.clan.slug,
+        },
+      },
+      role: 'EDITOR' as const,
+    };
   }
 
   private async loginBySmsCode(phone: string, smsCode: string) {

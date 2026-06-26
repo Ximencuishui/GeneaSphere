@@ -1,6 +1,14 @@
 ﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaClient, Gender } from '@geneasphere/db';
 import * as bcrypt from 'bcryptjs';
+import {
+  ADMIN_AVATAR,
+  MEMBER_AVATAR,
+  HISTORICAL_AVATAR,
+  MALE_AVATAR,
+  FEMALE_AVATAR,
+  CLAN_COVER_IMAGE,
+} from './demo-assets';
 /**
  * 演示种子数据服务 - 朱熹族谱版（1000 人）
  * 始祖朱熹（1130-1200），覆盖约 28 代。
@@ -25,24 +33,48 @@ export class DemoSeedService implements OnModuleInit {
       let demoUser = await this.prisma.user.findUnique({ where: { phone: '13800000000' } });
       if (!demoUser) {
         demoUser = await this.prisma.user.create({
-          data: { phone: '13800000000', password_hash: demoPasswordHash, nickname: '演示用户·管理员', email: 'demo@geneasphere.com', gender: 'male', avatar_url: null },
+          data: {
+            phone: '13800000000',
+            password_hash: demoPasswordHash,
+            nickname: '演示用户·管理员',
+            email: 'demo@geneasphere.com',
+            gender: 'male',
+            avatar_url: ADMIN_AVATAR,
+          },
         });
-        this.logger.log('演示用户已创建: 13800000000 / demo123');
+        this.logger.log(`演示用户已创建: 13800000000 / demo123 (avatar=${ADMIN_AVATAR})`);
       } else {
         await this.prisma.user.update({
           where: { phone: '13800000000' },
-          data: { password_hash: demoPasswordHash, nickname: demoUser.nickname || '演示用户·管理员', email: demoUser.email || 'demo@geneasphere.com' },
+          data: {
+            password_hash: demoPasswordHash,
+            nickname: demoUser.nickname || '演示用户·管理员',
+            email: demoUser.email || 'demo@geneasphere.com',
+            avatar_url: demoUser.avatar_url || ADMIN_AVATAR,
+          },
         });
       }
       let demoMemberUser = await this.prisma.user.findUnique({ where: { phone: '13800000001' } });
       if (!demoMemberUser) {
         demoMemberUser = await this.prisma.user.create({
-          data: { phone: '13800000001', password_hash: demoPasswordHash, nickname: '演示族员·小明', email: 'member@geneasphere.com', gender: 'male', avatar_url: null },
+          data: {
+            phone: '13800000001',
+            password_hash: demoPasswordHash,
+            nickname: '演示族员·朱小小',
+            email: 'member@geneasphere.com',
+            gender: 'male',
+            avatar_url: MEMBER_AVATAR,
+          },
         });
       } else {
         await this.prisma.user.update({
           where: { phone: '13800000001' },
-          data: { password_hash: demoPasswordHash, nickname: demoMemberUser.nickname || '演示族员·小明', email: demoMemberUser.email || 'member@geneasphere.com' },
+          data: {
+            password_hash: demoPasswordHash,
+            nickname: demoMemberUser.nickname || '演示族员·朱小小',
+            email: demoMemberUser.email || 'member@geneasphere.com',
+            avatar_url: demoMemberUser.avatar_url || MEMBER_AVATAR,
+          },
         });
       }
       for (const userId of [demoUser.id, demoMemberUser.id]) {
@@ -58,9 +90,10 @@ export class DemoSeedService implements OnModuleInit {
         this.logger.log('旧演示家族已清理');
       }
       let demoClan = await this.prisma.clan.findFirst({ where: { name: '朱熹族谱（演示）' } });
+      const isFirstCreate = !demoClan;
       if (!demoClan) {
         demoClan = await this.prisma.clan.create({
-          data: { name: '朱熹族谱（演示）', description: '南宋理学家朱熹（1130-1200）后裔族谱演示，涵盖约 28 代、1000 位族人。', admin_user: { connect: { id: demoUser.id } } },
+          data: { name: '朱熹族谱（演示）', description: this.buildClanDescription(), admin_user: { connect: { id: demoUser.id } } },
         });
         await this.prisma.clanMember.create({ data: { clan_id: demoClan.id, user_id: demoUser.id, role: 'OWNER' } });
         const stats = await this.createDemoZhuXiGenealogy(demoClan.id);
@@ -71,6 +104,60 @@ export class DemoSeedService implements OnModuleInit {
       }
       const existingMemberClan = await this.prisma.clanMember.findUnique({ where: { clan_id_user_id: { clan_id: demoClan.id, user_id: demoMemberUser.id } } });
       if (!existingMemberClan) await this.prisma.clanMember.create({ data: { clan_id: demoClan.id, user_id: demoMemberUser.id, role: 'EDITOR' } });
+
+      // ==================== 朱小小 Person 记录 + PersonUserLink 关联 ====================
+      // 族员演示账号（13800000001）作为朱熹长房后裔"朱小小"在族谱中真实存在
+      // 使用 upsert 保证幂等：多次启动 seed 不会重复创建
+      let zhuxiaoxiao = await this.prisma.person.findFirst({
+        where: { clan_id: demoClan.id, full_name: '朱小小' },
+      });
+      if (!zhuxiaoxiao) {
+        zhuxiaoxiao = await this.prisma.person.create({
+          data: {
+            clan_id: demoClan.id,
+            full_name: '朱小小',
+            gender: 'male' as Gender,
+            birth_date: new Date('2000-01-01'),
+            death_date: null,
+            is_living: true,
+            birth_place: '福建武夷山',
+            migration_branch: 'A',
+            avatar_url: MEMBER_AVATAR,
+            thumbnail_url: MEMBER_AVATAR,
+          },
+        });
+        this.logger.log(`✅ 朱小小 Person 记录已创建: id=${zhuxiaoxiao.id}`);
+      } else if (!zhuxiaoxiao.avatar_url) {
+        zhuxiaoxiao = await this.prisma.person.update({
+          where: { id: zhuxiaoxiao.id },
+          data: { avatar_url: MEMBER_AVATAR, thumbnail_url: MEMBER_AVATAR },
+        });
+      }
+
+      // 创建或更新 PersonUserLink 关联（族员账号 ↔ 朱小小 Person）
+      const existingLink = await this.prisma.personUserLink.findFirst({
+        where: { user_id: demoMemberUser.id, person_id: zhuxiaoxiao.id, relation_role: 'self' },
+      });
+      if (!existingLink) {
+        await this.prisma.personUserLink.create({
+          data: {
+            user_id: demoMemberUser.id,
+            person_id: zhuxiaoxiao.id,
+            relation_role: 'self',
+            verified_at: new Date(),
+          },
+        });
+        this.logger.log(`✅ PersonUserLink 已创建: user=${demoMemberUser.id} -> 朱小小(person=${zhuxiaoxiao.id})`);
+      }
+
+      // 仅在首次创建家族时设置完整 description（避免每次启动都写库）
+      if (isFirstCreate) {
+        await this.prisma.clan.update({
+          where: { id: demoClan.id },
+          data: { description: this.buildClanDescription() },
+        });
+      }
+
       await this.seedPlatformAdmin();
     } catch (error) {
       this.logger.error('种子数据初始化失败:', error.message);
@@ -85,6 +172,11 @@ export class DemoSeedService implements OnModuleInit {
     } else {
       await this.prisma.platformAdmin.update({ where: { username: 'platform_admin' }, data: { password_hash: passwordHash } });
     }
+  }
+
+  /** 构造演示家族的完整 description（含朱小小介绍） */
+  private buildClanDescription(): string {
+    return `南宋理学家朱熹（1130-1200）后裔族谱演示，涵盖约 28 代、1000 位族人。\n\n演示族员「朱小小」：朱熹长房 30 世孙，2000 年生于福建武夷山，毕业于厦门大学软件工程系，现从事家族数字化工作。`;
   }
   private static readonly TARGET_POPULATION = 1000;
   private static readonly CURRENT_YEAR = 2025;
@@ -133,11 +225,15 @@ export class DemoSeedService implements OnModuleInit {
     this.logger.log('开始生成朱熹族谱 1000 人演示数据...');
     const historicalMap = new Map<string, bigint>();
     const historicalData = DemoSeedService.HISTORICAL_FIGURES.map((f) => ({
-      clan_id: clanId, full_name: f.name, gender: f.gender as Gender,
-      birth_date: new Date(`${f.birth}-01-01`), death_date: f.death ? new Date(`${f.death}-12-31`) : null,
+      clan_id: clanId,
+      full_name: f.name,
+      gender: f.gender as Gender,
+      birth_date: new Date(`${f.birth}-01-01`),
+      death_date: f.death ? new Date(`${f.death}-12-31`) : null,
       is_living: !f.death || f.death >= DemoSeedService.CURRENT_YEAR,
       birth_place: DemoSeedService.BIRTH_PLACES[f.generation % DemoSeedService.BIRTH_PLACES.length],
       migration_branch: f.branch,
+      avatar_url: HISTORICAL_AVATAR(f.generation * 10 + (f.branch ? f.branch.charCodeAt(0) : 0), f.gender),
     }));
     const createdHistorical = await this.prisma.person.createManyAndReturn({ data: historicalData });
     createdHistorical.forEach((p, idx) => { historicalMap.set(DemoSeedService.HISTORICAL_FIGURES[idx].name, p.id); });
@@ -311,6 +407,7 @@ export class DemoSeedService implements OnModuleInit {
       is_living: p.is_living,
       birth_place: DemoSeedService.BIRTH_PLACES[p.gen % DemoSeedService.BIRTH_PLACES.length],
       migration_branch: p.branch,
+      avatar_url: p.gender === 'male' ? MALE_AVATAR(p.gen * 100 + totalCreated) : FEMALE_AVATAR(p.gen * 100 + totalCreated),
     }));
     const CHUNK = 200;
     const allNewPersons: any[] = [];
