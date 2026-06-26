@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Request, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, UseGuards, Request, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
@@ -18,13 +18,12 @@ export class DashboardController {
   @ApiOperation({ summary: 'Get dashboard statistics' })
   async getDashboard(@Request() req) {
     const userId = req.user.userId;
-    const clanId = BigInt(req.query.clanId || '0');
-
-    if (clanId === BigInt(0)) {
-      throw new ForbiddenException('clanId is required');
+    const clanSlug = String(req.query.clanSlug || '');
+    if (!clanSlug) {
+      throw new BadRequestException('clanSlug is required');
     }
 
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const [
       totalMembers,

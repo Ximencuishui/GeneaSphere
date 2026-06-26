@@ -1,10 +1,33 @@
 import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { Role, ReviewStatus, ApplicationStatus } from '@prisma/client';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clanResolver: ClanResolverService,
+  ) {}
+
+  /**
+   * 多家族 SaaS：根据 URL 上的 slug 解析到 clanId，并校验当前用户是该家族的 OWNER/ADMIN。
+   * 所有 /api/admin/* controller 入口统一调用此方法替代原来的 BigInt(query.clanId) + requireAdmin。
+   */
+  async requireAdminBySlug(clanSlug: string, userId: string): Promise<bigint> {
+    const clan = await this.clanResolver.resolveOrThrow(clanSlug);
+    await this.requireAdmin(clan.id, userId);
+    return clan.id;
+  }
+
+  /**
+   * 多家族 SaaS：slug → clanId 并校验 OWNER。
+   */
+  async requireOwnerBySlug(clanSlug: string, userId: string): Promise<bigint> {
+    const clan = await this.clanResolver.resolveOrThrow(clanSlug);
+    await this.requireOwner(clan.id, userId);
+    return clan.id;
+  }
 
   /**
    * 检查用户是否有管理员权限

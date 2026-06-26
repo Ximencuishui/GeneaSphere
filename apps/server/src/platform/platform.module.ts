@@ -10,6 +10,7 @@ import { StatisticsController } from './statistics/statistics.controller';
 import { PlatformLogsController } from './logs/logs.controller';
 import { SettingsService } from './settings/settings.service';
 import { PdfReportService } from './statistics/pdf-report.service';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @Module({
   imports: [forwardRef(() => PlatformAuthModule)],
@@ -23,7 +24,7 @@ import { PdfReportService } from './statistics/pdf-report.service';
     StatisticsController,
     PlatformLogsController,
   ],
-  providers: [SettingsService, PdfReportService],
-  exports: [SettingsService, PdfReportService],
+  providers: [SettingsService, PdfReportService, ClanResolverService],
+  exports: [SettingsService, PdfReportService, ClanResolverService],
 })
 export class PlatformModule {}

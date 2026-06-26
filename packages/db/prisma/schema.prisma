@@ -99,6 +99,7 @@ model User {
 model Clan {
   id                       BigInt                   @id @default(autoincrement()) @map("id")
   name                     String                   @map("name")
+  slug                     String?                  @unique @map("slug")
   description              String?                  @map("description")
   admin_user_id            String                   @map("admin_user_id")
   settings_json            Json?                    @map("settings_json")
@@ -153,6 +154,7 @@ model Clan {
 
   @@index([status])
   @@index([register_ip])
+  @@index([slug])
   @@map("clans")
 }
 

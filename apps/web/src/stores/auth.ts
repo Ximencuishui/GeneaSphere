@@ -41,6 +41,27 @@ export const useAuthStore = defineStore("auth", () => {
     return response.data
   }
 
+  /** 登录后智能跳转：多家族 SaaS 跳转规则 */
+  const navigateAfterLogin = async () => {
+    try {
+      const response = await axios.get('/api/auth/me/admin-clans')
+      const clans: Array<{ id: string; slug: string; name: string }> = response.data.clans || []
+      if (clans.length === 1) {
+        // 单一家族：直接进入家族后台
+        await router.push(`/zupu/${clans[0].slug}/dashboard`)
+      } else if (clans.length > 1) {
+        // 多个家族：跳转到家族选择页
+        await router.push('/select-family')
+      } else {
+        // 无管理家族：进入普通用户仪表盘
+        await router.push('/dashboard')
+      }
+    } catch (error) {
+      console.warn('Failed to fetch admin clans, fallback to dashboard', error)
+      await router.push('/dashboard')
+    }
+  }
+
   /** 短信验证码登录（无密码自动注册） */
   const loginBySms = async (phone: string, smsCode: string) => {
     loading.value = true
@@ -50,7 +71,7 @@ export const useAuthStore = defineStore("auth", () => {
       localStorage.setItem(TOKEN_KEY, token.value)
       axios.defaults.headers.common["Authorization"] = "Bearer " + token.value
       user.value = parseTokenPayload(token.value)
-      await router.push("/dashboard")
+      await navigateAfterLogin()
     } catch (error) {
       throw error
     } finally {
@@ -67,7 +88,7 @@ export const useAuthStore = defineStore("auth", () => {
       localStorage.setItem(TOKEN_KEY, token.value)
       axios.defaults.headers.common["Authorization"] = "Bearer " + token.value
       user.value = parseTokenPayload(token.value)
-      await router.push("/dashboard")
+      await navigateAfterLogin()
     } catch (error) {
       throw error
     } finally {
@@ -92,7 +113,7 @@ export const useAuthStore = defineStore("auth", () => {
       localStorage.setItem(TOKEN_KEY, token.value)
       axios.defaults.headers.common["Authorization"] = "Bearer " + token.value
       user.value = parseTokenPayload(token.value)
-      await router.push("/dashboard")
+      await navigateAfterLogin()
     } catch (error) {
       throw error
     } finally {

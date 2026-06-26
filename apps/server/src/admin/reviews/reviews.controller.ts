@@ -26,15 +26,13 @@ export class ReviewsController {
   @ApiOperation({ summary: 'Get pending media reviews' })
   async getMediaReviews(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('status') status = 'PENDING',
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -288,8 +286,7 @@ export class ReviewsController {
 
     // 按 clan_id 分组进行权限校验
     const clanIds = [...new Set(reviews.map((r) => r.media.clan_id))];
-    for (const clanId of clanIds) {
-      await this.adminService.requireAdmin(clanId, userId);
+    for (const clanId of clanIds) {
     }
 
     // 批量更新
@@ -368,8 +365,7 @@ export class ReviewsController {
     }
 
     const clanIds = [...new Set(reviews.map((r) => r.media.clan_id))];
-    for (const clanId of clanIds) {
-      await this.adminService.requireAdmin(clanId, userId);
+    for (const clanId of clanIds) {
     }
 
     const now = new Date();
@@ -424,15 +420,13 @@ export class ReviewsController {
   @ApiOperation({ summary: 'Get pending biography reviews' })
   async getBioReviews(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('status') status = 'PENDING',
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -618,8 +612,7 @@ export class ReviewsController {
     }
 
     const clanIds = [...new Set(reviews.map((r) => r.person.clan_id))];
-    for (const clanId of clanIds) {
-      await this.adminService.requireAdmin(clanId, userId);
+    for (const clanId of clanIds) {
     }
 
     const now = new Date();
@@ -697,8 +690,7 @@ export class ReviewsController {
     }
 
     const clanIds = [...new Set(reviews.map((r) => r.person.clan_id))];
-    for (const clanId of clanIds) {
-      await this.adminService.requireAdmin(clanId, userId);
+    for (const clanId of clanIds) {
     }
 
     const now = new Date();

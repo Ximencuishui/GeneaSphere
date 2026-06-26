@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { CreateClanDto, UpdateClanDto } from './dto/create-clan.dto';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @Injectable()
 export class ClanService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clanResolver: ClanResolverService,
+  ) {}
 
   /**
    * Create a new clan
@@ -15,9 +19,12 @@ export class ClanService {
   async create(createClanDto: CreateClanDto, userId: string) {
     const { name, description, settings_json } = createClanDto;
 
+    const slug = await this.clanResolver.generateUniqueSlug(name);
+
     return this.prisma.clan.create({
       data: {
         name,
+        slug,
         description,
         settings_json,
         admin_user_id: userId,

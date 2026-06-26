@@ -23,14 +23,14 @@ export class AdminFamilyRelationController {
   @ApiOperation({ summary: '审核队列列表' })
   async listChanges(
     @Request() req,
-    @Query('clanId') clanId: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('status') status?: string,
     @Query('change_type') changeType?: string,
     @Query('page') page = 1,
     @Query('pageSize') pageSize = 20,
   ) {
     return this.service.listChanges(req.user.userId, {
-      clanId,
+      clanSlug,
       status,
       changeType,
       page: Number(page),
@@ -68,8 +68,8 @@ export class AdminFamilyRelationController {
 
   @Get('disputes')
   @ApiOperation({ summary: '争议列表' })
-  async listDisputes(@Request() req, @Query('clanId') clanId: string) {
-    return this.service.listDisputes(req.user.userId, clanId);
+  async listDisputes(@Request() req, @Query('clanSlug') clanSlug: string) {
+    return this.service.listDisputes(req.user.userId, clanSlug);
   }
 
   @Post('disputes/:id/resolve')

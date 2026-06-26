@@ -65,9 +65,9 @@ const pendingTodos = ref<{
 
 const fetchPendingCount = async () => {
   try {
-    const clanId = route.query.clanId || '1'
+    const clanSlug = (route.params.slug as string) || route.query.clanSlug || ''
     const res = await axios.get('/api/admin/dashboard', {
-      params: { clanId },
+      params: { clanSlug },
     })
     const stats = res.data.statistics
     pendingCount.value = (stats.pending_media_reviews || 0) + (stats.pending_bio_reviews || 0) + (stats.pending_applications || 0)
@@ -85,139 +85,143 @@ onMounted(() => {
   fetchPendingCount()
 })
 
-const menuItems = ref([
+// 当前路径的 clan slug（路径参数 :slug）
+const clanSlug = computed(() => (route.params.slug as string) || '')
+
+// 根据当前 slug 动态生成所有菜单路径
+const menuItems = computed(() => [
   {
     title: '概况',
     icon: 'Monitor',
     children: [
-      { title: '控制面板', path: '/admin/dashboard' },
-      { title: '族谱树', path: '/tree/1' },
+      { title: '控制面板', path: `/zupu/${clanSlug.value}/dashboard` },
+      { title: '族谱树', path: `/tree/${clanSlug.value}` },
     ],
   },
   {
     title: '人员管理',
     icon: 'User',
     children: [
-      { title: '成员列表', path: '/admin/members' },
-      { title: '权限分配', path: '/admin/members?tab=roles' },
-      { title: '邀请二维码', path: '/admin/invite/qrcodes' },
-      { title: '验证记录', path: '/admin/invite/records' },
-      { title: '信息修改审核', path: '/admin/invite/reviews' },
-      { title: '家庭关系变更审核', path: '/admin/family-relation/reviews' },
-      { title: '子女归属争议', path: '/admin/family-relation/disputes' },
-      { title: 'PDF 导入管理', path: '/admin/import' },
+      { title: '成员列表', path: `/zupu/${clanSlug.value}/members` },
+      { title: '权限分配', path: `/zupu/${clanSlug.value}/members?tab=roles` },
+      { title: '邀请二维码', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
+      { title: '验证记录', path: `/zupu/${clanSlug.value}/invite/records` },
+      { title: '信息修改审核', path: `/zupu/${clanSlug.value}/invite/reviews` },
+      { title: '家庭关系变更审核', path: `/zupu/${clanSlug.value}/family-relation/reviews` },
+      { title: '子女归属争议', path: `/zupu/${clanSlug.value}/family-relation/disputes` },
+      { title: 'PDF 导入管理', path: `/zupu/${clanSlug.value}/import` },
     ],
   },
   {
     title: '内容审核',
     icon: 'PictureFilled',
     children: [
-      { title: '影像审核', path: '/admin/reviews/media' },
-      { title: '生平审核', path: '/admin/reviews/bio' },
-      { title: '举报管理', path: '/admin/reports' },
+      { title: '影像审核', path: `/zupu/${clanSlug.value}/reviews/media` },
+      { title: '生平审核', path: `/zupu/${clanSlug.value}/reviews/bio` },
+      { title: '举报管理', path: `/zupu/${clanSlug.value}/reports` },
     ],
   },
   {
     title: '地方记忆',
     icon: 'Collection',
     children: [
-      { title: '题库管理', path: '/admin/memory/quizzes' },
+      { title: '题库管理', path: `/zupu/${clanSlug.value}/memory/quizzes` },
     ],
   },
   {
     title: '寻亲管理',
     icon: 'Connection',
     children: [
-      { title: '认亲申请', path: '/admin/merge/applications' },
-      { title: '寻亲帖管理', path: '/admin/merge/posts' },
+      { title: '认亲申请', path: `/zupu/${clanSlug.value}/merge/applications` },
+      { title: '寻亲帖管理', path: `/zupu/${clanSlug.value}/merge/posts` },
     ],
   },
   {
     title: '家族公告',
     icon: 'Postcard',
     children: [
-      { title: '公告管理', path: '/admin/announcements' },
+      { title: '公告管理', path: `/zupu/${clanSlug.value}/announcements` },
     ],
   },
   {
     title: '数据管理',
     icon: 'DataLine',
     children: [
-      { title: '数据统计', path: '/admin/statistics' },
-      { title: '回收站', path: '/admin/trash' },
-      { title: '数据导出', path: '/admin/settings/export' },
+      { title: '数据统计', path: `/zupu/${clanSlug.value}/statistics` },
+      { title: '回收站', path: `/zupu/${clanSlug.value}/trash` },
+      { title: '数据导出', path: `/zupu/${clanSlug.value}/settings/export` },
     ],
   },
   {
     title: '影像管理',
     icon: 'PictureFilled',
     children: [
-      { title: '影像库', path: '/admin/media/library' },
-      { title: '相册管理', path: '/admin/media/albums' },
+      { title: '影像库', path: `/zupu/${clanSlug.value}/media/library` },
+      { title: '相册管理', path: `/zupu/${clanSlug.value}/media/albums` },
     ],
   },
   {
     title: '工具记录',
     icon: 'RefreshRight',
     children: [
-      { title: 'AI工具使用记录', path: '/admin/toolbox-usage' },
-      { title: '家庭图册', path: '/admin/family-albums' },
+      { title: 'AI工具使用记录', path: `/zupu/${clanSlug.value}/toolbox-usage` },
+      { title: '家庭图册', path: `/zupu/${clanSlug.value}/family-albums` },
     ],
   },
   {
     title: '印刷服务',
     icon: 'Printer',
     children: [
-      { title: '订单管理', path: '/admin/orders' },
+      { title: '订单管理', path: `/zupu/${clanSlug.value}/orders` },
     ],
   },
   {
     title: '族谱生成',
     icon: 'Document',
     children: [
-      { title: '生成族谱', path: '/admin/genealogy/generate' },
-      { title: '历史版本', path: '/admin/genealogy/history' },
+      { title: '生成族谱', path: `/zupu/${clanSlug.value}/genealogy/generate` },
+      { title: '历史版本', path: `/zupu/${clanSlug.value}/genealogy/history` },
     ],
   },
   {
     title: '视频中心',
     icon: 'VideoCamera',
     children: [
-      { title: '迁徙历史视频', path: '/admin/video/migration' },
-      { title: '大事件视频', path: '/admin/video/event' },
+      { title: '迁徙历史视频', path: `/zupu/${clanSlug.value}/video/migration` },
+      { title: '大事件视频', path: `/zupu/${clanSlug.value}/video/event` },
     ],
   },
   {
     title: '事件管理',
     icon: 'Calendar',
     children: [
-      { title: '大事件列表', path: '/admin/family-events' },
-      { title: '迁徙管理', path: '/admin/migration' },
+      { title: '大事件列表', path: `/zupu/${clanSlug.value}/family-events` },
+      { title: '迁徙管理', path: `/zupu/${clanSlug.value}/migration` },
     ],
   },
   {
     title: '短信通知',
     icon: 'Message',
     children: [
-      { title: '发送短信', path: '/admin/sms/send' },
-      { title: '余额管理', path: '/admin/sms/balance' },
+      { title: '发送短信', path: `/zupu/${clanSlug.value}/sms/send` },
+      { title: '余额管理', path: `/zupu/${clanSlug.value}/sms/balance` },
     ],
   },
   {
     title: '日志审计',
     icon: 'Document',
     children: [
-      { title: '操作日志', path: '/admin/logs' },
+      { title: '操作日志', path: `/zupu/${clanSlug.value}/logs` },
     ],
   },
   {
     title: '系统设置',
     icon: 'Setting',
     children: [
-      { title: '隐私配置', path: '/admin/settings/privacy' },
-      { title: '字辈管理', path: '/admin/settings/xipai' },
-      { title: '家族信息', path: '/admin/settings/clan-info' },
-      { title: '云存储', path: '/admin/settings/storage' },
+      { title: '隐私配置', path: `/zupu/${clanSlug.value}/settings/privacy` },
+      { title: '字辈管理', path: `/zupu/${clanSlug.value}/settings/xipai` },
+      { title: '家族信息', path: `/zupu/${clanSlug.value}/settings/clan-info` },
+      { title: '云存储', path: `/zupu/${clanSlug.value}/settings/storage` },
     ],
   },
 ])
@@ -240,11 +244,11 @@ const updateOpenedMenus = () => {
 watch(() => route.path, updateOpenedMenus, { immediate: true })
 
 const activeMenu = computed(() => {
-  // 处理带 query 的路由，如 /admin/members?tab=roles
-  const path = route.path
+  // 处理带 query 的路由，如 /zupu/:slug/members?tab=roles
+  const fullPath = route.fullPath
   const tab = route.query.tab
-  if (tab === 'roles') return '/admin/members?tab=roles'
-  return path
+  if (tab === 'roles') return `/zupu/${clanSlug.value}/members?tab=roles`
+  return fullPath
 })
 
 // 生成面包屑
@@ -329,7 +333,7 @@ const handleLogout = () => {
             @click="sidebarVisible = true"
           />
           <ElBreadcrumb separator="/" class="breadcrumb">
-            <ElBreadcrumbItem :to="{ path: '/admin/dashboard' }">
+            <ElBreadcrumbItem :to="{ path: `/zupu/${clanSlug}/dashboard` }">
               <ElIcon><HomeFilled /></ElIcon>
             </ElBreadcrumbItem>
             <ElBreadcrumbItem
@@ -360,7 +364,7 @@ const handleLogout = () => {
                 <div
                   v-if="pendingTodos.media_count > 0"
                   class="notify-item"
-                  @click="router.push('/admin/reviews/media'); notifyVisible = false"
+                  @click="router.push(`/zupu/${clanSlug}/reviews/media`); notifyVisible = false"
                 >
                   <ElIcon color="#E6A23C"><PictureFilled /></ElIcon>
                   <span>待审影像</span>
@@ -369,7 +373,7 @@ const handleLogout = () => {
                 <div
                   v-if="pendingTodos.bio_count > 0"
                   class="notify-item"
-                  @click="router.push('/admin/reviews/bio'); notifyVisible = false"
+                  @click="router.push(`/zupu/${clanSlug}/reviews/bio`); notifyVisible = false"
                 >
                   <ElIcon color="#409EFF"><Document /></ElIcon>
                   <span>待审生平</span>
@@ -378,7 +382,7 @@ const handleLogout = () => {
                 <div
                   v-if="pendingTodos.merge_count > 0"
                   class="notify-item"
-                  @click="router.push('/admin/merge/applications'); notifyVisible = false"
+                  @click="router.push(`/zupu/${clanSlug}/merge/applications`); notifyVisible = false"
                 >
                   <ElIcon color="#67C23A"><Connection /></ElIcon>
                   <span>待处理寻亲</span>
@@ -394,7 +398,7 @@ const handleLogout = () => {
             </span>
             <template #dropdown>
               <ElDropdownMenu>
-                <ElDropdownItem @click="router.push('/admin/settings/privacy')">
+                <ElDropdownItem @click="router.push(`/zupu/${clanSlug}/settings/privacy`)">
                   个人设置
                 </ElDropdownItem>
                 <ElDropdownItem divided @click="handleLogout">

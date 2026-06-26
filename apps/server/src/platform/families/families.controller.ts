@@ -77,6 +77,7 @@ export class FamiliesController {
     return {
       data: items.map((c) => ({
         id: c.id.toString(),
+        slug: c.slug,
         name: c.name,
         description: c.description,
         status: c.status,
@@ -131,6 +132,7 @@ export class FamiliesController {
 
     return {
       id: clan.id.toString(),
+      slug: clan.slug,
       name: clan.name,
       description: clan.description,
       status: clan.status,

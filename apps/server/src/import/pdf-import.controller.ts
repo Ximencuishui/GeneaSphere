@@ -19,6 +19,7 @@ import { memoryStorage } from 'multer';
 import { PdfImportService, PdfPersonRecord } from './pdf-import.service';
 import { OcrBillingService } from './ocr-billing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('import/pdf')
@@ -26,6 +27,7 @@ export class PdfImportController {
   constructor(
     private readonly pdfImportService: PdfImportService,
     private readonly ocrBilling: OcrBillingService,
+    private readonly clanResolver: ClanResolverService,
   ) {}
 
   /**
@@ -57,7 +59,7 @@ export class PdfImportController {
   )
   async uploadPdf(
     @UploadedFile() file: Express.Multer.File,
-    @Body('clan_id') clanIdStr: string,
+    @Body('clan_slug') clanSlug: string,
     @Body('user_id') userId: string,
     @Body('force_ocr') forceOcr?: string
   ) {
@@ -65,7 +67,7 @@ export class PdfImportController {
       throw new BadRequestException('请上传PDF文件');
     }
 
-    const clanId = BigInt(clanIdStr);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
 
     try {
       const taskId = await this.pdfImportService.createImportTask(
@@ -162,9 +164,9 @@ export class PdfImportController {
   async executeImport(
     @Param('taskId') taskId: string,
     @Body('user_id') userId: string,
-    @Body('clan_id') clanIdStr: string
+    @Body('clan_slug') clanSlug: string
   ) {
-    const clanId = BigInt(clanIdStr);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
 
     try {
       const result = await this.pdfImportService.executeImport(

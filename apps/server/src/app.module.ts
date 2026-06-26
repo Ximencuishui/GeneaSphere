@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { CommonModule } from './common/common.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { ClanModule } from './clan/clan.module';
@@ -36,6 +37,7 @@ import { ClanEventVideoModule } from './clan-event-video/clan-event-video.module
 @Module({
   imports: [
     CosModule,
+    CommonModule,
     ConfigModule.forRoot({
       isGlobal: true,
     }),

@@ -16,14 +16,13 @@ export class AdminFamilyRelationService {
    * 审核队列列表
    */
   async listChanges(callerUserId: string, params: {
-    clanId: string;
+    clanSlug: string;
     status?: string;
     changeType?: string;
     page: number;
     pageSize: number;
   }) {
-    const clanIdBig = BigInt(params.clanId);
-    await this.adminService.requireAdmin(clanIdBig, callerUserId);
+    const clanIdBig = await this.adminService.requireAdminBySlug(params.clanSlug, callerUserId);
     const where: any = { clan_id: clanIdBig };
 
     if (params.status) where.status = params.status;
@@ -253,9 +252,8 @@ export class AdminFamilyRelationService {
   /**
    * 争议列表
    */
-  async listDisputes(callerUserId: string, clanId: string) {
-    const clanIdBig = BigInt(clanId);
-    await this.adminService.requireAdmin(clanIdBig, callerUserId);
+  async listDisputes(callerUserId: string, clanSlug: string) {
+    const clanIdBig = await this.adminService.requireAdminBySlug(clanSlug, callerUserId);
     return this.prisma.familyRelationChange.findMany({
       where: { clan_id: clanIdBig, is_disputed: true },
       orderBy: { created_at: 'desc' },

@@ -2,13 +2,17 @@ import { Controller, Get, Post, Put, Body, Query, Param, UseGuards, Request } fr
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { SmsService } from './sms.service';
+import { AdminService } from '../admin.service';
 
 @ApiTags('admin/sms')
 @Controller('api/admin/sms')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class SmsController {
-  constructor(private readonly smsService: SmsService) {}
+  constructor(
+    private readonly smsService: SmsService,
+    private readonly adminService: AdminService,
+  ) {}
 
   // ==================== 余额管理 ====================
 
@@ -19,10 +23,10 @@ export class SmsController {
   @ApiOperation({ summary: '获取当前余额和统计信息' })
   async getBalance(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
     return await this.smsService.getBalance(clanId, userId);
   }
 
@@ -33,10 +37,10 @@ export class SmsController {
   @ApiOperation({ summary: '设置低水位预警阈值' })
   async setLowBalanceThreshold(
     @Request() req,
-    @Body() body: { clanId: string; threshold: number },
+    @Body() body: { clanSlug: string; threshold: number },
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
     return await this.smsService.setLowBalanceThreshold(clanId, userId, body.threshold);
   }
 
@@ -47,12 +51,12 @@ export class SmsController {
   @ApiOperation({ summary: '获取费用统计' })
   async getCostStats(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
     return await this.smsService.getCostStats(
       clanId,
       userId,
@@ -70,10 +74,10 @@ export class SmsController {
   @ApiOperation({ summary: '创建充值订单' })
   async createRechargeOrder(
     @Request() req,
-    @Body() body: { clanId: string; amount: number; paymentMethod: 'wechat' | 'alipay' },
+    @Body() body: { clanSlug: string; amount: number; paymentMethod: 'wechat' | 'alipay' },
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
     return await this.smsService.createRechargeOrder(
       clanId,
       userId,
@@ -89,12 +93,12 @@ export class SmsController {
   @ApiOperation({ summary: '获取充值记录列表' })
   async getRechargeRecords(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
     return await this.smsService.getRechargeRecords(
       clanId,
       userId,
@@ -113,7 +117,7 @@ export class SmsController {
   async sendSms(
     @Request() req,
     @Body() body: {
-      clanId: string;
+      clanSlug: string;
       content: string;
       recipientIds: string[];
       signName?: string;
@@ -122,7 +126,7 @@ export class SmsController {
     },
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
     return await this.smsService.sendSms(
       clanId,
       userId,
@@ -141,13 +145,13 @@ export class SmsController {
   @ApiOperation({ summary: '获取发送记录列表' })
   async getSendRecords(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
     return await this.smsService.getSendRecords(
       clanId,
       userId,
@@ -165,10 +169,10 @@ export class SmsController {
   async getSendRecordDetail(
     @Request() req,
     @Param('id') recordIdStr: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
     const recordId = BigInt(recordIdStr);
     return await this.smsService.getSendRecordDetail(recordId, clanId, userId);
   }
@@ -182,12 +186,12 @@ export class SmsController {
   @ApiOperation({ summary: '获取扣费记录列表' })
   async getCostLogs(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
     return await this.smsService.getCostLogs(
       clanId,
       userId,

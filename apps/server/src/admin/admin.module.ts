@@ -17,6 +17,7 @@ import { AdminFamilyRelationService } from './family-relation/admin-family-relat
 import { AdminImportController } from './import/admin-import.controller';
 import { PrismaService } from '@geneasphere/db';
 import { NotificationService } from '../common/notification.service';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 // v2.0 新增 Controller
 import { AdminAnnouncementController } from './announcement/admin-announcement.controller';
@@ -51,7 +52,7 @@ import { AdminFamilyAlbumController } from './family-album/admin-family-album.co
     AdminToolboxUsageController,
     AdminFamilyAlbumController,
   ],
-  providers: [AdminService, MergeService, SmsService, AdminFamilyRelationService, PrismaService, NotificationService],
-  exports: [AdminService, MergeService, NotificationService],
+  providers: [AdminService, MergeService, SmsService, AdminFamilyRelationService, PrismaService, NotificationService, ClanResolverService],
+  exports: [AdminService, MergeService, NotificationService, ClanResolverService],
 })
 export class AdminModule {}

@@ -17,29 +17,34 @@ import { FamilyEventService } from './family-event.service';
 import { CreateFamilyEventDto } from './dto/create-family-event.dto';
 import { UpdateFamilyEventDto } from './dto/update-family-event.dto';
 import { FamilyEventType } from '@prisma/client';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @ApiTags('family-event')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('api/family-events')
 export class FamilyEventController {
-  constructor(private readonly service: FamilyEventService) {}
+  constructor(
+    private readonly service: FamilyEventService,
+    private readonly clanResolver: ClanResolverService,
+  ) {}
 
-  @Get(':clanId')
+  @Get(':clanSlug')
   @ApiOperation({ summary: '查询家族大事件列表' })
   async list(
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Query('event_type') event_type?: string,
     @Query('start_year') start_year?: string,
     @Query('end_year') end_year?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
     const eventTypeEnum =
       event_type && (Object.values(FamilyEventType) as string[]).includes(event_type)
         ? (event_type as FamilyEventType)
         : undefined;
-    return this.service.list(this.toBigInt(clanIdStr), {
+    return this.service.list(clanId, {
       event_type: eventTypeEnum,
       start_year: start_year ? Number(start_year) : undefined,
       end_year: end_year ? Number(end_year) : undefined,
@@ -48,55 +53,61 @@ export class FamilyEventController {
     });
   }
 
-  @Get(':clanId/:id')
+  @Get(':clanSlug/:id')
   @ApiOperation({ summary: '查询单个家族事件' })
-  async findOne(@Param('clanId') clanIdStr: string, @Param('id') idStr: string) {
-    return this.service.findOne(this.toBigInt(clanIdStr), this.toBigInt(idStr));
+  async findOne(@Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.service.findOne(clanId, this.toBigInt(idStr));
   }
 
-  @Post(':clanId')
+  @Post(':clanSlug')
   @ApiOperation({ summary: '新增家族事件' })
   async create(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Body() dto: CreateFamilyEventDto,
   ) {
-    return this.service.create(this.toBigInt(clanIdStr), req.user.userId, dto);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.service.create(clanId, req.user.userId, dto);
   }
 
-  @Put(':clanId/:id')
+  @Put(':clanSlug/:id')
   @ApiOperation({ summary: '更新家族事件' })
   async update(
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Param('id') idStr: string,
     @Body() dto: UpdateFamilyEventDto,
   ) {
-    return this.service.update(this.toBigInt(clanIdStr), this.toBigInt(idStr), dto);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.service.update(clanId, this.toBigInt(idStr), dto);
   }
 
-  @Delete(':clanId/:id')
+  @Delete(':clanSlug/:id')
   @ApiOperation({ summary: '删除家族事件' })
-  async delete(@Param('clanId') clanIdStr: string, @Param('id') idStr: string) {
-    return this.service.delete(this.toBigInt(clanIdStr), this.toBigInt(idStr));
+  async delete(@Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.service.delete(clanId, this.toBigInt(idStr));
   }
 
-  @Post(':clanId/bulk')
+  @Post(':clanSlug/bulk')
   @ApiOperation({ summary: '批量导入家族事件（JSON 数组）' })
   async bulkCreate(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Body() body: { events: CreateFamilyEventDto[] },
   ) {
     if (!Array.isArray(body?.events)) {
       throw new BadRequestException('events 必须是数组');
     }
-    return this.service.bulkCreate(this.toBigInt(clanIdStr), req.user.userId, body.events);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.service.bulkCreate(clanId, req.user.userId, body.events);
   }
 
-  @Post(':clanId/generate-life-events')
+  @Post(':clanSlug/generate-life-events')
   @ApiOperation({ summary: '基于人物生卒数据自动生成候选事件' })
-  async generateLifeEvents(@Param('clanId') clanIdStr: string) {
-    return this.service.generateLifeEvents(this.toBigInt(clanIdStr));
+  async generateLifeEvents(@Param('clanSlug') clanSlug: string) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.service.generateLifeEvents(clanId);
   }
 
   private toBigInt(value: string): bigint {

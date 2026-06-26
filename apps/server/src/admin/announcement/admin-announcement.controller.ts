@@ -33,15 +33,13 @@ export class AdminAnnouncementController {
   @ApiOperation({ summary: '获取公告列表' })
   async getAnnouncements(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -101,12 +99,10 @@ export class AdminAnnouncementController {
   async getAnnouncement(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const announcement = await this.prisma.clanAnnouncement.findUnique({
       where: { id: BigInt(id) },
@@ -146,9 +142,7 @@ export class AdminAnnouncementController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
     const announcement = await this.prisma.clanAnnouncement.create({
       data: {
@@ -194,9 +188,7 @@ export class AdminAnnouncementController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
     const announcement = await this.prisma.clanAnnouncement.update({
       where: { id: BigInt(id) },
@@ -236,12 +228,10 @@ export class AdminAnnouncementController {
   async deleteAnnouncement(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const announcement = await this.prisma.clanAnnouncement.findUnique({
       where: { id: BigInt(id) },
@@ -275,13 +265,11 @@ export class AdminAnnouncementController {
   async togglePin(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Body() body: { isPinned: boolean },
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 最多置顶3条
     if (body.isPinned) {
@@ -321,13 +309,11 @@ export class AdminAnnouncementController {
   async toggleStatus(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Body() body: { isActive: boolean },
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 先获取当前状态
     const current = await this.prisma.clanAnnouncement.findUnique({

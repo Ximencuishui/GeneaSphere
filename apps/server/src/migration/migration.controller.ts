@@ -17,49 +17,56 @@ import { MigrationService } from './migration.service';
 import { CreateMigrationEventDto } from './dto/create-migration-event.dto';
 import { UpdateMigrationEventDto } from './dto/update-migration-event.dto';
 import { LinkLocationMediaDto } from './dto/link-location-media.dto';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @ApiTags('migration')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('api/migration')
 export class MigrationController {
-  constructor(private readonly migrationService: MigrationService) {}
+  constructor(
+    private readonly migrationService: MigrationService,
+    private readonly clanResolver: ClanResolverService,
+  ) {}
 
   // ==================== POI / 事件 / 支系查询 ====================
 
   /**
    * 获取家族 POI 列表
    */
-  @Get(':clanId/pois')
+  @Get(':clanSlug/pois')
   @ApiOperation({ summary: '获取家族 POI 列表（含人物出生地/死亡地/迁徙事件起点终点）' })
   async getPois(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Query('branch') branch?: string,
   ) {
-    return this.migrationService.getPois(this.toBigInt(clanIdStr), branch);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.getPois(clanId, branch);
   }
 
   /**
    * 获取迁徙事件列表
    */
-  @Get(':clanId/events')
+  @Get(':clanSlug/events')
   @ApiOperation({ summary: '获取迁徙事件列表（按时间排序）' })
   async getEvents(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Query('branch') branch?: string,
   ) {
-    return this.migrationService.getEvents(this.toBigInt(clanIdStr), branch);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.getEvents(clanId, branch);
   }
 
   /**
    * 获取所有支系
    */
-  @Get(':clanId/branches')
+  @Get(':clanSlug/branches')
   @ApiOperation({ summary: '获取家族所有支系列表' })
-  async getBranches(@Param('clanId') clanIdStr: string) {
-    return this.migrationService.getBranches(this.toBigInt(clanIdStr));
+  async getBranches(@Param('clanSlug') clanSlug: string) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.getBranches(clanId);
   }
 
   // ==================== 迁徙事件 CRUD（需管理员） ====================
@@ -67,54 +74,44 @@ export class MigrationController {
   /**
    * 创建迁徙事件
    */
-  @Post(':clanId/events')
+  @Post(':clanSlug/events')
   @ApiOperation({ summary: '创建迁徙事件（管理员）' })
   async createEvent(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Body() dto: CreateMigrationEventDto,
   ) {
-    return this.migrationService.createEvent(
-      this.toBigInt(clanIdStr),
-      req.user.userId,
-      dto,
-    );
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.createEvent(clanId, req.user.userId, dto);
   }
 
   /**
    * 更新迁徙事件
    */
-  @Put(':clanId/events/:id')
+  @Put(':clanSlug/events/:id')
   @ApiOperation({ summary: '更新迁徙事件（管理员）' })
   async updateEvent(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Param('id') id: string,
     @Body() dto: UpdateMigrationEventDto,
   ) {
-    return this.migrationService.updateEvent(
-      this.toBigInt(clanIdStr),
-      req.user.userId,
-      id,
-      dto,
-    );
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.updateEvent(clanId, req.user.userId, id, dto);
   }
 
   /**
    * 删除迁徙事件
    */
-  @Delete(':clanId/events/:id')
+  @Delete(':clanSlug/events/:id')
   @ApiOperation({ summary: '删除迁徙事件（管理员）' })
   async deleteEvent(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Param('id') id: string,
   ) {
-    return this.migrationService.deleteEvent(
-      this.toBigInt(clanIdStr),
-      req.user.userId,
-      id,
-    );
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.deleteEvent(clanId, req.user.userId, id);
   }
 
   // ==================== 朝代数据 ====================
@@ -133,50 +130,45 @@ export class MigrationController {
   /**
    * 获取某地点关联的图片
    */
-  @Get(':clanId/location-media')
+  @Get(':clanSlug/location-media')
   @ApiOperation({ summary: '获取某地点关联的图片列表' })
   async getLocationMedia(
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Query('location') location: string,
   ) {
     if (!location?.trim()) {
       throw new BadRequestException('location 参数必填');
     }
-    return this.migrationService.getLocationMedia(this.toBigInt(clanIdStr), location);
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.getLocationMedia(clanId, location);
   }
 
   /**
    * 手动关联图片到地点（管理员）
    */
-  @Post(':clanId/location-media')
+  @Post(':clanSlug/location-media')
   @ApiOperation({ summary: '将图片关联到指定地点（管理员）' })
   async linkLocationMedia(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Body() dto: LinkLocationMediaDto,
   ) {
-    return this.migrationService.linkLocationMedia(
-      this.toBigInt(clanIdStr),
-      req.user.userId,
-      dto,
-    );
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.linkLocationMedia(clanId, req.user.userId, dto);
   }
 
   /**
    * 解除图片与地点的关联（管理员）
    */
-  @Delete(':clanId/location-media/:linkId')
+  @Delete(':clanSlug/location-media/:linkId')
   @ApiOperation({ summary: '解除图片与地点的关联（管理员）' })
   async unlinkLocationMedia(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Param('linkId') linkId: string,
   ) {
-    return this.migrationService.unlinkLocationMedia(
-      this.toBigInt(clanIdStr),
-      req.user.userId,
-      linkId,
-    );
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.unlinkLocationMedia(clanId, req.user.userId, linkId);
   }
 
   // ==================== 经纬度补全（管理员） ====================
@@ -184,24 +176,26 @@ export class MigrationController {
   /**
    * 获取所有缺少经纬度的地点（管理员）
    */
-  @Get(':clanId/locations/missing-coords')
+  @Get(':clanSlug/locations/missing-coords')
   @ApiOperation({ summary: '获取所有缺少经纬度的地点（管理员）' })
-  async getMissingCoords(@Param('clanId') clanIdStr: string) {
-    return this.migrationService.getLocationsMissingCoords(this.toBigInt(clanIdStr));
+  async getMissingCoords(@Param('clanSlug') clanSlug: string) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.migrationService.getLocationsMissingCoords(clanId);
   }
 
   /**
    * 补全地点经纬度（管理员）
    */
-  @Post(':clanId/locations/fill-coords')
+  @Post(':clanSlug/locations/fill-coords')
   @ApiOperation({ summary: '补全地点经纬度（管理员）' })
   async fillCoords(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
     @Body() body: { location_name: string; lat: number; lng: number },
   ) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
     return this.migrationService.fillLocationCoords(
-      this.toBigInt(clanIdStr),
+      clanId,
       req.user.userId,
       body.location_name,
       Number(body.lat),

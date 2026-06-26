@@ -21,7 +21,7 @@ export class LogsController {
   @ApiOperation({ summary: 'Get audit logs' })
   async getLogs(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('action') action?: string,
@@ -30,9 +30,7 @@ export class LogsController {
     @Query('endDate') endDateStr?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -99,14 +97,12 @@ export class LogsController {
   @ApiOperation({ summary: 'Export audit logs as CSV' })
   async exportLogs(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('startDate') startDateStr?: string,
     @Query('endDate') endDateStr?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const where: any = { clan_id: clanId };
 
@@ -136,7 +132,7 @@ export class LogsController {
     const csv = header + rows.join('');
 
     return {
-      filename: `audit_logs_${clanIdStr}_${new Date().toISOString().split('T')[0]}.csv`,
+      filename: `audit_logs_${clanSlug}_${new Date().toISOString().split('T')[0]}.csv`,
       content: csv,
       content_type: 'text/csv',
     };

@@ -16,6 +16,7 @@ import { ReviewStatus } from '@prisma/client';
 import { PlatformAuthGuard } from '../auth/platform-auth.guard';
 import { PlatformOperationLogService } from '../common/platform-operation-log.service';
 import { getClientIp } from '../common/ip.util';
+import { ClanResolverService } from '../../common/clan-resolver.service';
 
 @ApiTags('platform/reviews')
 @ApiBearerAuth('platform')
@@ -25,6 +26,7 @@ export class ContentReviewsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly logService: PlatformOperationLogService,
+    private readonly clanResolver: ClanResolverService,
   ) {}
 
   // ==================== 影像审核 ====================
@@ -33,7 +35,7 @@ export class ContentReviewsController {
   @ApiOperation({ summary: '全平台待审核影像' })
   async mediaList(
     @Query('status') status = 'PENDING',
-    @Query('clanId') clanIdStr?: string,
+    @Query('clanSlug') clanSlug?: string,
     @Query('startDate') startDateStr?: string,
     @Query('endDate') endDateStr?: string,
     @Query('page') pageStr = '1',
@@ -44,8 +46,10 @@ export class ContentReviewsController {
     const skip = (page - 1) * pageSize;
 
     const where: any = { status: status as ReviewStatus };
-    if (clanIdStr) {
-      where.media = { clan_id: BigInt(clanIdStr) };
+    if (clanSlug) {
+      // 平台管理端可按 clanSlug 筛选（解析为 bigint 后用于数据库过滤）
+      const { id: clanIdBig } = await this.clanResolver.resolveOrThrow(clanSlug);
+      where.media = { clan_id: clanIdBig };
     }
     if (startDateStr || endDateStr) {
       where.created_at = {};

@@ -11,6 +11,7 @@ import { DemoSeedService } from './demo-seed.service'
 import { PrismaService } from '@geneasphere/db'
 import { LoginLockService } from '../common/login-lock.service'
 import { RateLimitMiddleware } from '../common/rate-limit.middleware'
+import { ClanResolverService } from '../common/clan-resolver.service'
 @Module({
   imports: [
     PassportModule,
@@ -23,9 +24,9 @@ import { RateLimitMiddleware } from '../common/rate-limit.middleware'
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, SmsService, JwtStrategy, JwtAuthGuard, DemoSeedService, PrismaService, LoginLockService],
+  providers: [AuthService, SmsService, JwtStrategy, JwtAuthGuard, DemoSeedService, PrismaService, LoginLockService, ClanResolverService],
   controllers: [AuthController],
-  exports: [JwtAuthGuard, SmsService, LoginLockService],
+  exports: [JwtAuthGuard, SmsService, LoginLockService, ClanResolverService],
 })
 export class AuthModule implements NestModule {
   /**

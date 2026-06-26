@@ -24,12 +24,10 @@ export class SettingsController {
   @ApiOperation({ summary: 'Get privacy settings' })
   async getPrivacySettings(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     let settings = await this.prisma.privacySetting.findUnique({
       where: { clan_id: clanId },
@@ -65,9 +63,7 @@ export class SettingsController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
     const settings = await this.prisma.privacySetting.upsert({
       where: { clan_id: clanId },
@@ -112,12 +108,10 @@ export class SettingsController {
   @ApiOperation({ summary: 'Get xipai (generation characters) list' })
   async getXipai(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const xipai = await this.prisma.xipai.findMany({
       where: { clan_id: clanId },
@@ -139,12 +133,10 @@ export class SettingsController {
   @ApiOperation({ summary: 'Add xipai character' })
   async addXipai(
     @Request() req,
-    @Body() body: { clanId: string; generation: number; character: string; note?: string },
+    @Body() body: { clanSlug: string; generation: number; character: string; note?: string },
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
     const xipai = await this.prisma.xipai.create({
       data: {
@@ -255,12 +247,10 @@ export class SettingsController {
   @ApiOperation({ summary: 'Get storage usage' })
   async getStorageUsage(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 获取各类文件大小
     // 说明：云存储分项计数（视频/其他文件）暂仅返回 0，
@@ -310,12 +300,10 @@ const [photos, videos, others] = await Promise.all([
   @ApiOperation({ summary: 'Export all clan data as JSON' })
   async exportClanData(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 收集所有家族数据
     const [
@@ -410,12 +398,10 @@ const [photos, videos, others] = await Promise.all([
   @ApiOperation({ summary: '获取家族信息' })
   async getClanInfo(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const clan = await this.prisma.clan.findUnique({
       where: { id: clanId },
@@ -453,9 +439,7 @@ const [photos, videos, others] = await Promise.all([
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
-
-    await this.adminService.requireOwner(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
     const updateData: any = {};
 

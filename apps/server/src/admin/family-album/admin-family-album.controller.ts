@@ -31,16 +31,15 @@ export class AdminFamilyAlbumController {
   @ApiOperation({ summary: '获取家庭图册列表' })
   async getFamilyAlbums(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('status') status?: string,
     @Query('filterUserId') filterUserId?: string,
   ) {
     const currentUserId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, currentUserId);
 
-    await this.adminService.requireAdmin(clanId, currentUserId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -109,12 +108,11 @@ export class AdminFamilyAlbumController {
   async getFamilyAlbumDetail(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const album = await this.prisma.familyBookProject.findUnique({
       where: { id: BigInt(id) },
@@ -178,9 +176,8 @@ export class AdminFamilyAlbumController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const updateData: any = {};
 
@@ -216,12 +213,11 @@ export class AdminFamilyAlbumController {
   async deleteFamilyAlbum(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const album = await this.prisma.familyBookProject.findUnique({
       where: { id: BigInt(id) },
@@ -260,12 +256,11 @@ export class AdminFamilyAlbumController {
   @ApiOperation({ summary: '获取家庭图册统计' })
   async getStats(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const [
       totalAlbums,

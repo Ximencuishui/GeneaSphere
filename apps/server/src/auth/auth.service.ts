@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaClient } from '@prisma/client';
+import { PrismaService } from '@geneasphere/db';
+import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { SmsService } from './sms.service';
@@ -8,9 +9,8 @@ import { LoginLockService } from '../common/login-lock.service';
 
 @Injectable()
 export class AuthService {
-  private prisma = new PrismaClient();
-
   constructor(
+    private readonly prisma: PrismaService,
     private jwtService: JwtService,
     private smsService: SmsService,
     private loginLockService: LoginLockService,
@@ -181,6 +181,40 @@ export class AuthService {
       access_token: token,
       user: { id: user.id, phone: user.phone },
     };
+  }
+
+  /**
+   * 查询当前用户作为 OWNER/ADMIN 的所有家族列表（多家族 SaaS 登录跳转依据）。
+   * 用于前端登录后根据家族数量决定跳到选择器还是直接进入某个家族后台。
+   */
+  async getAdminClans(userId: string) {
+    const memberships = await this.prisma.clanMember.findMany({
+      where: {
+        user_id: userId,
+        role: { in: [Role.OWNER, Role.ADMIN] },
+        clan: { status: 'NORMAL' },
+      },
+      select: {
+        role: true,
+        clan: {
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            admin_user_id: true,
+          },
+        },
+      },
+      orderBy: { clan: { created_at: 'asc' } },
+    });
+
+    return memberships.map((m) => ({
+      id: m.clan.id.toString(),
+      slug: m.clan.slug,
+      name: m.clan.name,
+      role: m.role,
+      is_owner: m.clan.admin_user_id === userId,
+    }));
   }
 
   private async loginBySmsCode(phone: string, smsCode: string) {

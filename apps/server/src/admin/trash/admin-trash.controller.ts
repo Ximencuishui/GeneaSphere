@@ -30,14 +30,12 @@ export class AdminTrashController {
   @ApiOperation({ summary: '获取已删除成员列表' })
   async getDeletedMembers(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -92,12 +90,10 @@ export class AdminTrashController {
   async restoreMember(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const person = await this.prisma.person.findUnique({
       where: { id: BigInt(id) },
@@ -139,12 +135,10 @@ export class AdminTrashController {
   async permanentDeleteMember(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireOwner(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const person = await this.prisma.person.findUnique({
       where: { id: BigInt(id) },
@@ -195,14 +189,12 @@ export class AdminTrashController {
   @ApiOperation({ summary: '获取已删除影像列表' })
   async getDeletedMedia(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -258,12 +250,10 @@ export class AdminTrashController {
   async restoreMedia(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const media = await this.prisma.mediaArchive.findUnique({
       where: { id: BigInt(id) },
@@ -304,12 +294,10 @@ export class AdminTrashController {
   async permanentDeleteMedia(
     @Request() req,
     @Param('id') id: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireOwner(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const media = await this.prisma.mediaArchive.findUnique({
       where: { id: BigInt(id) },

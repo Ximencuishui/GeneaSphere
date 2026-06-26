@@ -22,7 +22,7 @@ export class MembersController {
   @ApiOperation({ summary: 'Get member list with pagination and filters' })
   async getMembers(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('role') role?: string,
@@ -30,9 +30,7 @@ export class MembersController {
     @Query('keyword') keyword?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -155,13 +153,12 @@ export class MembersController {
   @ApiOperation({ summary: 'Transfer clan ownership to another member' })
   async transferOwnership(
     @Request() req,
-    @Body() body: { targetUserId: string; clanId: string },
+    @Body() body: { targetUserId: string; clanSlug: string },
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(body.clanId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
-    // 仅当前 Owner 可转让
-    await this.adminService.requireOwner(clanId, userId);
+    // 仅当前 Owner 可转让
 
     // 检查目标用户是否已是该家族的成员
     const targetMember = await this.prisma.clanMember.findUnique({

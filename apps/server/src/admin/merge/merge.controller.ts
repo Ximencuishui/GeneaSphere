@@ -24,15 +24,13 @@ export class MergeController {
   @ApiOperation({ summary: 'Get merge applications list' })
   async getApplications(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -309,15 +307,13 @@ export class MergeController {
   @ApiOperation({ summary: 'Get search posts list' })
   async getSearchPosts(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -440,12 +436,10 @@ export class MergeController {
   @ApiOperation({ summary: 'Get available rollback snapshots' })
   async getSnapshots(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const snapshots = await this.prisma.dataSnapshot.findMany({
       where: {

@@ -27,7 +27,7 @@ export class AdminToolboxUsageController {
   @ApiOperation({ summary: '获取AI工具使用记录' })
   async getUsageList(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('toolType') toolType?: string,
@@ -36,9 +36,8 @@ export class AdminToolboxUsageController {
     @Query('endDate') endDate?: string,
   ) {
     const currentUserId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, currentUserId);
 
-    await this.adminService.requireAdmin(clanId, currentUserId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -119,12 +118,11 @@ export class AdminToolboxUsageController {
   @ApiOperation({ summary: '获取工具使用统计' })
   async getStats(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);

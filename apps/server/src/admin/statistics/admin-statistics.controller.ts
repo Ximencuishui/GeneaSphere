@@ -27,12 +27,10 @@ export class AdminStatisticsController {
   @ApiOperation({ summary: '获取统计概览' })
   async getOverview(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const [
       totalMembers,
@@ -128,12 +126,10 @@ export class AdminStatisticsController {
   @ApiOperation({ summary: '人口统计' })
   async getDemographics(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 世代分布
     const generationStats = await this.prisma.$queryRaw<any[]>`
@@ -205,12 +201,10 @@ export class AdminStatisticsController {
   @ApiOperation({ summary: '影像统计' })
   async getMediaStats(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 按年份分布
     const yearStats = await this.prisma.$queryRaw<any[]>`
@@ -283,12 +277,10 @@ export class AdminStatisticsController {
   @ApiOperation({ summary: '迁徙统计' })
   async getMigrationStats(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 迁徙事件统计
     const totalEvents = await this.prisma.migrationEvent.count({

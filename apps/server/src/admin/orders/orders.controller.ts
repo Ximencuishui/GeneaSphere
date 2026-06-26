@@ -31,15 +31,13 @@ export class OrdersController {
   @ApiOperation({ summary: 'Get print orders list' })
   async getOrders(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;

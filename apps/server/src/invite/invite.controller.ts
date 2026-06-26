@@ -27,6 +27,7 @@ import { ConfirmInfoDto } from './dto/confirm-info.dto';
 import { ModificationReviewDto } from './dto/modification-review.dto';
 import { WxCallbackDto } from './dto/wx-callback.dto';
 import { VerificationStatus } from '@prisma/client';
+import { ClanResolverService } from '../common/clan-resolver.service';
 
 @ApiTags('invite')
 @Controller('api/invite')
@@ -35,6 +36,7 @@ export class InviteController {
     private readonly invite: InviteService,
     private readonly wechat: WechatService,
     private readonly admin: AdminService,
+    private readonly clanResolver: ClanResolverService,
   ) {}
 
   // ==================== 管理端：邀请二维码 ====================
@@ -45,8 +47,7 @@ export class InviteController {
   @ApiOperation({ summary: '管理员创建邀请二维码' })
   async createQrcode(@Request() req, @Body() dto: CreateInviteQrcodeDto) {
     const userId = req.user.userId;
-    const clanId = BigInt(dto.clan_id);
-    await this.admin.requireAdmin(clanId, userId);
+    const clanId = await this.admin.requireAdminBySlug(dto.clan_slug, userId);
     return this.invite.createInviteQrcode(clanId, userId, dto.expire_days);
   }
 
@@ -54,10 +55,9 @@ export class InviteController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: '管理员列出家族邀请二维码' })
-  async listQrcodes(@Request() req, @Query('clan_id') clanIdStr: string) {
+  async listQrcodes(@Request() req, @Query('clan_slug') clanSlug: string) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-    await this.admin.requireAdmin(clanId, userId);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, userId);
     return { data: await this.invite.listInviteQrcodes(clanId) };
   }
 
@@ -68,6 +68,7 @@ export class InviteController {
   async getQrcode(@Request() req, @Param('id') idStr: string) {
     const id = BigInt(idStr);
     const detail = await this.invite.getInviteQrcode(id);
+    // detail.clan_id 是数据库里的字符串 id，转回 bigint 后做权限校验
     await this.admin.requireAdmin(BigInt(detail.clan_id), req.user.userId);
     return detail;
   }
@@ -86,11 +87,10 @@ export class InviteController {
   @ApiOperation({ summary: '扫码与验证统计' })
   async scanStats(
     @Request() req,
-    @Query('clan_id') clanIdStr: string,
+    @Query('clan_slug') clanSlug: string,
     @Query('days') daysStr?: string,
   ) {
-    const clanId = BigInt(clanIdStr);
-    await this.admin.requireAdmin(clanId, req.user.userId);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     const days = daysStr ? parseInt(daysStr) : 7;
     return this.invite.getScanStats(clanId, days);
   }
@@ -103,13 +103,12 @@ export class InviteController {
   @ApiOperation({ summary: '验证会话记录' })
   async listRecords(
     @Request() req,
-    @Query('clan_id') clanIdStr: string,
+    @Query('clan_slug') clanSlug: string,
     @Query('status') status?: VerificationStatus,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
   ) {
-    const clanId = BigInt(clanIdStr);
-    await this.admin.requireAdmin(clanId, req.user.userId);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.invite.listVerificationRecords(clanId, {
       status,
       page: parseInt(pageStr) || 1,
@@ -123,6 +122,7 @@ export class InviteController {
   @ApiOperation({ summary: '验证会话详情' })
   async getRecordDetail(@Request() req, @Param('id') idStr: string) {
     const detail = await this.invite.getVerificationRecordDetail(BigInt(idStr));
+    // detail.clan_id 是数据库里的字符串 id，转回 bigint 后做权限校验
     await this.admin.requireAdmin(BigInt(detail.clan_id), req.user.userId);
     return detail;
   }
@@ -135,11 +135,10 @@ export class InviteController {
   @ApiOperation({ summary: '信息修改申请列表' })
   async listModification(
     @Request() req,
-    @Query('clan_id') clanIdStr: string,
+    @Query('clan_slug') clanSlug: string,
     @Query('status') status?: any,
   ) {
-    const clanId = BigInt(clanIdStr);
-    await this.admin.requireAdmin(clanId, req.user.userId);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return { data: await this.invite.listModificationRequests(clanId, status) };
   }
 
@@ -166,7 +165,8 @@ export class InviteController {
   @ApiBearerAuth()
   @ApiOperation({ summary: '已认证族人生成互发验证二维码（30 分钟有效）' })
   async createPeerQrcode(@Request() req, @Body() dto: CreatePeerQrcodeDto) {
-    return this.invite.createPeerQrcode(req.user.userId, BigInt(dto.clan_id));
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(dto.clan_slug);
+    return this.invite.createPeerQrcode(req.user.userId, clanId);
   }
 
   @Get('peer-qrcode/:id')
@@ -226,7 +226,8 @@ export class InviteController {
   @Get('h5/auto-match')
   @ApiOperation({ summary: '自动匹配族谱人物' })
   async autoMatch(@Query() dto: AutoMatchDto) {
-    return this.invite.autoMatchPerson(BigInt(dto.clan_id), {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(dto.clan_slug);
+    return this.invite.autoMatchPerson(clanId, {
       full_name: dto.full_name,
       father_name: dto.father_name,
       birth_year: dto.birth_year,

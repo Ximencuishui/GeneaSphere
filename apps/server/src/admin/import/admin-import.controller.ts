@@ -25,15 +25,13 @@ export class AdminImportController {
   @ApiOperation({ summary: '获取 PDF 导入记录列表' })
   async getImportLogs(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -154,12 +152,10 @@ export class AdminImportController {
   @ApiOperation({ summary: '获取正在进行的导入任务' })
   async getActiveTasks(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 获取所有 pending | parsing | preview | correcting | importing 状态的任务
     const activeStatuses = ['pending', 'parsing', 'preview', 'correcting', 'importing'];
@@ -194,12 +190,10 @@ export class AdminImportController {
   @ApiOperation({ summary: '获取 OCR 使用统计' })
   async getOcrStats(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
-
-    await this.adminService.requireAdmin(clanId, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     // 获取本月 OCR 使用统计（基于 PdfImportLog）
     const startOfMonth = new Date();

@@ -27,7 +27,7 @@ export class MergeWizardController {
   async getWizardData(
     @Request() req,
     @Param('appId') appIdStr: string,
-    @Query('mainClanId') mainClanIdStr?: string,
+    @Query('mainClanSlug') mainClanSlug?: string,
   ) {
     const userId = req.user.userId;
     const appId = BigInt(appIdStr);
@@ -41,10 +41,12 @@ export class MergeWizardController {
       throw new Error('Application not found');
     }
 
-    // 确定主家族ID（可以是查询参数，也可以从申请中获取）
-    const mainClanId = mainClanIdStr ? BigInt(mainClanIdStr) : app.clan_id;
+    // 确定主家族ID：优先用查询参数中的 slug，否则取申请关联的 clan_id
+    const mainClanId = mainClanSlug
+      ? await this.adminService.requireAdminBySlug(mainClanSlug, userId)
+      : app.clan_id;
 
-    // 验证管理员权限
+    // 如果从申请中拿到的 clanId 仍未确认权限，这里再校验一次
     await this.adminService.requireAdmin(mainClanId, userId);
 
     const wizardData = await this.mergeService.getWizardData(appId, mainClanId);
@@ -58,16 +60,15 @@ export class MergeWizardController {
   /**
    * 获取族谱树结构
    */
-  @Get('clans/:clanId/tree')
+  @Get('clans/:clanSlug/tree')
   @ApiOperation({ summary: 'Get clan family tree structure' })
   async getClanTree(
     @Request() req,
-    @Param('clanId') clanIdStr: string,
+    @Param('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const tree = await this.mergeService.getClanTree(clanId);
 
@@ -85,13 +86,12 @@ export class MergeWizardController {
   async getAncestors(
     @Request() req,
     @Param('personId') personIdStr: string,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
     const personId = BigInt(personIdStr);
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const ancestors = await this.mergeService.getAncestors(personId, clanId);
 
@@ -230,12 +230,11 @@ export class MergeWizardController {
   @ApiOperation({ summary: 'Get merge snapshots for rollback' })
   async getMergeSnapshots(
     @Request() req,
-    @Query('clanId') clanIdStr: string,
+    @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = BigInt(clanIdStr);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    await this.adminService.requireAdmin(clanId, userId);
 
     const snapshots = await this.mergeService.getMergeSnapshots(clanId);
 
