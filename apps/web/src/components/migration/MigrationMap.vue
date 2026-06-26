@@ -70,6 +70,11 @@ import type {
 } from '@/types';
 import PhotoCluster from './PhotoCluster.vue';
 
+// ==================== 模块级朝代 GeoJSON 缓存 ====================
+// 将缓存提升到模块级别（<script setup> 之外），跨组件挂载生命周期持久化。
+// 用户在 SPA 内导航离开再回来时，无需重新 fetch GeoJSON。
+const dynastyGeoJsonCache = new Map<number, any>();
+
 const props = defineProps<{
   clanId: string | number;
   branch?: string | null;
@@ -100,7 +105,6 @@ let map: L.Map | null = null;
 let poiLayer: L.LayerGroup | null = null;
 let pathLayer: L.LayerGroup | null = null;
 let dynastyLayer: L.LayerGroup | null = null;
-const dynastyGeoJsonCache = new Map<number, any>();
 
 // 支系配色
 const BRANCH_COLORS = ['#C53030', '#2B6CB0', '#2F855A', '#B7791F', '#6B46C1', '#0987A0'];
@@ -187,6 +191,10 @@ async function loadData() {
     renderPois();
     renderPaths();
     fitToPois();
+
+    // 预加载所有朝代的 GeoJSON 疆域数据，
+    // 之后用户滑动时间轴时无需按需 fetch，直接从缓存读取
+    preloadDynastyGeoJson();
 
     // 默认选中第一个有经纬度的 POI
     const firstValid = pois.value.find((p) => p.lat != null && p.lng != null);
@@ -313,6 +321,29 @@ function renderPaths() {
     );
     line.addTo(pathLayer);
   }
+}
+
+// ==================== 预加载所有朝代 GeoJSON ====================
+
+async function preloadDynastyGeoJson() {
+  const urls = (dynasties.value || []).map((d) => ({
+    id: d.id,
+    url: d.geojson_url || `/geojson/dynasties/${getDynastyFileName(d)}.geojson`,
+  }));
+
+  await Promise.all(
+    urls.map(async ({ id, url }) => {
+      if (dynastyGeoJsonCache.has(id)) return;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const geo = await resp.json();
+        dynastyGeoJsonCache.set(id, geo);
+      } catch {
+        // 单个 GeoJSON 加载失败不影响其他数据
+      }
+    }),
+  );
 }
 
 // ==================== 朝代图层 ====================

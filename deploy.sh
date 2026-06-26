@@ -197,7 +197,7 @@ deploy_project() {
         pnpm install --frozen-lockfile 2>&1 | tail -5
 
         log_info "生成 Prisma Client..."
-        npx prisma generate
+        npx prisma generate --schema=packages/db/prisma/schema.prisma
 
         log_info "构建后端..."
         pnpm --filter server build 2>&1 | tail -3

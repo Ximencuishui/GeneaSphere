@@ -21,7 +21,23 @@
 
     <!-- Left: Tree Canvas -->
     <div class="tree-canvas-container">
-      <GenealogyTree ref="treeRef" :clanId="clanId" />
+      <!--
+        GenealogyTree 是重组件，内部依赖 @antv/g6。
+        使用 defineAsyncComponent 懒加载，避免 TreePage 的 chunk 在
+        GenealogyTree（以及间接的 vendor-antv）加载完成前无法执行。
+        这里额外提供一个紧凑的占位，避免异步加载期间页面白屏。
+      -->
+      <Suspense>
+        <template #default>
+          <GenealogyTree ref="treeRef" :clanId="clanId" />
+        </template>
+        <template #fallback>
+          <div class="tree-async-fallback">
+            <div class="fallback-spinner" />
+            <p class="fallback-text">正在准备族谱编辑器…</p>
+          </div>
+        </template>
+      </Suspense>
     </div>
 
     <!-- Right: Detail Panel -->
@@ -166,12 +182,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue';
+import { defineAsyncComponent } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { 
-  Edit, 
-  Plus, 
-  Delete, 
+import {
+  Edit,
+  Plus,
+  Delete,
   Close,
   User,
   Male,
@@ -188,7 +205,11 @@ import {
   VideoPlay,
   Connection
 } from '@element-plus/icons-vue';
-import GenealogyTree from '@/components/GenealogyTree.vue';
+// 异步加载 GenealogyTree 组件（含 @antv/g6 1MB+ 重库）：
+// 避免在 TreePage chunk 解析时阻塞整条静态依赖链。
+const GenealogyTree = defineAsyncComponent(
+  () => import('@/components/GenealogyTree.vue'),
+);
 import { useGenealogyStore } from '@/stores/genealogy';
 import { mediaApi } from '@/api/media';
 import type { MediaArchive } from '@/types';
@@ -320,6 +341,36 @@ onMounted(() => {
 .tree-canvas-container {
   flex: 1;
   overflow: hidden;
+}
+
+/* 异步加载 GenealogyTree 期间的紧凑占位：避免 vendor-antv 慢加载时整页白屏 */
+.tree-async-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #FAF8F5 0%, #F5F0E8 100%);
+  color: #5D4037;
+}
+.tree-async-fallback .fallback-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid rgba(201, 169, 110, 0.2);
+  border-top-color: #C9A96E;
+  animation: tree-async-spin 0.9s linear infinite;
+}
+.tree-async-fallback .fallback-text {
+  margin: 0;
+  font-size: 14px;
+  color: #8D6E63;
+  letter-spacing: 0.5px;
+}
+@keyframes tree-async-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Navigation Bar */

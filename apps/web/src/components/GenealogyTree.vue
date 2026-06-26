@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
-import { Graph, treeToGraphData } from '@antv/g6';
 import { ElMessage } from 'element-plus';
 import {
   ZoomIn,
@@ -24,6 +23,99 @@ import { useGenealogyStore } from '@/stores/genealogy';
 import type { ViewMode } from '@/stores/genealogy';
 import { treeApi } from '@/api/tree';
 import type { GenealogyNode } from '@/types';
+
+/**
+ * G6 精细化按需加载
+ *
+ * G6 5.x 的 package 主入口会触发 `import './preset'`，preset 会调
+ * `registerBuiltInExtensions()`，一次性 register 100+ 扩展
+ * （17 个 layout / 19 个 element / 14 个 behavior / 18 个 plugin / ...），
+ * 并把 @antv/layout（3.6MB，含 d3-force / dagre / ml-matrix 等重型依赖）
+ * 作为静态依赖拉入。这导致 vendor-antv 体积稳在 1.2MB+。
+ *
+ * 拆成子路径后：
+ * - Graph 类从 `esm/runtime/graph` 子路径取（G6 本体 60KB）
+ * - treeToGraphData 从 `esm/utils/tree` 取（1.7KB 独立实现）
+ * - 节点 / 边 / 行为 / 布局按需取并手动 register（仅注册家族树实际用到的 7 个）
+ * - 不导入 preset -> @antv/layout 整个包不会被拉入
+ * - compact-box 布局来自 @antv/hierarchy（19.6KB），
+ *   不再经过 @antv/layout 路径
+ *
+ * 预期 vendor-antv 从 1.2MB gzip 434KB -> 400-600KB gzip 200-250KB
+ */
+type G6GraphCtor = any;
+type G6TreeToGraphData = (tree: any) => { nodes?: any[]; edges?: any[] };
+type G6Runtime = { Graph: G6GraphCtor; treeToGraphData: G6TreeToGraphData };
+
+let g6RuntimePromise: Promise<G6Runtime> | null = null;
+
+async function loadG6Runtime(): Promise<G6Runtime> {
+  // 1) Graph / treeToGraphData / register 从 G6 子路径取，绕过主入口的 preset
+  const [{ Graph }, treeMod, { register }] = await Promise.all([
+    import('@antv/g6/esm/runtime/graph'),
+    import('@antv/g6/esm/utils/tree'),
+    import('@antv/g6/esm/registry/register'),
+  ]);
+  const treeToGraphData = treeMod.treeToGraphData as G6TreeToGraphData;
+
+  // 2) 注册家族树实际用到的扩展
+  //    Tooltip 组件使用自定义 HTML 实现（见 node:mouseenter handler），
+  //    无需注册 G6 内置 Tooltip 插件
+  const [
+    { Rect },
+    { CubicHorizontal },
+    { compactBox },
+    { DragCanvas },
+    { ZoomCanvas },
+    { DragElement },
+    { ArrangeDrawOrder },
+    { CollapseExpandCombo },
+    { CollapseExpandNode },
+    { GetEdgeActualEnds },
+    { UpdateRelatedEdge },
+  ] = await Promise.all([
+    import('@antv/g6/esm/elements/nodes/rect'),
+    import('@antv/g6/esm/elements/edges/cubic-horizontal'),
+    // compactBox 是唯一一个不依赖 @antv/layout 的 layout
+    // （来自 @antv/hierarchy，19.6KB 轻量库），
+    // 使用 as any 绕开 TS 类型检查：@antv/hierarchy 导出的是纯函数，
+    // 而 ExtensionRegistry.layout 期望类构造器，G6 内部也是这样注册的
+    import('@antv/hierarchy').then(m => ({ compactBox: m.compactBox })),
+    import('@antv/g6/esm/behaviors/drag-canvas'),
+    import('@antv/g6/esm/behaviors/zoom-canvas'),
+    import('@antv/g6/esm/behaviors/drag-element'),
+    // transforms：treeToGraphData + compact-box 布局内部依赖的 transforms
+    import('@antv/g6/esm/transforms/arrange-draw-order'),
+    import('@antv/g6/esm/transforms/collapse-expand-combo'),
+    import('@antv/g6/esm/transforms/collapse-expand-node'),
+    import('@antv/g6/esm/transforms/get-edge-actual-ends'),
+    import('@antv/g6/esm/transforms/update-related-edge'),
+  ]);
+
+  register('node', 'rect', Rect);
+  register('edge', 'cubic-horizontal', CubicHorizontal);
+  register('layout', 'compact-box', compactBox as any);
+  register('behavior', 'drag-canvas', DragCanvas);
+  register('behavior', 'zoom-canvas', ZoomCanvas);
+  register('behavior', 'drag-element', DragElement);
+
+  // transforms：treeToGraphData + compact-box 布局内部依赖的 transforms
+  // 注册 key 使用 G6 内置的扩展名（build-in.js 中的 key）
+  register('transform', 'arrange-draw-order', ArrangeDrawOrder);
+  register('transform', 'collapse-expand-combo', CollapseExpandCombo);
+  register('transform', 'collapse-expand-node', CollapseExpandNode);
+  register('transform', 'get-edge-actual-ends', GetEdgeActualEnds);
+  register('transform', 'update-related-edges', UpdateRelatedEdge);
+
+  return { Graph, treeToGraphData };
+}
+
+function loadG6(): Promise<G6Runtime> {
+  if (!g6RuntimePromise) {
+    g6RuntimePromise = loadG6Runtime();
+  }
+  return g6RuntimePromise;
+}
 
 const props = defineProps<{
   clanId?: string;
@@ -315,8 +407,14 @@ const generateAvatarSvg = (name: string, gender: string): string => {
 
 // ==================== Graph Initialization ====================
 
-const initGraph = (data: GenealogyNode) => {
+const initGraph = async (data: GenealogyNode) => {
   if (!container.value) return;
+
+  // 加载 G6 运行时（Graph + 必要扩展的注册）。
+  // 动态 import 走子路径，绕开主入口的 preset 依赖链，
+  // vendor-antv 体积会从 1.2MB 缩减到 400-600KB。
+  setLoadingStage('render');
+  const { Graph, treeToGraphData } = await loadG6();
 
   if (graph.value) {
     graph.value.destroy();
@@ -325,9 +423,6 @@ const initGraph = (data: GenealogyNode) => {
   const width = container.value.offsetWidth;
   const height = container.value.offsetHeight;
   const config = viewModeConfig.value[genealogyStore.viewMode];
-
-  // 数据转换发生在 initGraph 之前的调用点（见 onMounted/retryLoad），这里直接进入 render 阶段
-  setLoadingStage('render');
 
   const treeData = transformToG6Data(data);
   const graphData = treeToGraphData(treeData);
@@ -338,7 +433,7 @@ const initGraph = (data: GenealogyNode) => {
     height,
     autoFit: 'view',
     autoResize: true,
-    behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element', 'tooltip'],
+    behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
     layout: {
       type: 'compact-box',
       direction: layoutDirection.value,

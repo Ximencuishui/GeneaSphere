@@ -1,7 +1,13 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from "vue"
 import { useAuthStore } from "@/stores/auth"
 import { useGenealogyStore } from "@/stores/genealogy"
-import GenealogyTree from "@/components/GenealogyTree.vue"
+
+// 异步加载 GenealogyTree 组件（含 @antv/g6 1MB+ 重库）：
+// 避免 vendor-antv 阻塞 DashboardView 的挂载。
+const GenealogyTree = defineAsyncComponent(
+  () => import("@/components/GenealogyTree.vue"),
+)
 
 const authStore = useAuthStore()
 const genealogyStore = useGenealogyStore()
