@@ -210,30 +210,56 @@ model Person {
 }
 
 model FamilyUnit {
-  id         BigInt        @id @default(autoincrement()) @map("id")
-  clan_id    BigInt        @map("clan_id")
-  husband_id BigInt?       @map("husband_id")
-  wife_id    BigInt?       @map("wife_id")
-  union_type String?       @default("normal") @map("union_type")
-  children   FamilyChild[]
-  clan       Clan          @relation(fields: [clan_id], references: [id], onDelete: Cascade)
-  husband    Person?       @relation("HusbandRelation", fields: [husband_id], references: [id])
-  wife       Person?       @relation("WifeRelation", fields: [wife_id], references: [id])
+  id             BigInt        @id @default(autoincrement()) @map("id")
+  clan_id        BigInt        @map("clan_id")
+  husband_id     BigInt?       @map("husband_id")
+  wife_id        BigInt?       @map("wife_id")
+  union_type     String?       @default("normal") @map("union_type")
+  // 婚姻元数据（支持再婚与时间区间）
+  marriage_date  DateTime?     @map("marriage_date")
+  marriage_order Int           @default(1) @map("marriage_order")
+  divorce_date   DateTime?     @map("divorce_date")
+  end_reason     MarriageEndReason? @map("end_reason")
+  is_current     Boolean       @default(true) @map("is_current")
+  note           String?       @map("note")
+  children       FamilyChild[]
+  clan           Clan          @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  husband        Person?       @relation("HusbandRelation", fields: [husband_id], references: [id])
+  wife           Person?       @relation("WifeRelation", fields: [wife_id], references: [id])
 
+  @@unique([husband_id, wife_id, marriage_order])
+  @@index([clan_id])
+  @@index([husband_id])
+  @@index([wife_id])
   @@map("family_units")
 }
 
-model FamilyChild {
-  id          BigInt     @id @default(autoincrement()) @map("id")
-  family_id   BigInt     @map("family_id")
-  child_id    BigInt     @map("child_id")
-  birth_order Int        @map("birth_order")
-  child       Person     @relation("ChildRelation", fields: [child_id], references: [id], onDelete: Cascade)
-  family      FamilyUnit @relation(fields: [family_id], references: [id], onDelete: Cascade)
+// 子女与父母关系类型（中文族谱继子女/养子是标配）
+enum ChildRelationType {
+  BIOLOGICAL // 亲生
+  ADOPTED     // 收养
+  STEP        // 继子女（再婚带来的）
+  FOSTER      // 寄养/过继
+}
 
+model FamilyChild {
+  id          BigInt            @id @default(autoincrement()) @map("id")
+  family_id   BigInt            @map("family_id")
+  child_id    BigInt            @map("child_id")
+  birth_order Int               @map("birth_order")
+  // 与该 family 的关系类型，默认亲生
+  child_type  ChildRelationType @default(BIOLOGICAL) @map("child_type")
+  child       Person            @relation("ChildRelation", fields: [child_id], references: [id], onDelete: Cascade)
+  family      FamilyUnit        @relation(fields: [family_id], references: [id], onDelete: Cascade)
+
+  @@index([family_id])
+  @@index([child_id])
   @@map("family_children")
 }
 
+// 闭包表：存储族谱血缘关系（祖先→后代，depth=0 表示自己）
+// 性能关键：ancestor_id 和 descendant_id 必须分别建索引，
+// 否则 1000+ 人族谱的子树查询会全表扫描。
 model PersonAncestry {
   ancestor_id   BigInt @map("ancestor_id")
   descendant_id BigInt @map("descendant_id")
@@ -242,6 +268,8 @@ model PersonAncestry {
   descendant    Person @relation("DescendantRelation", fields: [descendant_id], references: [id], onDelete: Cascade)
 
   @@id([ancestor_id, descendant_id])
+  @@index([ancestor_id, depth])
+  @@index([descendant_id])
   @@map("person_ancestry")
 }
 

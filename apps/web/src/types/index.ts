@@ -92,6 +92,49 @@ export interface GenealogyNode {
   avatar_url?: string;
   thumbnail_url?: string;
   has_photo: boolean;
+  /** 当前 + 历史配偶（从后端 FamilyUnit 推导），前端用于画 spouse 边 */
+  spouses?: SpouseInfo[];
+  /** 历史婚姻明细（与 spouses 互补，含 marriage_date / end_reason） */
+  marriages_history?: MarriageHistoryEntry[];
+}
+
+/**
+ * 配偶信息（从后端 FamilyUnit 推导）
+ * - 用于前端绘制 spouse 边（再婚/离异显示虚线 + 序号）
+ */
+export interface SpouseInfo {
+  id: string;
+  name: string;
+  gender: string;
+  family_id: string;
+  marriage_date?: string | null;
+  end_date?: string | null;
+  marriage_order: number;
+  is_current: boolean;
+  end_reason?: string | null;
+  note?: string | null;
+}
+
+/** 历史婚姻条目（含结婚/结束日期） */
+export interface MarriageHistoryEntry {
+  family_id: string;
+  spouse_id: string;
+  spouse_name: string;
+  marriage_date?: string | null;
+  end_date?: string | null;
+  end_reason?: string | null;
+  marriage_order: number;
+  is_current: boolean;
+}
+
+/**
+ * 人物详情（侧栏编辑用）
+ */
+export interface PersonDetail {
+  person: GenealogyNode;
+  parents: { id: string; full_name: string; gender: string }[];
+  spouses: SpouseInfo[];
+  children: { id: string; full_name: string; gender: string; birth_year?: number }[];
 }
 
 export interface TreeResponse {
