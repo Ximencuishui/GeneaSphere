@@ -23,5 +23,7 @@ deploy_light/
 dist.zip
 deploy-pack.sh
 geneasphere.tar.gz
+web-dist*.tar.gz
+check_size.ps1
 packages/db/.env.bak
 docs/bak/
