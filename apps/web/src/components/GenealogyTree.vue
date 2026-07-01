@@ -18,12 +18,19 @@ import {
   List,
   Warning,
   CircleClose,
+  Fold,
+  Expand,
+  Picture,
 } from '@element-plus/icons-vue';
 import { useGenealogyStore } from '@/stores/genealogy';
 import type { ViewMode } from '@/stores/genealogy';
 import { treeApi } from '@/api/tree';
 import type { GenealogyNode } from '@/types';
 import PersonEditDrawer from './PersonEditDrawer.vue';
+import ImagePreview from './ImagePreview.vue';
+import { Rect as G6Rect } from '@antv/g6/esm/elements/nodes/rect';
+import { LayoutEngine } from '@/utils/layout-engine';
+import type { LayoutNode, LayoutEdge, LayoutConfig } from '@/types/layout';
 
 /**
  * G6 精细化按需加载
@@ -69,6 +76,10 @@ async function loadG6Runtime(): Promise<G6Runtime> {
   const [
     { Rect },
     { CubicHorizontal },
+    { CubicVertical },
+    { Line },
+    { Polyline },
+    { Fade },
     { compactBox },
     { DragCanvas },
     { ZoomCanvas },
@@ -81,6 +92,10 @@ async function loadG6Runtime(): Promise<G6Runtime> {
   ] = await Promise.all([
     import('@antv/g6/esm/elements/nodes/rect'),
     import('@antv/g6/esm/elements/edges/cubic-horizontal'),
+    import('@antv/g6/esm/elements/edges/cubic-vertical'),
+    import('@antv/g6/esm/elements/edges/line'),
+    import('@antv/g6/esm/elements/edges/polyline'),
+    import('@antv/g6/esm/animations/index').then(m => ({ Fade: m.Fade })),
     // compactBox 是唯一一个不依赖 @antv/layout 的 layout
     // （来自 @antv/hierarchy，19.6KB 轻量库），
     // 使用 as any 绕开 TS 类型检查：@antv/hierarchy 导出的是纯函数，
@@ -97,8 +112,57 @@ async function loadG6Runtime(): Promise<G6Runtime> {
     import('@antv/g6/esm/transforms/update-related-edge'),
   ]);
 
-  register('node', 'rect', Rect);
+  // 自定义节点：渲染顺序改为 背景 → 姓名 → 缩略图（缩略图在姓名上方）
+  class GenealogyNode extends Rect {
+    render(attributes = this.parsedAttributes, container = this) {
+      // 1. key shape (background)
+      this._drawKeyShape(attributes, container);
+      if (!this.getShape('key')) return;
+      // 2. halo
+      this.drawHaloShape(attributes, container);
+      // 3. label (name) — render BEFORE icon so icon sits on top
+      this.drawLabelShape(attributes, container);
+      // 4. icon (thumbnail) — render AFTER label
+      this.drawIconShape(attributes, container);
+      // 5. badges
+      this.drawBadgeShapes(attributes, container);
+      // 6. ports
+      this.drawPortShapes(attributes, container);
+    }
+  }
+
+  // 自定义边：使用布局引擎预计算的正交路径
+  // 完全覆盖 getKeyPath 和 getEndpoints，直接使用预计算的绝对坐标
+  class OrthEdge extends Polyline {
+    getEndpoints(attributes: any, optimize = true, controlPoints = []) {
+      const orthPath = attributes.orthPath;
+      if (orthPath?.points && orthPath.points.length >= 2) {
+        const pts = orthPath.points;
+        return [[pts[0].x, pts[0].y], [pts[pts.length - 1].x, pts[pts.length - 1].y]];
+      }
+      return super.getEndpoints(attributes, optimize, controlPoints);
+    }
+    
+    getKeyPath(attributes: any) {
+      const orthPath = attributes.orthPath;
+      if (orthPath?.points && orthPath.points.length >= 2) {
+        const pts = orthPath.points;
+        const path: any[] = [['M', pts[0].x, pts[0].y]];
+        for (let i = 1; i < pts.length; i++) {
+          path.push(['L', pts[i].x, pts[i].y]);
+        }
+        return path;
+      }
+      return super.getKeyPath(attributes);
+    }
+  }
+  register('node', 'rect', GenealogyNode);
   register('edge', 'cubic-horizontal', CubicHorizontal);
+  register('edge', 'cubic-vertical', CubicVertical);
+  register('edge', 'line', Line);
+  register('edge', 'polyline', Polyline);
+  register('edge', 'orth', OrthEdge);
+  register('animation', 'fade', Fade);
   register('layout', 'compact-box', compactBox as any);
   register('behavior', 'drag-canvas', DragCanvas);
   register('behavior', 'zoom-canvas', ZoomCanvas);
@@ -152,6 +216,15 @@ let perfRafId = 0;
 /** 压测按钮 loading 状态 */
 const perfTestLoading = ref(false);
 
+/** 视口裁剪 rAF id（提升到模块作用域，便于 onUnmounted 清理） */
+let cullingRafId = 0;
+
+/** 工具栏是否折叠（折叠后只显示图标 + 搜索框，节省顶部空间） */
+const toolbarCollapsed = ref(false);
+
+/** initGraph 防抖定时器 ID，避免快速切换视图模式时重复重建 */
+let initGraphDebounceTimer: number | null = null;
+
 const container = ref<HTMLDivElement | null>(null);
 const graph = ref<any>(null);
 const genealogyStore = useGenealogyStore();
@@ -164,6 +237,17 @@ const filterGender = ref<'all' | 'male' | 'female'>('all');
 const highlightNodeIds = ref<Set<string>>(new Set());
 const showOnlyWithPhotos = ref(false);
 const searchResultCount = ref(0);
+
+// ==================== Image Preview ====================
+const previewVisible = ref(false);
+const previewSrc = ref('');
+const previewName = ref('');
+
+const openImagePreview = (src: string, name: string) => {
+  previewSrc.value = src;
+  previewName.value = name;
+  previewVisible.value = true;
+};
 
 // ==================== Loading Stage Progress ====================
 /**
@@ -281,31 +365,31 @@ function failLoading() {
 
 const viewModeConfig = computed(() => ({
   compact: {
-    nodeWidth: 120,
-    nodeHeight: 50,
+    nodeWidth: 28,
+    nodeHeight: 64,
     avatarSize: 0,
-    nameFontSize: 13,
+    nameFontSize: 12,
     sublabelFontSize: 0,
-    nodeSep: 40,
-    rankSep: 100,
+    nodeSep: 14,
+    rankSep: 80,   // nodeHeight(64) + 间距(16)
   },
   detailed: {
-    nodeWidth: 170,
-    nodeHeight: 82,
-    avatarSize: 44,
-    nameFontSize: 14,
-    sublabelFontSize: 11,
-    nodeSep: 50,
-    rankSep: 140,
-  },
-  portrait: {
-    nodeWidth: 110,
-    nodeHeight: 125,
-    avatarSize: 62,
+    nodeWidth: 34,
+    nodeHeight: 80,
+    avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 10,
-    nodeSep: 30,
-    rankSep: 160,
+    nodeSep: 16,
+    rankSep: 96,   // nodeHeight(80) + 间距(16)
+  },
+  portrait: {
+    nodeWidth: 80,
+    nodeHeight: 72,
+    avatarSize: 22,
+    nameFontSize: 12,
+    sublabelFontSize: 9,
+    nodeSep: 14,
+    rankSep: 108,  // nodeHeight(72) + 间距(36)
   },
 }));
 
@@ -381,24 +465,37 @@ const retryLoad = async () => {
 const transformToG6Data = (node: GenealogyNode): any => {
   const isMainLineage = genealogyStore.isInMainLineage(node.id);
 
+  // 兼容三种字段名：full_name（老约定）/ name（clan full 接口实际返回）/ label（其他）
+  // demo 朱熹族谱 API 实际返回 name，没 full_name；之前一直空白是因为只读 full_name
+  const displayName: string =
+    (node as any).full_name || (node as any).name || (node as any).label || '';
+
   const result: any = {
     id: String(node.id),
-    label: node.full_name || node.label || '',
+    label: displayName,
     data: {
       gender: node.gender,
       is_living: node.is_living,
       birth_year: node.birth_date ? new Date(node.birth_date).getFullYear() : undefined,
       death_year: node.death_date ? new Date(node.death_date).getFullYear() : undefined,
-      has_photo: node.has_photo,
-      thumbnail_url: node.thumbnail_url,
-      avatar_url: node.avatar_url,
+      has_photo: (node as any).has_photo,
+      thumbnail_url: (node as any).thumbnail_url || (node as any).avatar_url,
+      avatar_url: (node as any).avatar_url,
       is_main_lineage: isMainLineage,
       original: node,
     },
   };
 
   if (node.children && node.children.length > 0) {
-    result.children = node.children.map((child) => transformToG6Data(child));
+    const transformed = node.children.map((child) => transformToG6Data(child));
+    // 主脉子节点放中间，旁系对称分布两侧 → 布局时主脉自然居中
+    const mainIdx = transformed.findIndex(c => c.data?.is_main_lineage);
+    if (mainIdx > 0) {
+      const [mainChild] = transformed.splice(mainIdx, 1);
+      const mid = Math.floor(transformed.length / 2);
+      transformed.splice(mid, 0, mainChild);
+    }
+    result.children = transformed;
   }
 
   return result;
@@ -425,6 +522,21 @@ const matchesPhotoFilter = (node: any): boolean => {
 };
 
 // Generate initial avatar SVG based on gender and name
+/**
+ * UTF-8 安全的 base64 编码
+ * - 原生 btoa() 仅支持 Latin1，遇到中文姓名（如"朱熹"）会抛 InvalidCharacterError
+ * - 中文姓名 → SVG <text> → btoa() 链路是族谱场景的必修项（demo 数据全是中文）
+ * - 选 TextEncoder + String.fromCharCode.apply 走标准 UTF-8 → base64，
+ *   比 unescape(encodeURIComponent(...)) 兼容性更好（避免被部分 polyfill 警告）
+ */
+function utf8ToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 const generateAvatarSvg = (name: string, gender: string): string => {
   const initial = name ? name.charAt(0) : '?';
   const bgColor = gender === 'male' ? '#1976D2' : '#C2185B';
@@ -432,7 +544,7 @@ const generateAvatarSvg = (name: string, gender: string): string => {
     <circle cx="40" cy="40" r="40" fill="${bgColor}" opacity="0.15"/>
     <text x="40" y="46" text-anchor="middle" fill="${bgColor}" font-size="32" font-weight="600">${initial}</text>
   </svg>`;
-  return `data:image/svg+xml;base64,${btoa(svg)}`;
+  return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
 };
 
 // ==================== Graph Initialization ====================
@@ -503,42 +615,38 @@ const initGraph = async (data: GenealogyNode) => {
   const treeData = transformToG6Data(data);
   const graphData = treeToGraphData(treeData);
 
-  // ==================== 补齐 spouse 边 ====================
+  // ==================== 补齐 spouse 边（延迟添加策略）====================
   /**
    * treeToGraphData 仅生成父子边，再婚/多段婚姻需要从 node.spouses 手动补边。
-   * - 边型 spouse（虚线 + order 标签）
-   * - 当前婚姻 is_current=true 用实线，否则虚线（离异/丧偶）
-   * - 同一对夫妻多段婚姻按 marriage_order 递增编号
    *
-   * 注意：spouse 节点本身可能不在 graphData.nodes 中（例如跨子树配偶），
-   * 我们用 Map 建立 nodeId -> spouse 节点的引用，缺失时插入虚拟占位节点
-   * （不参与布局，但保证边能渲染）。下一步可以考虑把这些"外缘"节点折叠到子树。
+   * 关键设计：配偶节点不参与初始布局，而是在布局完成后通过布局引擎定位到伴侣旁边。
    */
   const existingNodeIds = new Set((graphData.nodes || []).map((n: any) => String(n.id)));
   const existingNodeMap = new Map<string, any>();
   for (const n of graphData.nodes || []) existingNodeMap.set(String(n.id), n);
 
-  // 收集子树所有节点：用于查找 spouse 节点是否在本图内
   const walkTree = (node: GenealogyNode | any): void => {
     existingNodeIds.add(String(node.id));
     if (node.children) node.children.forEach(walkTree);
   };
   walkTree(data);
 
-  const extraEdges: any[] = [];
+  // 收集所有配偶信息，延迟到布局后添加
+  const pendingSpouseNodes: any[] = [];
+  const pendingSpouseEdges: any[] = [];
   const seenSpousePairs = new Set<string>();
+
   const visitSpouses = (node: any) => {
     const spouses = node.spouses as any[] | undefined;
     if (!spouses) return;
     for (const s of spouses) {
-      // 无向对：用 sorted pair 防重复
       const pairKey = [String(node.id), String(s.id)].sort().join('|');
       if (seenSpousePairs.has(pairKey)) continue;
       seenSpousePairs.add(pairKey);
 
-      // spouse 不在当前图内：插入虚拟占位节点（仅用于边）
+      // 收集配偶节点（不在初始布局中）
       if (!existingNodeMap.has(String(s.id))) {
-        const placeholder = {
+        pendingSpouseNodes.push({
           id: String(s.id),
           label: s.name,
           data: {
@@ -550,15 +658,12 @@ const initGraph = async (data: GenealogyNode) => {
           },
           style: {
             opacity: 0.45,
-            lineDash: [4, 4],
           },
-        };
-        (graphData.nodes || (graphData.nodes = [])).push(placeholder);
-        existingNodeMap.set(String(s.id), placeholder);
-        existingNodeIds.add(String(s.id));
+        });
+        existingNodeMap.set(String(s.id), pendingSpouseNodes[pendingSpouseNodes.length - 1]);
       }
 
-      extraEdges.push({
+      pendingSpouseEdges.push({
         id: `spouse-${pairKey}-${s.marriage_order}`,
         source: String(node.id),
         target: String(s.id),
@@ -574,24 +679,193 @@ const initGraph = async (data: GenealogyNode) => {
   };
   visitSpouses(data);
 
-  if (extraEdges.length > 0) {
-    graphData.edges = (graphData.edges || []).concat(extraEdges);
+  // ==================== 使用自适应布局引擎 ====================
+  /**
+   * 不再使用 G6 的 compact-box 布局，改用自定义布局引擎。
+   * 布局引擎负责：
+   * 1. 基于代际的层次布局
+   * 2. 同代节点水平对齐
+   * 3. 主脉节点居中排列
+   * 4. 智能计算节点间距
+   * 5. 配偶节点优化定位
+   * 6. 自适应缩放和视口适配
+   */
+  
+  // 从树结构计算代际（比从边计算更可靠）
+  const generationMap = new Map<string, number>();
+  const computeGenerationsFromTree = (node: any, gen: number) => {
+    generationMap.set(String(node.id), gen);
+    if (node.children) {
+      for (const child of node.children) {
+        computeGenerationsFromTree(child, gen + 1);
+      }
+    }
+  };
+  computeGenerationsFromTree(data, 0);
+  
+  // 准备布局引擎输入数据
+  const layoutNodes: LayoutNode[] = (graphData.nodes || []).map((n: any) => ({
+    id: String(n.id),
+    label: n.label || '',
+    gender: n.data?.gender || 'male',
+    isMainLineage: n.data?.is_main_lineage || false,
+    isLiving: n.data?.is_living || false,
+    generation: generationMap.get(String(n.id)) ?? 0,
+    data: n.data,
+    width: config.nodeWidth,
+    height: config.nodeHeight,
+  }));
+
+  const layoutEdges: LayoutEdge[] = (graphData.edges || []).map((e: any) => ({
+    id: String(e.id),
+    source: String(e.source),
+    target: String(e.target),
+    kind: e.data?.kind === 'spouse' ? 'spouse' : 'parent-child',
+    isCurrent: e.data?.is_current,
+    marriageOrder: e.data?.order,
+  }));
+
+  // 添加配偶边到布局引擎
+  for (const edge of pendingSpouseEdges) {
+    layoutEdges.push({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      kind: 'spouse',
+      isCurrent: edge.data?.is_current,
+      marriageOrder: edge.data?.order,
+    });
   }
+
+  // 添加配偶节点到布局引擎（标记为外部配偶，不参与主布局）
+  for (const node of pendingSpouseNodes) {
+    layoutNodes.push({
+      id: String(node.id),
+      label: node.label || '',
+      gender: node.data?.gender || 'male',
+      isMainLineage: false,
+      isLiving: node.data?.is_living || false,
+      generation: -1, // 标记为外部节点，不参与主布局
+      data: node.data,
+      width: config.nodeWidth,
+      height: config.nodeHeight,
+    });
+  }
+
+  // 创建布局引擎
+  const layoutEngine = new LayoutEngine({
+    canvasSize: { width, height },
+    config: {
+      nodeWidth: config.nodeWidth,
+      nodeHeight: config.nodeHeight,
+      nodeSep: config.nodeSep,
+      rankSep: config.rankSep,
+      spouseGap: 16, // 增加配偶节点间距，避免重叠
+      mainLineageCenter: true,
+      spouseOptimization: true,
+      generationAlign: true,
+      autoFit: {
+        enabled: true,
+        padding: 40,
+        maxZoom: 2,
+        minZoom: 0.1,
+        preferDirection: layoutDirection.value as 'TB' | 'LR',
+      },
+      performance: {
+        maxNodesForFullLayout: 2000,
+        viewportCulling: true,
+        lodEnabled: true,
+      },
+    },
+  });
+
+  // 计算布局
+  const layoutResult = layoutEngine.calculateLayout(layoutNodes, layoutEdges);
+  
+  // 自适应缩放
+  const viewportConfig = layoutEngine.autoFit(layoutResult);
+
+  // 创建节点位置映射
+  const nodePositionMap = new Map<string, { x: number; y: number }>();
+  for (const pos of layoutResult.nodes) {
+    nodePositionMap.set(pos.id, { x: pos.x, y: pos.y });
+  }
+
+  // 更新 G6 节点数据，设置初始位置
+  for (const node of graphData.nodes || []) {
+    const pos = nodePositionMap.get(String(node.id));
+    if (pos) {
+      node.style = { ...node.style, x: pos.x, y: pos.y };
+    }
+  }
+
+  // 将配偶节点添加到 G6 数据中
+  for (const node of pendingSpouseNodes) {
+    const pos = nodePositionMap.get(String(node.id));
+    if (pos) {
+      node.style = { ...node.style, x: pos.x, y: pos.y };
+    }
+    // 推入 graphData.nodes
+    if (!graphData.nodes) graphData.nodes = [];
+    graphData.nodes.push(node);
+  }
+
+  // 将配偶边添加到 G6 数据中
+  for (const edge of pendingSpouseEdges) {
+    if (!graphData.edges) graphData.edges = [];
+    graphData.edges.push({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      data: edge.data,
+    });
+  }
+
+  // 将布局引擎计算的正交路径附加到 G6 边数据
+  // 按 source-target 匹配（layout 和 G6 的 edge id 可能不同）
+  const layoutEdgeByPair = new Map<string, LayoutEdge>();
+  for (const le of layoutResult.edges) {
+    layoutEdgeByPair.set(`${le.source}-${le.target}`, le);
+  }
+  
+  let orthPathCount = 0;
+  let spouseEdgeCount = 0;
+  let missingPathCount = 0;
+  for (const edge of graphData.edges || []) {
+    const layoutEdge = layoutEdgeByPair.get(`${edge.source}-${edge.target}`);
+    if (layoutEdge?.path) {
+      // 将 orthPath 放在 style 中，G6 的 getKeyPath 从 attributes（由 style 构建）读取
+      edge.style = { ...edge.style, orthPath: layoutEdge.path };
+      orthPathCount++;
+    } else if (edge.data?.kind !== 'spouse') {
+      missingPathCount++;
+      console.warn('[GenealogyTree] 边缺少正交路径:', edge.id, edge.source, '->', edge.target);
+    }
+    if (edge.data?.kind === 'spouse') {
+      spouseEdgeCount++;
+    }
+  }
+  console.log('[GenealogyTree] 布局完成:', {
+    totalEdges: graphData.edges?.length || 0,
+    orthPathCount,
+    missingPathCount,
+    spouseEdgeCount,
+    totalNodes: graphData.nodes?.length || 0,
+    spouseNodes: pendingSpouseNodes.length,
+  });
 
   const g6Graph = new Graph({
     container: container.value,
     width,
     height,
-    autoFit: 'center',
     autoResize: true,
-    behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
-    layout: {
-      type: 'compact-box',
-      direction: layoutDirection.value,
-      nodeSep: config.nodeSep,
-      rankSep: config.rankSep,
-      getId: (d: any) => d.id,
-    },
+    behaviors: [
+      'drag-canvas',
+      'zoom-canvas',
+      'drag-element',
+    ],
+    // 不再使用 G6 布局，使用自定义布局引擎
+    layout: undefined,
     node: {
       type: 'rect',
       style: {
@@ -647,32 +921,34 @@ const initGraph = async (data: GenealogyNode) => {
           return 1;
         },
 
-        // Avatar image
+        // Thumbnail image (small square icon at top-left inside the node)
         iconSrc: (d: any) => {
           if (config.avatarSize === 0) return undefined;
           if (d.data?.thumbnail_url) return d.data.thumbnail_url;
-          return generateAvatarSvg(
-            d.label || d.data?.original?.full_name || '',
-            d.data?.gender || 'male',
-          );
+          return undefined;
         },
         iconWidth: config.avatarSize,
         iconHeight: config.avatarSize,
         iconOffset: (_d: any) => {
-          if (genealogyStore.viewMode === 'portrait') {
-            return [0, -20];
-          }
-          return [-(config.nodeWidth / 2 - 28), 0];
+          // Top-left corner inside the node box
+          const halfW = config.nodeWidth / 2;
+          const halfH = config.nodeHeight / 2;
+          const pad = 4;
+          return [-halfW + config.avatarSize / 2 + pad, -halfH + config.avatarSize / 2 + pad];
         },
-        iconRadius: config.avatarSize / 2,
+        iconRadius: 4,
 
-        // Name label
+        // Name label — vertical text (one character per line)
         labelText: (d: any) => {
           const name = d.label || '';
+          let truncated: string;
           if (genealogyStore.viewMode === 'portrait') {
-            return name.length > 6 ? name.substring(0, 5) + '..' : name;
+            truncated = name.length > 6 ? name.substring(0, 5) + '..' : name;
+          } else {
+            truncated = name.length > 8 ? name.substring(0, 7) + '..' : name;
           }
-          return name.length > 8 ? name.substring(0, 7) + '..' : name;
+          // Insert newline between each character for vertical display
+          return truncated.split('').join('\n');
         },
         labelFill: (d: any) => {
           if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
@@ -682,8 +958,8 @@ const initGraph = async (data: GenealogyNode) => {
         },
         labelFontSize: config.nameFontSize,
         labelFontWeight: 600,
-        labelPlacement: genealogyStore.viewMode === 'portrait' ? 'bottom' : 'right',
-        labelOffset: genealogyStore.viewMode === 'portrait' ? [0, 30] : [10, 0],
+        labelPlacement: 'center',
+        labelOffset: [0, 0],
 
         // Sublabel (years)
         sublabelText: (d: any) => {
@@ -720,22 +996,24 @@ const initGraph = async (data: GenealogyNode) => {
       },
     },
     edge: {
-      type: 'cubic-horizontal',
+      type: (d: any) => {
+        // 配偶边使用直线
+        if (d.data?.kind === 'spouse') return 'line';
+        // 父子边使用自定义正交边（使用布局引擎预计算的路径）
+        return 'orth';
+      },
       style: {
         stroke: (d: any) => {
           const sourceMatched = matchesSearch(d.source) && matchesGenderFilter(d.source);
           const targetMatched = matchesSearch(d.target) && matchesGenderFilter(d.target);
           if (d.data?.kind === 'spouse') {
-            // 配偶边：当前婚姻红粉色，历史婚姻灰色
             return d.data?.is_current ? '#E91E63' : '#9E9E9E';
           }
           return (sourceMatched && targetMatched) ? '#B0BEC5' : '#E8E0D8';
         },
         lineWidth: (d: any) => {
-          // spouse 边加粗一点点便于辨识
           return d.data?.kind === 'spouse' ? 2.5 : 2;
         },
-        // 历史婚姻（离异/丧偶）走虚线
         lineDash: (d: any) => {
           if (d.data?.kind === 'spouse' && !d.data?.is_current) return [6, 4];
           return undefined;
@@ -771,7 +1049,6 @@ const initGraph = async (data: GenealogyNode) => {
    * - graph.setElementVisibility(id, v)   批量设置可见性
    */
   const VIEWPORT_MARGIN = 200;
-  let cullingRafId = 0;
 
   function performViewportCulling(g: any, force = false) {
     if (!g || typeof g.getSize !== 'function') return;
@@ -828,7 +1105,12 @@ const initGraph = async (data: GenealogyNode) => {
    */
   function applyZoomLOD(g: any) {
     if (!g || typeof g.getZoom !== 'function') return;
-    const zoom = g.getZoom();
+    let zoom: number;
+    try {
+      zoom = g.getZoom();
+    } catch {
+      return;
+    }
     const lodLevel: 'minimal' | 'medium' | 'full' =
       zoom < 0.5 ? 'minimal' : zoom < 0.85 ? 'medium' : 'full';
     // 不每次都触发 style 重算；改为更新 element attributes 让节点渲染时读取
@@ -847,6 +1129,7 @@ const initGraph = async (data: GenealogyNode) => {
 
   // 监听 G6 生命周期事件，触发裁剪与 LOD
   // 关闭动画以避免 culling 与 animate transform 冲突
+  // 注意：布局引擎已在 setData 前计算好所有节点位置，无需后处理
   g6Graph.on('afterlayout', () => {
     performViewportCulling(g6Graph, true);
     applyZoomLOD(g6Graph);
@@ -907,9 +1190,19 @@ const initGraph = async (data: GenealogyNode) => {
     perfRafId = requestAnimationFrame(fpsLoop);
   }
 
-  // Node click event
+  // Node click event — check if click is on the icon (thumbnail)
   g6Graph.on('node:click', (e: any) => {
+    const targetId = e.target?.id;
+    const isIconClick = targetId && String(targetId).includes('icon');
     const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
+
+    if (isIconClick && nodeModel?.data?.thumbnail_url) {
+      // Click on thumbnail → open image preview
+      const name = nodeModel.data.original?.full_name || nodeModel.label || '';
+      openImagePreview(nodeModel.data.thumbnail_url, name);
+      return;
+    }
+
     if (nodeModel?.data?.original) {
       genealogyStore.selectNode(nodeModel.data.original as GenealogyNode);
       refreshGraph();
@@ -969,6 +1262,20 @@ const initGraph = async (data: GenealogyNode) => {
   finishLoading();
 };
 
+/**
+ * 防抖版 initGraph 包装器
+ * 快速切换视图模式 / 布局方向时，取消上一次未执行的重建，避免性能浪费
+ */
+function debouncedInitGraph(data: GenealogyNode) {
+  if (initGraphDebounceTimer !== null) {
+    clearTimeout(initGraphDebounceTimer);
+  }
+  initGraphDebounceTimer = window.setTimeout(() => {
+    initGraphDebounceTimer = null;
+    initGraph(data);
+  }, 150);
+}
+
 // ==================== Search Handler ====================
 
 const handleSearch = () => {
@@ -1023,14 +1330,14 @@ const toggleLayout = () => {
   layoutDirection.value = layoutDirection.value === 'TB' ? 'LR' : 'TB';
   ElMessage.success(`已切换为${layoutDirection.value === 'TB' ? '纵向' : '横向'}布局`);
   if (genealogyStore.treeData) {
-    initGraph(genealogyStore.treeData);
+    debouncedInitGraph(genealogyStore.treeData);
   }
 };
 
 const handleViewModeChange = (mode: ViewMode) => {
   genealogyStore.setViewMode(mode);
   if (genealogyStore.treeData) {
-    initGraph(genealogyStore.treeData);
+    debouncedInitGraph(genealogyStore.treeData);
   }
 };
 
@@ -1250,6 +1557,11 @@ onUnmounted(() => {
   clearProgressTimer();
   clearHideTimer();
   teardownGraphResize();
+  // 清理 initGraph 防抖定时器
+  if (initGraphDebounceTimer !== null) {
+    clearTimeout(initGraphDebounceTimer);
+    initGraphDebounceTimer = null;
+  }
   // 清理性能埋点 rAF
   if (perfRafId) {
     cancelAnimationFrame(perfRafId);
@@ -1272,147 +1584,214 @@ defineExpose({
   addPerson,
   refresh: refreshGraph,
   focusMainLineage,
+  /**
+   * 鸟瞰图桥接：返回节点位与视口信息，供 TreeMinimap 同步渲染
+   * - 返回 null 表示画布尚未初始化（M2 鸟瞰图在画布 ready 后才显示）
+   * - 节点位置从 G6 getElementPosition 读取（画布坐标，不是屏幕坐标）
+   * - 缩略图组件自行换算到 200x150 画布内坐标（与伪代码 §5.4 对齐）
+   */
+  getMinimapSnapshot() {
+    if (!graph.value || typeof graph.value.getNodeData !== 'function') return null;
+    try {
+      const [vw, vh] = graph.value.getSize();
+      const [cx, cy] = graph.value.getViewportCenter();
+      const zoom = graph.value.getZoom();
+      const nodes = graph.value.getNodeData() || [];
+      const points = nodes.map((n: any) => {
+        const pos = graph.value.getElementPosition(String(n.id));
+        return {
+          id: String(n.id),
+          x: pos?.[0] ?? 0,
+          y: pos?.[1] ?? 0,
+          gender: n.data?.gender,
+          isMain: n.data?.is_main_lineage === true,
+          isLiving: n.data?.is_living === true,
+        };
+      });
+      return { nodes: points, viewport: { cx, cy, vw, vh, zoom } };
+    } catch {
+      return null;
+    }
+  },
+  /**
+   * 鸟瞰图拖拽跳转：移动主画布视口使 (canvasX, canvasY) 居中
+   * - G6 v5 translateTo 接受画布坐标
+   * - 跳转后自动 aftertransform → M2/M3 自动触发鸟瞰图重绘
+   */
+  panTo(canvasX: number, canvasY: number) {
+    try {
+      graph.value?.translateTo?.({ x: canvasX, y: canvasY });
+    } catch {
+      /* graph may be mid-destroy */
+    }
+  },
+  /**
+   * 代际总数（M3）：计算树最大深度（根为第 1 代）
+   * - 遍历 treeData 子节点累加 depth
+   * - 用于 TreeGenerationSlider 的滑块刻度范围
+   */
+  getTotalGenerations(): number {
+    const tree = genealogyStore.treeData;
+    if (!tree) return 1;
+    const computeDepth = (node: any, d: number): number => {
+      const children = node.children || [];
+      if (!children.length) return d;
+      let max = d;
+      for (const c of children) {
+        const childDepth = computeDepth(c, d + 1);
+        if (childDepth > max) max = childDepth;
+      }
+      return max;
+    };
+    return computeDepth(tree, 1);
+  },
+  /**
+   * 聚焦某节点（M3）：包装 G6 focusElement
+   * - 用于 TreeGenerationSlider 点击代际刻度时定位到该代际的代表节点
+   */
+  focusNode(id: string | number) {
+    try {
+      graph.value?.focusElement?.(String(id));
+    } catch {
+      /* graph may be mid-destroy */
+    }
+  },
 });
 </script>
 
 <template>
   <div class="genealogy-tree-container">
-    <!-- Enhanced Warm-Toned Toolbar -->
-    <div class="tree-toolbar">
-      <!-- Search Section -->
-      <div class="toolbar-section">
-        <div class="section-label">搜索</div>
-        <div class="toolbar-search">
-          <el-input
-            v-model="searchKeyword"
-            :placeholder="searchResultCount > 0 ? `找到 ${searchResultCount} 个结果` : '搜索姓名...'"
-            :prefix-icon="Search"
-            :suffix-icon="searchResultCount > 0 ? 'Check' : undefined"
-            clearable
-            @keyup.enter="handleSearch"
-            @clear="clearSearch"
-            @input="handleSearch"
-            size="default"
-            style="width: 200px"
-            :class="{ 'has-search-result': searchResultCount > 0 }"
-          />
-        </div>
-      </div>
+    <!-- Compact Toolbar (单行布局，隐藏 label 节省空间) -->
+    <div class="tree-toolbar" :class="{ 'is-collapsed': toolbarCollapsed }">
+      <el-button
+        class="toolbar-toggle"
+        :icon="toolbarCollapsed ? Expand : Fold"
+        circle
+        size="small"
+        @click="toolbarCollapsed = !toolbarCollapsed"
+        :title="toolbarCollapsed ? '展开工具栏' : '收起工具栏'"
+      />
+
+      <!-- Search (always visible, 最常用) -->
+      <el-input
+        v-model="searchKeyword"
+        :placeholder="searchResultCount > 0 ? `找到 ${searchResultCount} 个结果` : '搜索姓名…'"
+        :prefix-icon="Search"
+        clearable
+        @keyup.enter="handleSearch"
+        @clear="clearSearch"
+        @input="handleSearch"
+        size="small"
+        style="width: 180px"
+        :class="{ 'has-search-result': searchResultCount > 0 }"
+      />
 
       <el-divider direction="vertical" />
 
-      <!-- View Mode Section -->
-      <div class="toolbar-section">
-        <div class="section-label">视图</div>
-        <div class="view-mode-switcher">
-          <el-button-group>
-            <el-button
-              :type="genealogyStore.viewMode === 'compact' ? 'primary' : 'default'"
-              @click="handleViewModeChange('compact')"
-              size="small"
-              title="紧凑视图"
-            >
-              <el-icon><List /></el-icon>
-              <span class="btn-text">紧凑</span>
-            </el-button>
-            <el-button
-              :type="genealogyStore.viewMode === 'detailed' ? 'primary' : 'default'"
-              @click="handleViewModeChange('detailed')"
-              size="small"
-              title="详细视图"
-            >
-              <el-icon><Grid /></el-icon>
-              <span class="btn-text">详细</span>
-            </el-button>
-            <el-button
-              :type="genealogyStore.viewMode === 'portrait' ? 'primary' : 'default'"
-              @click="handleViewModeChange('portrait')"
-              size="small"
-              title="肖像视图"
-            >
-              <el-icon><User /></el-icon>
-              <span class="btn-text">肖像</span>
-            </el-button>
-          </el-button-group>
-        </div>
-      </div>
-
-      <el-divider direction="vertical" />
-
-      <!-- Filter Section -->
-      <div class="toolbar-section">
-        <div class="section-label">筛选</div>
-        <div class="filter-group">
-          <el-select
-            v-model="filterGender"
-            placeholder="全部"
-            @change="handleGenderFilterChange"
-            size="small"
-            style="width: 80px"
-          >
-            <el-option label="全部" value="all" />
-            <el-option label="男" value="male" />
-            <el-option label="女" value="female" />
-          </el-select>
-
-          <el-checkbox
-            v-model="showOnlyWithPhotos"
-            @change="refreshGraph"
+      <!-- View Mode -->
+      <el-button-group>
+        <el-tooltip content="紧凑视图" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'compact' ? 'primary' : 'default'"
+            @click="handleViewModeChange('compact')"
             size="small"
           >
-            仅照片
-          </el-checkbox>
-        </div>
-      </div>
+            <el-icon><List /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="详细视图" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'detailed' ? 'primary' : 'default'"
+            @click="handleViewModeChange('detailed')"
+            size="small"
+          >
+            <el-icon><Grid /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="肖像视图" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'portrait' ? 'primary' : 'default'"
+            @click="handleViewModeChange('portrait')"
+            size="small"
+          >
+            <el-icon><User /></el-icon>
+          </el-button>
+        </el-tooltip>
+      </el-button-group>
 
       <el-divider direction="vertical" />
 
-      <!-- Layout Section -->
-      <div class="toolbar-section">
-        <div class="section-label">布局</div>
+      <!-- Filter -->
+      <el-select
+        v-model="filterGender"
+        @change="handleGenderFilterChange"
+        size="small"
+        style="width: 72px"
+        title="按性别筛选"
+      >
+        <el-option label="全部" value="all" />
+        <el-option label="男" value="male" />
+        <el-option label="女" value="female" />
+      </el-select>
+
+      <el-tooltip content="仅显示有照片" placement="bottom">
+        <el-checkbox v-model="showOnlyWithPhotos" @change="refreshGraph" size="small">
+          <el-icon><Picture /></el-icon>
+        </el-checkbox>
+      </el-tooltip>
+
+      <el-divider direction="vertical" />
+
+      <!-- Layout -->
+      <el-tooltip content="切换纵向/横向布局" placement="bottom">
         <el-button
           @click="toggleLayout"
           :icon="layoutDirection === 'TB' ? Grid : Rank"
           size="small"
           :type="layoutDirection === 'TB' ? 'primary' : 'default'"
-          title="切换布局方向"
-        >
-          {{ layoutDirection === 'TB' ? '纵向' : '横向' }}
-        </el-button>
-      </div>
+          style="min-width: 36px"
+        />
+      </el-tooltip>
 
-      <div class="toolbar-spacer"></div>
+      <div class="toolbar-spacer" />
 
-      <!-- Actions Section -->
-      <div class="toolbar-section actions-section">
-        <el-button-group class="zoom-controls">
-          <el-button @click="zoomIn" size="small" title="放大">
+      <!-- Zoom Controls -->
+      <el-button-group class="zoom-controls">
+        <el-tooltip content="放大" placement="bottom">
+          <el-button @click="zoomIn" size="small">
             <el-icon><ZoomIn /></el-icon>
           </el-button>
-          <el-button @click="zoomOut" size="small" title="缩小">
+        </el-tooltip>
+        <el-tooltip content="缩小" placement="bottom">
+          <el-button @click="zoomOut" size="small">
             <el-icon><ZoomOut /></el-icon>
           </el-button>
-          <el-button @click="resetZoom" size="small" title="重置视图">
+        </el-tooltip>
+        <el-tooltip content="适配视图" placement="bottom">
+          <el-button @click="resetZoom" size="small">
             <el-icon><ScaleToOriginal /></el-icon>
           </el-button>
-        </el-button-group>
+        </el-tooltip>
+      </el-button-group>
 
+      <el-tooltip content="聚焦主传承线路" placement="bottom">
         <el-button
           @click="focusMainLineage"
           size="small"
-          title="聚焦传承线路"
           :type="genealogyStore.mainLineage.length ? 'warning' : 'default'"
+          :disabled="!genealogyStore.mainLineage.length"
         >
           <el-icon><Connection /></el-icon>
-          <span class="btn-text">传承</span>
         </el-button>
+      </el-tooltip>
 
-        <el-button @click="refreshGraph" :icon="Refresh" size="small" title="刷新" />
+      <el-tooltip content="刷新族谱" placement="bottom">
+        <el-button @click="refreshGraph" :icon="Refresh" size="small" />
+      </el-tooltip>
 
-        <el-button type="primary" @click="addPerson" :icon="Plus" size="small">
-          添加
-        </el-button>
-      </div>
+      <el-tooltip content="添加成员" placement="bottom">
+        <el-button type="primary" @click="addPerson" :icon="Plus" size="small" />
+      </el-tooltip>
     </div>
 
     <!-- Stats Bar -->
@@ -1519,6 +1898,13 @@ defineExpose({
       @create-marriage="handleDrawerCreateMarriage"
       @mutated="handleDrawerMutated"
     />
+
+    <!-- 图片预览：点击缩略图展开大图 -->
+    <ImagePreview
+      v-model="previewVisible"
+      :src="previewSrc"
+      :name="previewName"
+    />
   </div>
 </template>
 
@@ -1533,34 +1919,63 @@ defineExpose({
 
 .tree-toolbar {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  right: 16px;
-  z-index: 10;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 30;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
   background: rgba(255, 252, 248, 0.95);
   backdrop-filter: blur(12px);
-  padding: 12px 16px;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(93, 64, 55, 0.1);
-  border: 1px solid rgba(201, 169, 110, 0.25);
+  padding: 6px 12px;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(93, 64, 55, 0.08);
+  border: 1px solid rgba(201, 169, 110, 0.22);
+  transition: padding 0.2s ease;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tree-toolbar::-webkit-scrollbar { display: none; }
+
+/* 折叠态：隐藏 divider 与次要按钮，只保留 toggle + 搜索 + 缩放 + 添加 */
+.tree-toolbar.is-collapsed :deep(.el-divider),
+.tree-toolbar.is-collapsed .el-button-group:not(.zoom-controls),
+.tree-toolbar.is-collapsed > .el-checkbox,
+.tree-toolbar.is-collapsed > .el-select {
+  display: none !important;
+}
+.tree-toolbar.is-collapsed {
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.toolbar-toggle {
+  flex-shrink: 0;
+}
+
+.tree-toolbar :deep(.el-divider--vertical) {
+  height: 18px;
+  margin: 0;
+}
+
+.tree-toolbar :deep(.el-input--small .el-input__wrapper) {
+  padding: 0 8px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(201, 169, 110, 0.3) inset;
+}
+
+.tree-toolbar :deep(.el-checkbox) {
+  display: flex;
+  align-items: center;
 }
 
 .toolbar-section {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.section-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #8D6E63;
-  min-width: 36px;
-  text-align: right;
+  flex-shrink: 0;
 }
 
 .toolbar-search {
@@ -1570,6 +1985,7 @@ defineExpose({
 
 .toolbar-spacer {
   flex: 1;
+  min-width: 8px;
 }
 
 .filter-group {
@@ -1587,6 +2003,10 @@ defineExpose({
 .zoom-controls {
   background: rgba(201, 169, 110, 0.1);
   border-radius: 8px;
+}
+
+.zoom-controls :deep(.el-button) {
+  padding: 6px 10px;
 }
 
 .view-mode-switcher .el-button.is-primary {
@@ -1852,21 +2272,30 @@ defineExpose({
 .genealogy-tree-canvas {
   width: 100%;
   height: 100%;
+  /* G6 v5 会在容器内创建 4 层 <canvas>（背景/边/节点/UI），它们通过内联
+   * grid-area: 1/1/2/2 重叠到同一网格单元；外层必须是 grid 才能让它们叠加。
+   * 缺省 display 时会按 block 流式布局，4 层 canvas 沿垂直方向堆叠，
+   * 总高度膨胀为单层的 4 倍，导致画布看起来「空白的、节点画进屏外」。
+   * 此坑来源于 G6 5.x 子路径导入后 init() 不再自动注入容器样式。
+   */
+  display: grid;
+  position: relative;
+  overflow: hidden;
   background-image:
     radial-gradient(circle at 20% 50%, rgba(201, 169, 110, 0.06) 0%, transparent 50%),
     radial-gradient(circle at 80% 80%, rgba(93, 64, 55, 0.04) 0%, transparent 50%);
 }
 
 @media (max-width: 1200px) {
+  /* 之前是 flex-direction: column 让工具栏竖排，挤掉画布；
+   * 改为 nowrap + 横向滚动，让窄屏也能保留单行布局 */
   .tree-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-    padding: 10px 12px;
+    padding: 6px 8px;
+    gap: 6px;
   }
-  .toolbar-left,
-  .toolbar-center,
-  .toolbar-right {
-    flex-wrap: wrap;
+  .tree-toolbar.is-collapsed {
+    gap: 4px;
+    padding: 6px 6px;
   }
 }
 
@@ -1875,7 +2304,7 @@ defineExpose({
     top: 8px;
     left: 8px;
     right: 8px;
-    padding: 8px;
+    padding: 6px 8px;
   }
   .tree-stats {
     font-size: 10px;
