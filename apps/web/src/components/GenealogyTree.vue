@@ -370,8 +370,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 0,
     nameFontSize: 12,
     sublabelFontSize: 0,
-    nodeSep: 14,
-    rankSep: 80,   // nodeHeight(64) + 间距(16)
+    nodeSep: 20,
+    rankSep: 110,  // nodeHeight(64) + 间距(46)，预留配偶节点下方空间
   },
   detailed: {
     nodeWidth: 34,
@@ -379,8 +379,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 10,
-    nodeSep: 16,
-    rankSep: 96,   // nodeHeight(80) + 间距(16)
+    nodeSep: 24,
+    rankSep: 130,  // nodeHeight(80) + 间距(50)，预留配偶节点下方空间
   },
   portrait: {
     nodeWidth: 80,
@@ -388,8 +388,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 22,
     nameFontSize: 12,
     sublabelFontSize: 9,
-    nodeSep: 14,
-    rankSep: 108,  // nodeHeight(72) + 间距(36)
+    nodeSep: 20,
+    rankSep: 128,  // nodeHeight(72) + 间距(56)，预留配偶节点下方空间
   },
 }));
 
@@ -453,7 +453,7 @@ const retryLoad = async () => {
     if (data) {
       const treeData = (data as any).data || data;
       genealogyStore.setTreeData(treeData);
-      initGraph(treeData);
+      await initGraph(treeData);
     }
   } catch {
     // 错误已由 fetchTreeData 内设置到 errorState，无需再处理
@@ -462,7 +462,8 @@ const retryLoad = async () => {
 
 // ==================== Data Transformation ====================
 
-const transformToG6Data = (node: GenealogyNode): any => {
+const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, number>, gen: number = 0): any => {
+  if (generationMap) generationMap.set(String(node.id), gen);
   const isMainLineage = genealogyStore.isInMainLineage(node.id);
 
   // 兼容三种字段名：full_name（老约定）/ name（clan full 接口实际返回）/ label（其他）
@@ -487,7 +488,7 @@ const transformToG6Data = (node: GenealogyNode): any => {
   };
 
   if (node.children && node.children.length > 0) {
-    const transformed = node.children.map((child) => transformToG6Data(child));
+    const transformed = node.children.map((child) => transformToG6Data(child, generationMap, gen + 1));
     // 主脉子节点放中间，旁系对称分布两侧 → 布局时主脉自然居中
     const mainIdx = transformed.findIndex(c => c.data?.is_main_lineage);
     if (mainIdx > 0) {
@@ -612,7 +613,8 @@ const initGraph = async (data: GenealogyNode) => {
 
   const config = viewModeConfig.value[genealogyStore.viewMode];
 
-  const treeData = transformToG6Data(data);
+  const generationMap = new Map<string, number>();
+  const treeData = transformToG6Data(data, generationMap);
   const graphData = treeToGraphData(treeData);
 
   // ==================== 补齐 spouse 边（延迟添加策略）====================
@@ -624,12 +626,6 @@ const initGraph = async (data: GenealogyNode) => {
   const existingNodeIds = new Set((graphData.nodes || []).map((n: any) => String(n.id)));
   const existingNodeMap = new Map<string, any>();
   for (const n of graphData.nodes || []) existingNodeMap.set(String(n.id), n);
-
-  const walkTree = (node: GenealogyNode | any): void => {
-    existingNodeIds.add(String(node.id));
-    if (node.children) node.children.forEach(walkTree);
-  };
-  walkTree(data);
 
   // 收集所有配偶信息，延迟到布局后添加
   const pendingSpouseNodes: any[] = [];
@@ -644,10 +640,13 @@ const initGraph = async (data: GenealogyNode) => {
       if (seenSpousePairs.has(pairKey)) continue;
       seenSpousePairs.add(pairKey);
 
+      const sid = String(s.id);
+      let spouseNodeId = sid;
+
       // 收集配偶节点（不在初始布局中）
-      if (!existingNodeMap.has(String(s.id))) {
+      if (!existingNodeMap.has(sid)) {
         pendingSpouseNodes.push({
-          id: String(s.id),
+          id: sid,
           label: s.name,
           data: {
             gender: s.gender,
@@ -660,13 +659,34 @@ const initGraph = async (data: GenealogyNode) => {
             opacity: 0.45,
           },
         });
-        existingNodeMap.set(String(s.id), pendingSpouseNodes[pendingSpouseNodes.length - 1]);
+        existingNodeMap.set(sid, pendingSpouseNodes[pendingSpouseNodes.length - 1]);
+      } else {
+        // 该人已在族谱树中：为每一段婚姻关系生成独立的配偶副本节点，
+        // 避免同一副本被多个 source 共享导致 spouse 边无法对齐
+        spouseNodeId = `${sid}-spouse-${pendingSpouseEdges.length}`;
+        pendingSpouseNodes.push({
+          id: spouseNodeId,
+          label: s.name,
+          data: {
+            gender: s.gender,
+            is_living: true,
+            has_photo: false,
+            is_external_spouse: true,
+            is_duplicate_spouse: true,
+            originalId: sid,
+            original: null,
+          },
+          style: {
+            opacity: 0.45,
+          },
+        });
+        existingNodeMap.set(spouseNodeId, pendingSpouseNodes[pendingSpouseNodes.length - 1]);
       }
 
       pendingSpouseEdges.push({
         id: `spouse-${pairKey}-${s.marriage_order}`,
         source: String(node.id),
-        target: String(s.id),
+        target: spouseNodeId,
         data: {
           kind: 'spouse',
           order: s.marriage_order,
@@ -690,18 +710,6 @@ const initGraph = async (data: GenealogyNode) => {
    * 5. 配偶节点优化定位
    * 6. 自适应缩放和视口适配
    */
-  
-  // 从树结构计算代际（比从边计算更可靠）
-  const generationMap = new Map<string, number>();
-  const computeGenerationsFromTree = (node: any, gen: number) => {
-    generationMap.set(String(node.id), gen);
-    if (node.children) {
-      for (const child of node.children) {
-        computeGenerationsFromTree(child, gen + 1);
-      }
-    }
-  };
-  computeGenerationsFromTree(data, 0);
   
   // 准备布局引擎输入数据
   const layoutNodes: LayoutNode[] = (graphData.nodes || []).map((n: any) => ({
@@ -760,7 +768,7 @@ const initGraph = async (data: GenealogyNode) => {
       nodeHeight: config.nodeHeight,
       nodeSep: config.nodeSep,
       rankSep: config.rankSep,
-      spouseGap: 16, // 增加配偶节点间距，避免重叠
+      spouseGap: 32, // 增加配偶节点间距，避免重叠，使夫妻关系更清晰
       mainLineageCenter: true,
       spouseOptimization: true,
       generationAlign: true,
@@ -768,7 +776,7 @@ const initGraph = async (data: GenealogyNode) => {
         enabled: true,
         padding: 40,
         maxZoom: 2,
-        minZoom: 0.1,
+        minZoom: 0.25,
         preferDirection: layoutDirection.value as 'TB' | 'LR',
       },
       performance: {
@@ -845,14 +853,16 @@ const initGraph = async (data: GenealogyNode) => {
       spouseEdgeCount++;
     }
   }
-  console.log('[GenealogyTree] 布局完成:', {
-    totalEdges: graphData.edges?.length || 0,
-    orthPathCount,
-    missingPathCount,
-    spouseEdgeCount,
-    totalNodes: graphData.nodes?.length || 0,
-    spouseNodes: pendingSpouseNodes.length,
-  });
+  if (import.meta.env.DEV) {
+    console.log('[GenealogyTree] 布局完成:', {
+      totalEdges: graphData.edges?.length || 0,
+      orthPathCount,
+      missingPathCount,
+      spouseEdgeCount,
+      totalNodes: graphData.nodes?.length || 0,
+      spouseNodes: pendingSpouseNodes.length,
+    });
+  }
 
   const g6Graph = new Graph({
     container: container.value,
@@ -997,9 +1007,8 @@ const initGraph = async (data: GenealogyNode) => {
     },
     edge: {
       type: (d: any) => {
-        // 配偶边使用直线
-        if (d.data?.kind === 'spouse') return 'line';
-        // 父子边使用自定义正交边（使用布局引擎预计算的路径）
+        // 所有边都使用自定义正交边（使用布局引擎预计算的路径）
+        // 配偶边的 path 已在 positionSpouseNodes 中计算
         return 'orth';
       },
       style: {
@@ -1136,13 +1145,130 @@ const initGraph = async (data: GenealogyNode) => {
   });
   g6Graph.on('afterrender', () => {
     performViewportCulling(g6Graph, true);
+    graphChangeVersion.value++;
   });
   g6Graph.on('aftertransform', () => {
     performViewportCulling(g6Graph, false);
     applyZoomLOD(g6Graph);
+    graphChangeVersion.value++;
   });
   g6Graph.on('aftersizechange', () => {
     performViewportCulling(g6Graph, true);
+  });
+  
+  // ==================== 拖拽节点时更新关联边 ====================
+  /**
+   * 节点拖拽后，重新计算与该节点相连的所有边的正交路径
+   * 因为边使用预计算的绝对坐标，拖拽后需要实时更新
+   */
+  g6Graph.on('node:dragend', (evt: any) => {
+    const nodeId = evt.target?.id || evt.id;
+    if (!nodeId) return;
+    try {
+      // 获取拖拽后节点的新位置（从节点数据中读取）
+      const nodeData = g6Graph.getNodeData(nodeId);
+      if (!nodeData) return;
+      
+      // 从节点 style 中获取新位置
+      const newX = nodeData.style?.x;
+      const newY = nodeData.style?.y;
+      if (newX === undefined || newY === undefined) return;
+
+      // 查找所有与该节点相连的边
+      const allEdges = g6Graph.getEdgeData() || [];
+      const relatedEdges = allEdges.filter((e: any) => e.source === nodeId || e.target === nodeId);
+
+      for (const edge of relatedEdges) {
+        const edgeId = edge.id;
+        const sourceId = edge.source;
+        const targetId = edge.target;
+        
+        const sourceData = g6Graph.getNodeData(sourceId);
+        const targetData = g6Graph.getNodeData(targetId);
+        if (!sourceData || !targetData) continue;
+
+        // 获取节点位置（优先使用 style 中的位置）
+        const sourceX = sourceData.style?.x ?? 0;
+        const sourceY = sourceData.style?.y ?? 0;
+        const targetX = targetData.style?.x ?? 0;
+        const targetY = targetData.style?.y ?? 0;
+        
+        const sourceW = sourceData.style?.size?.[0] ?? config.nodeWidth;
+        const sourceH = sourceData.style?.size?.[1] ?? config.nodeHeight;
+        const targetW = targetData.style?.size?.[0] ?? config.nodeWidth;
+        const targetH = targetData.style?.size?.[1] ?? config.nodeHeight;
+
+        const isSpouse = edge.data?.kind === 'spouse';
+
+        if (isSpouse) {
+          // 配偶边：水平直线
+          const isSourceMain = sourceX < targetX;
+          const mainX = isSourceMain ? sourceX : targetX;
+          const mainY = isSourceMain ? sourceY : targetY;
+          const spouseX = isSourceMain ? targetX : sourceX;
+          const mainW = isSourceMain ? sourceW : targetW;
+          const spouseW = isSourceMain ? targetW : sourceW;
+
+          const mainRight = mainX + mainW / 2;
+          const spouseLeft = spouseX - spouseW / 2;
+
+          g6Graph.updateEdgeData([{
+            id: edgeId,
+            style: {
+              orthPath: {
+                points: [
+                  { x: mainRight, y: mainY },
+                  { x: spouseLeft, y: mainY },
+                ],
+                type: 'orth',
+              },
+            },
+          }]);
+        } else {
+          // 父子边：T 形正交路径
+          const parentX = sourceX;
+          const parentY = sourceY;
+          const childX = targetX;
+          const childY = targetY;
+
+          const parentBottomX = parentX;
+          const parentBottomY = parentY + sourceH / 2;
+          const childTopX = childX;
+          const childTopY = childY - targetH / 2;
+
+          let points: { x: number; y: number }[];
+          if (parentBottomX === childTopX) {
+            points = [
+              { x: parentBottomX, y: parentBottomY },
+              { x: childTopX, y: childTopY },
+            ];
+          } else {
+            const branchY = parentBottomY + (childTopY - parentBottomY) * 0.5;
+            points = [
+              { x: parentBottomX, y: parentBottomY },
+              { x: parentBottomX, y: branchY },
+              { x: childTopX, y: branchY },
+              { x: childTopX, y: childTopY },
+            ];
+          }
+
+          g6Graph.updateEdgeData([{
+            id: edgeId,
+            style: {
+              orthPath: {
+                points,
+                type: 'orth',
+              },
+            },
+          }]);
+        }
+      }
+
+      // 刷新画布
+      g6Graph.draw();
+    } catch (e) {
+      console.warn('[GenealogyTree] 拖拽后更新边路径失败:', e);
+    }
   });
 
   // ==================== FPS + 可见性计数（开发期可观测性） ====================
@@ -1205,11 +1331,27 @@ const initGraph = async (data: GenealogyNode) => {
 
     if (nodeModel?.data?.original) {
       genealogyStore.selectNode(nodeModel.data.original as GenealogyNode);
-      refreshGraph();
     }
   });
 
-  // Tooltip configuration using G6 v5 API
+  // Tooltip configuration — 单例模式，避免重复创建/销毁 DOM（性能优化）
+  let tooltipEl: HTMLDivElement | null = null;
+  const getTooltip = (): HTMLDivElement => {
+    if (!tooltipEl) {
+      tooltipEl = document.createElement('div');
+      tooltipEl.id = 'g6-tooltip';
+      tooltipEl.style.cssText = 'position:fixed;z-index:1000;pointer-events:none;';
+      document.body.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  };
+  const removeTooltip = () => {
+    if (tooltipEl) {
+      tooltipEl.remove();
+      tooltipEl = null; // 下次重新创建（避免层级问题）
+    }
+  };
+
   g6Graph.on('node:mouseenter', (e: any) => {
     const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
     if (nodeModel?.data?.original) {
@@ -1220,46 +1362,63 @@ const initGraph = async (data: GenealogyNode) => {
       const deathYear = data.death_year ? `去世: ${data.death_year}` : '';
       const status = data.is_living ? '在世' : '已故';
       
-      const tooltipContent = `
-        <div style="padding: 8px 12px; min-width: 140px; background: rgba(255, 255, 255, 0.98); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid rgba(201, 169, 110, 0.2);">
-          <div style="font-weight: 600; color: #5D4037; margin-bottom: 4px;">${name}</div>
-          <div style="display: flex; gap: 8px; font-size: 12px; color: #7F8C8D;">
+      const tooltip = getTooltip();
+      tooltip.innerHTML = `
+        <div style="padding:8px 12px;min-width:140px;background:rgba(255,255,255,0.98);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);border:1px solid rgba(201,169,110,0.2);">
+          <div style="font-weight:600;color:#5D4037;margin-bottom:4px;">${name}</div>
+          <div style="display:flex;gap:8px;font-size:12px;color:#7F8C8D;">
             <span>${gender}</span>
             <span>${status}</span>
           </div>
-          ${birthYear && `<div style="font-size: 12px; color: #999; margin-top: 4px;">${birthYear} ${deathYear}</div>`}
+          ${birthYear ? `<div style="font-size:12px;color:#999;margin-top:4px;">${birthYear} ${deathYear}</div>` : ''}
         </div>
       `;
       
       const event = e.originalEvent as MouseEvent;
-      const tooltip = document.createElement('div');
-      tooltip.innerHTML = tooltipContent;
-      tooltip.style.position = 'fixed';
       tooltip.style.left = `${event.clientX + 15}px`;
       tooltip.style.top = `${event.clientY + 15}px`;
-      tooltip.style.zIndex = '1000';
-      tooltip.style.pointerEvents = 'none';
-      tooltip.id = 'g6-tooltip';
-      document.body.appendChild(tooltip);
-      
-      const removeTooltip = () => {
-        const el = document.getElementById('g6-tooltip');
-        if (el) el.remove();
-      };
       
       g6Graph.once('node:mouseleave', removeTooltip);
-      
       document.addEventListener('click', removeTooltip, { once: true });
     }
   });
 
-  g6Graph.setData(graphData);
-  g6Graph.render();
-  graph.value = g6Graph;
-  // 绑定 ResizeObserver，后续容器尺寸变化（窗口 resize / 面板展开）自动 setSize
-  setupGraphResize(g6Graph);
-  // 渲染完成：进度条快速跑满到 100% 再延迟关闭
-  finishLoading();
+  try {
+    g6Graph.setData(graphData);
+    await g6Graph.render();
+    graph.value = g6Graph;
+    // 调试用：把 G6 实例暴露到全局，方便控制台检查节点/边坐标
+    if (import.meta.env.DEV) {
+      (window as any).__g6_graph__ = g6Graph;
+    }
+
+    // 应用布局引擎计算的视口变换（缩放 + 居中）
+    // 必须在 render() 完成后执行，否则 canvas 变换矩阵未初始化会报 transform undefined
+    if (
+      typeof g6Graph.zoomTo === 'function' &&
+      typeof g6Graph.translateBy === 'function' &&
+      typeof g6Graph.getViewportByCanvas === 'function'
+    ) {
+      await g6Graph.zoomTo(viewportConfig.zoom, { duration: 0 });
+      const [canvasW, canvasH] = g6Graph.getSize();
+      const canvasCenter: [number, number] = [canvasW / 2, canvasH / 2];
+      const contentVp = g6Graph.getViewportByCanvas([viewportConfig.centerX, viewportConfig.centerY]);
+      const delta: [number, number] = [
+        canvasCenter[0] - contentVp[0],
+        canvasCenter[1] - contentVp[1],
+      ];
+      await g6Graph.translateBy(delta, { duration: 0 });
+    }
+
+    // 绑定 ResizeObserver，后续容器尺寸变化（窗口 resize / 面板展开）自动 setSize
+    setupGraphResize(g6Graph);
+    // 渲染完成：进度条快速跑满到 100% 再延迟关闭
+    finishLoading();
+  } catch (e: any) {
+    console.error('[GenealogyTree] G6 渲染失败:', e);
+    ElMessage.error(`渲染失败：${e?.message || '未知错误'}`);
+    failLoading();
+  }
 };
 
 /**
@@ -1278,23 +1437,27 @@ function debouncedInitGraph(data: GenealogyNode) {
 
 // ==================== Search Handler ====================
 
+/** 搜索防抖计时器（每次输入 250ms 后执行搜索） */
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const handleSearchDebounced = () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => handleSearch(), 250);
+};
+
 const handleSearch = () => {
   if (!graph.value || !genealogyStore.treeData) return;
   highlightNodeIds.value.clear();
   
   if (searchKeyword.value) {
     let count = 0;
-    const findAllMatches = (node: any) => {
+    // 直接用 G6 已加载的图数据遍历，避免再次 transformToG6Data 全量转换
+    const allNodes = graph.value.getNodeData?.() || [];
+    for (const node of allNodes) {
       if (matchesSearch(node)) {
         highlightNodeIds.value.add(String(node.id));
         count++;
       }
-      if (node.children) {
-        node.children.forEach(findAllMatches);
-      }
-    };
-    const treeData = transformToG6Data(genealogyStore.treeData);
-    findAllMatches(treeData);
+    }
     searchResultCount.value = count;
     
     if (count > 0) {
@@ -1305,7 +1468,7 @@ const handleSearch = () => {
           try {
             graph.value.focusElement(firstMatchId, { duration: 500 });
           } catch {
-            console.log('Focus element failed');
+            if (import.meta.env.DEV) console.log('Focus element failed');
           }
         }, 300);
       }
@@ -1315,13 +1478,18 @@ const handleSearch = () => {
   } else {
     searchResultCount.value = 0;
   }
-  refreshGraph();
+  // 增量更新 G6 渲染（不再全量重建）
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
 };
 
 const clearSearch = () => {
   searchKeyword.value = '';
   highlightNodeIds.value.clear();
-  refreshGraph();
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
 };
 
 // ==================== Layout Controls ====================
@@ -1342,7 +1510,15 @@ const handleViewModeChange = (mode: ViewMode) => {
 };
 
 const handleGenderFilterChange = () => {
-  refreshGraph();
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
+};
+
+const handlePhotoFilterChange = () => {
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
 };
 
 const refreshGraph = () => {
@@ -1482,12 +1658,49 @@ function handleDrawerClose() {
   genealogyStore.selectNode(null);
 }
 
-/** 抽屉内编辑保存成功：把返回的 person 更新到 store 与画布 */
+/** 抽屉内编辑保存成功：把返回的 person 增量更新到画布（不再全量重建） */
 function handleDrawerUpdated(updated: GenealogyNode) {
   // 用返回的节点替换 store 中的 selectedNode（前端缓存的引用）
   genealogyStore.selectNode(updated);
-  // 整张图重建：编辑会影响节点显示（姓名/年份），不是热更新友好
-  refreshGraph();
+
+  if (!graph.value || !genealogyStore.treeData) {
+    refreshGraph();
+    return;
+  }
+
+  try {
+    const nodeId = String(updated.id);
+    const displayName = (updated as any).full_name || (updated as any).name || (updated as any).label || '';
+    const birthYear = updated.birth_date ? new Date(updated.birth_date).getFullYear() : undefined;
+    const deathYear = updated.death_date ? new Date(updated.death_date).getFullYear() : undefined;
+    const gender = (updated as any).gender;
+    const hasPhoto = !!(updated as any).has_photo;
+    const thumbnailUrl = (updated as any).thumbnail_url || (updated as any).avatar_url || '';
+    const avatarUrl = (updated as any).avatar_url || '';
+
+    // 读取当前 G6 节点数据并与新数据合并
+    const allNodes = graph.value.getNodeData() || [];
+    const existing = allNodes.find((n: any) => String(n.id) === nodeId);
+
+    graph.value.updateNodeData([{
+      id: nodeId,
+      label: displayName,
+      data: {
+        ...(existing?.data || {}),
+        gender,
+        birth_year: birthYear,
+        death_year: deathYear,
+        has_photo: hasPhoto,
+        thumbnail_url: thumbnailUrl,
+        avatar_url: avatarUrl,
+        original: updated,
+      },
+    }]);
+    graph.value.draw();
+  } catch (e) {
+    console.warn('[GenealogyTree] 编辑增量更新失败，回退到全量重建', e);
+    refreshGraph();
+  }
 }
 
 /** 抽屉内点击关系人：聚焦该节点（注意：跨子树焦点中心会被替换，
@@ -1496,7 +1709,13 @@ function handleDrawerNavigate(personId: string | number) {
   const target = findNodeInTree(genealogyStore.treeData, String(personId));
   if (target) {
     genealogyStore.selectNode(target);
-    refreshGraph();
+    // 增量选中 + 聚焦，避免全量重建
+    if (graph.value && typeof graph.value.draw === 'function') {
+      graph.value.draw();
+    }
+    try {
+      graph.value?.focusElement?.(String(personId), { duration: 500 });
+    } catch { /* graph may be mid-destroy */ }
   } else {
     ElMessage.info('该人物不在当前子树内，请调整根节点后查看');
   }
@@ -1533,7 +1752,9 @@ function findNodeInTree(root: GenealogyNode | null, id: string): GenealogyNode |
 watch(
   () => genealogyStore.selectedNode,
   () => {
-    refreshGraph();
+    if (graph.value && typeof graph.value.draw === 'function') {
+      graph.value.draw();
+    }
   },
 );
 
@@ -1545,7 +1766,7 @@ onMounted(async () => {
     if (data) {
       const treeData = (data as any).data || data;
       genealogyStore.setTreeData(treeData);
-      initGraph(treeData);
+      await initGraph(treeData);
     }
   } catch {
     // 错误已在 fetchTreeData 中设置到 errorState，画布将展示错误占位
@@ -1562,6 +1783,11 @@ onUnmounted(() => {
     clearTimeout(initGraphDebounceTimer);
     initGraphDebounceTimer = null;
   }
+  // 清理搜索防抖定时器
+  if (searchDebounceTimer !== null) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
   // 清理性能埋点 rAF
   if (perfRafId) {
     cancelAnimationFrame(perfRafId);
@@ -1577,11 +1803,15 @@ onUnmounted(() => {
   }
 });
 
+/** 画布变更版本号（每次 G6 渲染后递增，用于驱动 minimap 等外部组件的增量刷新） */
+const graphChangeVersion = ref(0);
+
 defineExpose({
   zoomIn,
   zoomOut,
   resetZoom,
   addPerson,
+  graphChangeVersion,
   refresh: refreshGraph,
   focusMainLineage,
   /**
@@ -1620,7 +1850,7 @@ defineExpose({
    */
   panTo(canvasX: number, canvasY: number) {
     try {
-      graph.value?.translateTo?.({ x: canvasX, y: canvasY });
+      graph.value?.translateTo?.([canvasX, canvasY]);
     } catch {
       /* graph may be mid-destroy */
     }
@@ -1680,7 +1910,7 @@ defineExpose({
         clearable
         @keyup.enter="handleSearch"
         @clear="clearSearch"
-        @input="handleSearch"
+        @input="handleSearchDebounced"
         size="small"
         style="width: 180px"
         :class="{ 'has-search-result': searchResultCount > 0 }"
@@ -1735,7 +1965,7 @@ defineExpose({
       </el-select>
 
       <el-tooltip content="仅显示有照片" placement="bottom">
-        <el-checkbox v-model="showOnlyWithPhotos" @change="refreshGraph" size="small">
+        <el-checkbox v-model="showOnlyWithPhotos" @change="handlePhotoFilterChange" size="small">
           <el-icon><Picture /></el-icon>
         </el-checkbox>
       </el-tooltip>

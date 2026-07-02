@@ -1,17 +1,27 @@
 <template>
   <div class="tree-page">
-    <!-- Top: Navigation Bar -->
-    <div class="tree-navbar" v-if="genealogyStore.selectedNode">
-      <div class="breadcrumb-path">
-        <el-icon><Connection /></el-icon>
-        <span class="breadcrumb-label">传承路径</span>
-        <span v-if="genealogyStore.mainLineage.length" class="breadcrumb-count">
-          ({{ genealogyStore.mainLineage.length }}代)
-        </span>
+    <!-- Top: Navigation Bar (fixed; always visible) -->
+    <div class="tree-navbar">
+      <div class="navbar-left">
+        <el-tooltip content="返回上一页" placement="bottom">
+          <el-button :icon="ArrowLeft" circle size="small" @click="goBack" />
+        </el-tooltip>
+        <el-tooltip content="返回首页" placement="bottom">
+          <el-button :icon="HomeFilled" circle size="small" @click="goHome" />
+        </el-tooltip>
+        <el-divider direction="vertical" />
+        <div class="navbar-title">
+          <el-icon class="title-icon"><Connection /></el-icon>
+          <span class="title-text">{{ pageTitle }}</span>
+        </div>
       </div>
-      <div class="navbar-actions">
+      <div class="navbar-right">
+        <div v-if="genealogyStore.mainLineage.length" class="lineage-chip">
+          <el-icon><Connection /></el-icon>
+          <span>传承路径 {{ genealogyStore.mainLineage.length }}代</span>
+        </div>
         <el-button size="small" @click="focusMainLineage" :icon="Connection" plain>
-          聚焦传承线路
+          聚焦传承
         </el-button>
         <el-button size="small" @click="highlightFamilyCircle" :icon="User" plain>
           三代亲属
@@ -38,6 +48,25 @@
           </div>
         </template>
       </Suspense>
+
+      <!-- 鸟瞰图（M2）：折凨态位于右下角，hover 1s 展开 -->
+      <!-- 模板里 `treeRef` 会被 Vue 自动 unwrap，访问 ref.value 已 unwrap 的 undefined.value 会抛错；
+           因此这里直接用 `treeRef?.xxx`，optional chaining 兑底 undefined。 -->
+      <TreeMinimap
+        ref="minimapRef"
+        :position="minimapPos"
+        :size="minimapSizeRef"
+        :get-snapshot="() => treeRef?.getMinimapSnapshot?.() ?? null"
+        :on-pan-to="(x: number, y: number) => treeRef?.panTo?.(x, y)"
+      />
+
+      <!-- 代际滑块（M3）：位于右下角，hover 浮出，详情面板打开时互斥隐藏 -->
+      <TreeGenerationSlider
+        :visibility="sliderVis"
+        :total-generations="treeRef?.getTotalGenerations?.() ?? 1"
+        :get-snapshot="() => treeRef?.getMinimapSnapshot?.() ?? null"
+        :on-focus-node="(id: string) => treeRef?.focusNode?.(id)"
+      />
     </div>
 
     <!-- Right: Detail Panel -->
@@ -183,7 +212,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue';
 import { defineAsyncComponent } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   Edit,
@@ -203,7 +232,9 @@ import {
   ZoomIn,
   VideoCamera,
   VideoPlay,
-  Connection
+  Connection,
+  ArrowLeft,
+  HomeFilled,
 } from '@element-plus/icons-vue';
 // 异步加载 GenealogyTree 组件（含 @antv/g6 1MB+ 重库）：
 // 避免在 TreePage chunk 解析时阻塞整条静态依赖链。
@@ -211,18 +242,63 @@ const GenealogyTree = defineAsyncComponent(
   () => import('@/components/GenealogyTree.vue'),
 );
 import { useGenealogyStore } from '@/stores/genealogy';
+import { useTreeLayoutOrchestrator } from '@/composables/useTreeLayoutOrchestrator';
 import { mediaApi } from '@/api/media';
 import type { MediaArchive } from '@/types';
+import TreeMinimap from '@/components/TreeMinimap.vue';
+import TreeGenerationSlider from '@/components/TreeGenerationSlider.vue';
 
 const route = useRoute();
+const router = useRouter();
 const genealogyStore = useGenealogyStore();
+/**
+ * 布局中央调度器（子文档《族谱树三视图布局优化 v1.1》§5）
+ * - 提供 derived layout state（minimapPosition / minimapSize / sliderVisibility）
+ * - 提供用户主动控制入口（showMinimap / showSlider / closeAux）
+ * - 当前页面只调用了 layout.closeAux()；minimapPosition / sliderVisibility 将在 M2/M3
+ *   创建 TreeMinimap.vue / TreeGenerationSlider.vue 后作为 props 传入
+ */
+const layout = useTreeLayoutOrchestrator();
 const treeRef = ref();
+const minimapRef = ref();
+/**
+ * 给 TreeMinimap 的两个响应式代理：模板里需要「值」而不是 ComputedRef，
+ * computed 内部直接 .value 读取，避免模板侧 TS 把 ref 误判为对象。
+ */
+const minimapPos = computed(() => layout.minimapPosition.value);
+const minimapSizeRef = computed(() => layout.minimapSize.value);
+const sliderVis = computed(() => layout.sliderVisibility.value);
 // 详情面板默认收起：避免 420px 详情面板在小屏下挤压树画布；
 // 选节点时再展开（已由 watch 逻辑负责）
 const showDetail = ref(false);
 const relatedMedia = ref<MediaArchive[]>([]);
 
 const clanId = computed(() => route.params.clanId as string);
+
+/**
+ * 顶部导航栏标题：优先展示本地缓存的家族名，其次回退到"家族族谱"
+ * - 避免每次进入页面都要拉取家族元信息（/api/clans/:id）
+ * - 缓存来源：LoginView 一键体验后会写入 localStorage['demo_clan_name']
+ *   或 admin 进入后台时的 store（待后续接入）
+ */
+const pageTitle = computed(() => {
+  const cached = localStorage.getItem('demo_clan_name');
+  return cached ? `${cached} · 族谱树` : '族谱全景';
+});
+
+/** 返回上一页：能退则退，不能退则回首页 */
+function goBack() {
+  if (window.history.length > 1) {
+    router.back();
+  } else {
+    router.push('/');
+  }
+}
+
+/** 返回首页（营销首页 LandingPage） */
+function goHome() {
+  router.push('/');
+}
 
 // Get initial letter of name
 function getInitial(name: string) {
@@ -263,8 +339,18 @@ watch(
   },
 );
 
+// 监听 GenealogyTree 画布变更后驱动 Minimap 和 GenerationSlider 增量刷新
+watch(
+  () => (treeRef.value as any)?.graphChangeVersion,
+  () => {
+    minimapRef.value?.refreshSnapshot?.();
+  },
+);
+
 function closeDetail() {
   genealogyStore.selectNode(null);
+  // 同步清理 orchestrator 的辅助视图状态，避免详情面板关闭后「主动模式」残留
+  layout.closeAux();
 }
 
 // Focus on main lineage in the genealogy tree
@@ -331,16 +417,42 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ================================================================
+ *  z-index 集中变量（子文档《族谱树三视图布局优化 v1.1》§4 修正 4）
+ *  - 区间说明：
+ *    - 50+ ：导航与全局浮层
+ *    - 30-49：详情面板 / 编辑抽屉（覆盖画布，但低于导航）
+ *    - 10-29：画布内辅助视图（工具栏 / 鸟瞰 / 滑块 / tooltip）
+ *  - 后续在新加浮层时一律从本表选 z-index，不要另写魔法数字
+ * ================================================================ */
+.tree-page {
+  --z-nav: 50;        /* 顶部导航 */
+  --z-toolbar: 30;    /* 画布工具栏（GenealogyTree 内部） */
+  --z-detail: 35;     /* 详情面板（侧栏，与画布分离，不争夺树互斥语义） */
+  --z-slider: 20;     /* 代际滑块 */
+  --z-minimap: 25;    /* 鸟瞰图 */
+  --z-tooltip: 60;    /* 节点 tooltip（最高） */
+  --z-progress: 40;   /* 加载进度条 */
+  --z-drawer: 45;     /* 侧边编辑抽屉 */
+}
+
 .tree-page {
   display: flex;
-  height: 100%;
+  /* 用 vh 兜底：#app 可能为 0；显式 100vh 避免画布高度坍缩为 0 导致 G6 0×0 初始化 */
+  height: 100vh;
+  min-height: 100vh;
   position: relative;
   background: #FAF8F5;
 }
 
 .tree-canvas-container {
   flex: 1;
+  /* 给绝对定位的 navbar 让出顶部空间，避免画布被遮挡 */
+  padding-top: 48px;
   overflow: hidden;
+  /* 显式占位高度，避免祖先 #app / .app-main 没有 height 时本容器坍缩为 0 */
+  min-height: 0;
+  position: relative;
 }
 
 /* 异步加载 GenealogyTree 期间的紧凑占位：避免 vendor-antv 慢加载时整页白屏 */
@@ -373,35 +485,68 @@ onMounted(() => {
   to { transform: rotate(360deg); }
 }
 
-/* Navigation Bar */
+/* Navigation Bar - Fixed Top */
 .tree-navbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 20px;
+  padding: 0 16px;
   background: rgba(255, 255, 255, 0.98);
   border-bottom: 1px solid rgba(201, 169, 110, 0.25);
   backdrop-filter: blur(12px);
-  z-index: 5;
+  z-index: 50;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
 }
 
-.breadcrumb-path {
+.navbar-left,
+.navbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--color-text-secondary);
+}
+
+.navbar-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-weight: 600;
+  color: var(--color-text-primary, #2C3E50);
   font-size: 14px;
 }
 
-.breadcrumb-label {
-  font-weight: 600;
-  color: var(--color-accent);
+.navbar-title .title-icon {
+  color: var(--color-accent, #C9A96E);
+  font-size: 16px;
 }
 
-.breadcrumb-count {
-  color: var(--color-text-muted);
+.navbar-title .title-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.lineage-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
   font-size: 12px;
+  color: var(--color-accent, #C9A96E);
+  background: rgba(201, 169, 110, 0.1);
+  border: 1px solid rgba(201, 169, 110, 0.25);
+}
+
+.lineage-chip .el-icon {
+  font-size: 13px;
 }
 
 .navbar-actions {
@@ -694,9 +839,27 @@ onMounted(() => {
 }
 
 /* Responsive Design */
+/* 子文档《族谱树三视图布局优化 v1.1》§4 修正 5 响应式断点表
+ * - 1200px 断点：代际滑块隐藏，详情面板变 360px
+ * - 1024px 断点：鸟瞰图隐藏，详情面板变 320px（避免两个辅助视图同时存在）
+ * - 768px 断点：详情面板改为底部抽屉（鸟瞰/代际已隐藏）
+ * - 480px 断点：进一步压缩
+ */
 @media (max-width: 1200px) {
+  .tree-page :deep(.tree-gen-slider) {
+    display: none !important;
+  }
   .detail-panel {
     width: 360px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .tree-page :deep(.tree-minimap) {
+    display: none !important;
+  }
+  .detail-panel {
+    width: 320px;
   }
 }
 
