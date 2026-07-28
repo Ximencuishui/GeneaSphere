@@ -29,7 +29,7 @@ const fetchApplications = async () => {
   try {
     const res = await axios.get('/api/admin/merge/applications', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: activeTab.value,
@@ -101,7 +101,7 @@ const rollbackLoading = ref(false)
 const fetchSnapshots = async () => {
   try {
     const res = await axios.get('/api/admin/merge/merge-snapshots', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     snapshots.value = res.data.data
   } catch (error) {
@@ -146,7 +146,7 @@ const handleMarkManual = async (app: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchApplications()
 })
 </script>

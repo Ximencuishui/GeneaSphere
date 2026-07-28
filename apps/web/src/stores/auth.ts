@@ -33,6 +33,7 @@ export interface DemoLoginResponse {
   user: { id: string; phone: string; role: string }
   demoClanId: string | null
   demoClanSlug: string | null
+  demoClanName: string | null
 }
 
 function parseTokenPayload(token: string): AuthUser | null {
@@ -148,6 +149,9 @@ export const useAuthStore = defineStore("auth", () => {
     axios.defaults.headers.common["Authorization"] = "Bearer " + data.access_token
     if (data.demoClanSlug) {
       localStorage.setItem(DEMO_CLAN_SLUG_KEY, data.demoClanSlug)
+    }
+    if (data.demoClanName) {
+      localStorage.setItem('demo_clan_name', data.demoClanName)
     }
   }
 

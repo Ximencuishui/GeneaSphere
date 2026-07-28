@@ -47,7 +47,7 @@ const fetchMembers = async () => {
   try {
     const res = await axios.get('/api/admin/members', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         role: filterRole.value || undefined,
@@ -136,7 +136,7 @@ const confirmTransferOwnership = async () => {
     await axios.patch('/api/admin/members/transfer-ownership', {
       targetUserId: transferTargetPhone.value,
       password: transferConfirmPassword.value,
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
     })
     ElMessage.success('所有权已转让')
     transferDialogVisible.value = false
@@ -195,7 +195,7 @@ const handleSelectionChange = (val: any[]) => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchMembers()
 
   if (route.query.tab === 'roles') {

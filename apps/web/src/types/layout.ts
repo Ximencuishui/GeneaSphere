@@ -133,7 +133,7 @@ export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   nodeHeight: 28,
   nodeSep: 'auto',
   rankSep: 'auto',
-  spouseGap: 8,
+  spouseGap: 32,
   mainLineageCenter: true,
   spouseOptimization: true,
   generationAlign: true,

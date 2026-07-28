@@ -26,7 +26,7 @@ const fetchData = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/albums', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     albums.value = res.data.data || res.data
   } catch (e: any) {
@@ -69,12 +69,12 @@ const handleSave = async () => {
   try {
     if (editingId.value) {
       await axios.put(`/api/admin/albums/${editingId.value}`, formData.value, {
-        params: { clanSlug: clanId.value },
+        params: { clanSlug: clanSlug.value },
       })
       ElMessage.success('更新成功')
     } else {
       await axios.post('/api/admin/albums', formData.value, {
-        params: { clanSlug: clanId.value },
+        params: { clanSlug: clanSlug.value },
       })
       ElMessage.success('创建成功')
     }
@@ -90,7 +90,7 @@ const handleDelete = async (id: string) => {
   try {
     await ElMessageBox.confirm('确定要删除该相册吗？', '提示', { type: 'warning' })
     await axios.delete(`/api/admin/albums/${id}`, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('删除成功')
     fetchData()

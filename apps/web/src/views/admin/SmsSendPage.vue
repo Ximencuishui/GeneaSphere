@@ -67,7 +67,7 @@ const canSend = computed(() => {
 const fetchBalance = async () => {
   try {
     const res = await axios.get('/api/admin/sms/balance', {
-      params: { clanSlug: clanId.value }
+      params: { clanSlug: clanSlug.value }
     })
     balance.value = res.data.balance
   } catch {
@@ -79,7 +79,7 @@ const fetchBalance = async () => {
 const fetchMembers = async () => {
   try {
     const res = await axios.get('/api/admin/members', {
-      params: { clanSlug: clanId.value, pageSize: 1000 }
+      params: { clanSlug: clanSlug.value, pageSize: 1000 }
     })
     memberList.value = res.data.members || []
   } catch {
@@ -102,7 +102,7 @@ const handleSend = async () => {
           '余额不足',
           { confirmButtonText: '立即充值', cancelButtonText: '取消', type: 'warning' }
         )
-        router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanId.value } })
+        router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanSlug.value } })
       } catch {
         // 用户取消
       }
@@ -137,7 +137,7 @@ const handleSend = async () => {
     }
 
     await axios.post('/api/admin/sms/send', {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       content: signName.value + smsContent.value,
       recipientIds,
       signName: signName.value,
@@ -165,7 +165,7 @@ const handleSend = async () => {
           '余额不足',
           { confirmButtonText: '立即充值', cancelButtonText: '取消', type: 'warning' }
         )
-        router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanId.value } })
+        router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanSlug.value } })
       } catch {
         // 用户取消
       }
@@ -179,7 +179,7 @@ const handleSend = async () => {
 
 // 前往充值
 const goToRecharge = () => {
-  router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanId.value } })
+  router.push({ path: `/zupu/${clanSlug}//admin/sms/balance`, query: { clanSlug: clanSlug.value } })
 }
 </script>
 

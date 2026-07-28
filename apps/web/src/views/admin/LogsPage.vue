@@ -36,7 +36,7 @@ const fetchLogs = async () => {
   try {
     const res = await axios.get('/api/admin/logs', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         action: filterAction.value || undefined,
@@ -58,7 +58,7 @@ const handleExport = async () => {
   try {
     const res = await axios.get('/api/admin/logs/export', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         startDate: filterStartDate.value || undefined,
         endDate: filterEndDate.value || undefined,
       },
@@ -68,7 +68,7 @@ const handleExport = async () => {
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `audit_logs_${clanId.value}_${new Date().toISOString().split('T')[0]}.csv`)
+    link.setAttribute('download', `audit_logs_${clanSlug.value}_${new Date().toISOString().split('T')[0]}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -80,7 +80,7 @@ const handleExport = async () => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchLogs()
 })
 </script>

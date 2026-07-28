@@ -5,6 +5,7 @@ import { RegisterDto, LoginDto, SendSmsCodeDto } from './dto/auth.dto';
 import { Public } from './public.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ClanResolverService } from '../common/clan-resolver.service';
+import { serializeBigInt } from '../common/bigint-serializer';
 
 @Controller('api/auth')
 export class AuthController {
@@ -79,6 +80,8 @@ export class AuthController {
   @Public()
   @Get('clans/resolve')
   async resolveClan(@Query('slug') slug: string) {
-    return await this.clanResolver.resolveOrThrow(slug);
+    const clan = await this.clanResolver.resolveOrThrow(slug);
+    // id 是 BigInt，必须在响应序列化前转 string，否则 Express res.json() 报错
+    return serializeBigInt(clan);
   }
 }

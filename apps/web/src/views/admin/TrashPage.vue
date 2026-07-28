@@ -26,7 +26,7 @@ const fetchMembers = async () => {
   try {
     const res = await axios.get('/api/admin/trash/members', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: membersPagination.value.page,
         pageSize: membersPagination.value.pageSize,
       },
@@ -46,7 +46,7 @@ const fetchMedia = async () => {
   try {
     const res = await axios.get('/api/admin/trash/media', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: mediaPagination.value.page,
         pageSize: mediaPagination.value.pageSize,
       },
@@ -65,7 +65,7 @@ const handleRestoreMember = async (id: string) => {
   try {
     await ElMessageBox.confirm('确定要恢复该成员吗？', '提示', { type: 'warning' })
     await axios.post(`/api/admin/trash/members/${id}/restore`, {}, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('恢复成功')
     fetchMembers()
@@ -84,7 +84,7 @@ const handlePermanentDeleteMember = async (id: string) => {
       confirmButtonText: '永久删除',
     })
     await axios.delete(`/api/admin/trash/members/${id}`, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('已永久删除')
     fetchMembers()
@@ -99,7 +99,7 @@ const handlePermanentDeleteMember = async (id: string) => {
 const handleRestoreMedia = async (id: string) => {
   try {
     await axios.post(`/api/admin/trash/media/${id}/restore`, {}, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('恢复成功')
     fetchMedia()
@@ -116,7 +116,7 @@ const handlePermanentDeleteMedia = async (id: string) => {
       confirmButtonText: '永久删除',
     })
     await axios.delete(`/api/admin/trash/media/${id}`, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('已永久删除')
     fetchMedia()

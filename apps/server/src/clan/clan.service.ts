@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '@geneasphere/db';
 import { CreateClanDto, UpdateClanDto } from './dto/create-clan.dto';
 import { ClanResolverService } from '../common/clan-resolver.service';
+import { serializeBigInt } from '../common/bigint-serializer';
 
 @Injectable()
 export class ClanService {
@@ -9,6 +10,14 @@ export class ClanService {
     private readonly prisma: PrismaService,
     private readonly clanResolver: ClanResolverService,
   ) {}
+
+  /**
+   * 统一出口序列化：把 Prisma 结果里的 BigInt 字段全部转 string，
+   * 避免 Express res.json() 抛 'Do not know how to serialize a BigInt'。
+   */
+  private toJson<T>(value: T): T {
+    return serializeBigInt(value);
+  }
 
   /**
    * Create a new clan
@@ -21,7 +30,7 @@ export class ClanService {
 
     const slug = await this.clanResolver.generateUniqueSlug(name);
 
-    return this.prisma.clan.create({
+    const result = await this.prisma.clan.create({
       data: {
         name,
         slug,
@@ -38,6 +47,7 @@ export class ClanService {
         },
       },
     });
+    return this.toJson(result);
   }
 
   /**
@@ -48,7 +58,7 @@ export class ClanService {
   async findAll(userId?: string) {
     const where = userId ? { admin_user_id: userId } : {};
 
-    return this.prisma.clan.findMany({
+    const rows = await this.prisma.clan.findMany({
       where,
       include: {
         admin_user: {
@@ -67,6 +77,7 @@ export class ClanService {
         created_at: 'desc',
       },
     });
+    return this.toJson(rows);
   }
 
   /**
@@ -103,7 +114,7 @@ export class ClanService {
       throw new NotFoundException(`Clan with ID ${id} not found`);
     }
 
-    return clan;
+    return this.toJson(clan);
   }
 
   /**
@@ -127,7 +138,7 @@ export class ClanService {
       throw new ForbiddenException('Only the clan admin can update this clan');
     }
 
-    return this.prisma.clan.update({
+    const result = await this.prisma.clan.update({
       where: { id },
       data: updateClanDto,
       include: {
@@ -139,6 +150,7 @@ export class ClanService {
         },
       },
     });
+    return this.toJson(result);
   }
 
   /**
@@ -186,10 +198,10 @@ export class ClanService {
       }),
     ]);
 
-    return {
+    return this.toJson({
       person_count: personCount,
       media_count: mediaCount,
       family_count: familyCount,
-    };
+    });
   }
 }

@@ -30,7 +30,7 @@ const styleOptions = [
 
 async function loadBranches() {
   try {
-    const res = await axios.get(`/api/migration/${clanId.value}/branches`)
+    const res = await axios.get(`/api/migration/${clanSlug.value}/branches`)
     branchOptions.value = (res.data?.data ?? []).map((b: any) => b.branch || b)
   } catch {
     branchOptions.value = []
@@ -39,7 +39,7 @@ async function loadBranches() {
 
 async function loadPreview() {
   try {
-    const res = await axios.get(`/api/clan-migration-videos/${clanId.value}/preview`, {
+    const res = await axios.get(`/api/clan-migration-videos/${clanSlug.value}/preview`, {
       params: {
         start_year: form.start_year || undefined,
         end_year: form.end_year || undefined,
@@ -55,7 +55,7 @@ async function loadPreview() {
 async function loadList() {
   loading.value = true
   try {
-    const res = await axios.get(`/api/clan-migration-videos/${clanId.value}`)
+    const res = await axios.get(`/api/clan-migration-videos/${clanSlug.value}`)
     list.value = res.data?.items ?? []
   } catch (err: any) {
     ElMessage.error(`加载列表失败：${err?.response?.data?.message ?? err.message}`)
@@ -71,7 +71,7 @@ async function handleGenerate() {
   }
   generating.value = true
   try {
-    const res = await axios.post(`/api/clan-migration-videos/${clanId.value}`, {
+    const res = await axios.post(`/api/clan-migration-videos/${clanSlug.value}`, {
       ...form,
       start_year: form.start_year || undefined,
       end_year: form.end_year || undefined,
@@ -91,7 +91,7 @@ function startPolling(projectId: string) {
   if (pollingTimer.value) clearInterval(pollingTimer.value)
   pollingTimer.value = window.setInterval(async () => {
     try {
-      const res = await axios.get(`/api/clan-migration-videos/${clanId.value}/${projectId}`)
+      const res = await axios.get(`/api/clan-migration-videos/${clanSlug.value}/${projectId}`)
       if (res.data?.status === 'completed') {
         ElMessage.success('视频生成完成！')
         if (pollingTimer.value) clearInterval(pollingTimer.value)

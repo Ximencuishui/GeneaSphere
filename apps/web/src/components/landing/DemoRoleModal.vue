@@ -25,6 +25,7 @@ interface DemoLoginResponse {
   user: { id: string; phone: string; role: string }
   demoClanId: string | null
   demoClanSlug: string | null
+  demoClanName: string | null
 }
 
 const props = defineProps<Props>()

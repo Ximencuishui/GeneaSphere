@@ -8,8 +8,111 @@
     <meta name="keywords" content="寻根路,xungenlu.cn,家谱,族谱,寻亲,归宗,迁徙地图,血脉传承" />
     <meta name="theme-color" content="#5D4037" />
     <title>寻根路 · xungenlu.cn · 寻根溯源、家族传承平台</title>
+    <style>
+      /**
+       * 初始加载占位（HTML 内联）
+       *
+       * 作用：浏览器解析 HTML 时立即显示，不依赖任何 JS / 外部 CSS。
+       * 这是首屏白屏的最后一道兜底——在 main.ts 执行前的几十秒里，
+       * 用户至少能看到品牌化的加载提示，而不是纯空白。
+       *
+       * 隐藏时机：main.ts 完成 Vue mount 后，会在 #initial-loader 上加 .is-hidden 类
+       */
+      html, body { margin: 0; padding: 0; height: 100%; background: #1e1c22; }
+      #initial-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #1e1c22 0%, #2c2a30 100%);
+        color: rgba(255, 255, 255, 0.85);
+        font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Roboto, sans-serif;
+        transition: opacity 0.4s ease;
+      }
+      #initial-loader.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .il-logo {
+        width: 72px;
+        height: 72px;
+        border-radius: 18px;
+        background: linear-gradient(135deg, #C9A96E, #A08050);
+        color: #1e1c22;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 36px;
+        font-weight: 800;
+        margin-bottom: 24px;
+        box-shadow: 0 8px 24px rgba(201, 169, 110, 0.25);
+        animation: il-pulse 1.8s ease-in-out infinite;
+      }
+      .il-title {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        margin-bottom: 8px;
+        background: linear-gradient(135deg, #C9A96E, #E8D5A3);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .il-subtitle {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.5);
+        letter-spacing: 1px;
+        margin-bottom: 32px;
+      }
+      .il-bar {
+        width: 220px;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 2px;
+        overflow: hidden;
+        position: relative;
+      }
+      .il-bar::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -40%;
+        width: 40%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, #C9A96E, transparent);
+        animation: il-slide 1.4s ease-in-out infinite;
+      }
+      .il-hint {
+        margin-top: 14px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.35);
+        letter-spacing: 0.5px;
+      }
+      @keyframes il-pulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 8px 24px rgba(201, 169, 110, 0.25); }
+        50% { transform: scale(1.06); box-shadow: 0 12px 32px rgba(201, 169, 110, 0.45); }
+      }
+      @keyframes il-slide {
+        0% { left: -40%; }
+        100% { left: 100%; }
+      }
+    </style>
   </head>
   <body>
+    <!--
+      初始加载占位：在 HTML 解析时立即显示，main.ts 完成 mount 后由 main.ts 加上 .is-hidden 类隐藏
+      关键：必须放在 #app 之外（同级），避免被 Vue mount 时的 innerHTML 替换覆盖
+    -->
+    <div id="initial-loader" aria-hidden="true">
+      <div class="il-logo">寻</div>
+      <div class="il-title">寻根路</div>
+      <div class="il-subtitle">xungenlu.cn</div>
+      <div class="il-bar"></div>
+      <div class="il-hint">正在加载资源，请稍候…</div>
+    </div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

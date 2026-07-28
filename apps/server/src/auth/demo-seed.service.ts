@@ -19,13 +19,51 @@ export class DemoSeedService implements OnModuleInit {
   private prisma = new PrismaClient();
   async onModuleInit() { await this.seedDemoData(); }
   async resetDemoClanData(clanId: bigint) {
-    await this.prisma.familyChild.deleteMany({ where: { family: { clan_id: clanId } } });
-    await this.prisma.familyUnit.deleteMany({ where: { clan_id: clanId } });
-    await this.prisma.personAncestry.deleteMany({
-      where: { OR: [{ ancestor: { clan_id: clanId } }, { descendant: { clan_id: clanId } }] },
+    // 1) 先收集该家族所有 person_id，后续按 id 引用精准清理孤儿记录
+    const personIds = (
+      await this.prisma.person.findMany({
+        where: { clan_id: clanId },
+        select: { id: true },
+      })
+    ).map((p) => p.id);
+    const personIdList = personIds.length > 0 ? personIds : [-1n];
+
+    // 2) 整段包进事务：任一步失败整体回滚，避免 familyUnit 残留撞 unique 约束
+    await this.prisma.$transaction(async (tx) => {
+      // a) 删 familyChild：先按 family.clan_id 清；再扫孤儿（family.clan_id != clanId
+      //    但 child_id 引用本家族 person 的记录），避免下次重建时 family_unit 还残留
+      //    child 关系导致 UNIQUE 冲突
+      await tx.familyChild.deleteMany({ where: { family: { clan_id: clanId } } });
+      await tx.familyChild.deleteMany({ where: { child_id: { in: personIdList } } });
+
+      // b) 删 familyUnit：按 clan_id 清；再扫孤儿 family_unit（clan_id != 目标 clanId
+      //    但 husband/wife 引用本家族 person 的）—— 这是上次 TRUNCATE CASCADE 没清干净的
+      //    来源。直接按 husband_id/wife_id IN personIdList 兜底，确保彻底干净
+      await tx.familyUnit.deleteMany({ where: { clan_id: clanId } });
+      await tx.familyUnit.deleteMany({
+        where: {
+          OR: [
+            { husband_id: { in: personIdList } },
+            { wife_id: { in: personIdList } },
+          ],
+        },
+      });
+
+      // c) 删 personAncestry（闭包表）：ancestor 或 descendant 任一引用本家族 person 即清
+      await tx.personAncestry.deleteMany({
+        where: {
+          OR: [
+            { ancestor_id: { in: personIdList } },
+            { descendant_id: { in: personIdList } },
+          ],
+        },
+      });
+
+      // d) 最后才删 person，避免在 familyChild/familyUnit 还引用时触发外键报错
+      await tx.person.deleteMany({ where: { clan_id: clanId } });
     });
-    await this.prisma.person.deleteMany({ where: { clan_id: clanId } });
-    this.logger.log(`已清空家族 ${clanId} 的人物/家庭/祖先关系`);
+
+    this.logger.log(`已清空家族 ${clanId} 的人物/家庭/祖先关系（含孤儿记录兜底清理，共 ${personIds.length} 人）`);
   }
   async seedDemoData() {
     try {
@@ -328,6 +366,17 @@ export class DemoSeedService implements OnModuleInit {
       return nm;
     };
     this.logger.log('  [3/5] 开始程序化繁衍生成新人物...');
+    // 每对夫妻只允许一个 FamilyUnit（唯一约束 husband_id+wife_id+marriage_order），按丈夫名去重复用
+    const familyByHusband = new Map<string, {key:string;husbandName:string;wifeName:string|null;childNames:string[];childOrders:number[];}>();
+    const getCoupleFamily = (husbandName: string, wifeName: string | null) => {
+      let fam = familyByHusband.get(husbandName);
+      if (!fam) {
+        fam = { key: 'F-' + husbandName, husbandName, wifeName, childNames: [], childOrders: [] };
+        familyByHusband.set(husbandName, fam);
+        newFamiliesData.push(fam);
+      }
+      return fam;
+    };
     let generation = 6;
     let totalCreated = 0;
     const totalTarget = DemoSeedService.TARGET_POPULATION - DemoSeedService.HISTORICAL_FIGURES.length;
@@ -364,8 +413,8 @@ export class DemoSeedService implements OnModuleInit {
           gen: generation, branch: father.branch, is_living: wDeath >= DemoSeedService.CURRENT_YEAR,
         });
         totalCreated++;
-        const childNames: string[] = [];
-        const childOrders: number[] = [];
+        // 儿子自己的小家庭（含女儿作为子女）
+        const sonFam = getCoupleFamily(sonName, wname);
         if ((nameIdx + i) % 2 === 0 && totalCreated < totalTarget) {
           const daughterName = ensureUnique(nextWifeName(), false);
           const dBirth = sonBirth + 3;
@@ -375,23 +424,13 @@ export class DemoSeedService implements OnModuleInit {
             gen: generation, branch: father.branch, is_living: dDeath >= DemoSeedService.CURRENT_YEAR,
           });
           totalCreated++;
-          childNames.push(daughterName);
-          childOrders.push(2);
+          sonFam.childNames.push(daughterName);
+          sonFam.childOrders.push(sonFam.childNames.length);
         }
-        newFamiliesData.push({
-          key: 'F-' + sonName + '-c1',
-          husbandName: sonName,
-          wifeName: wname,
-          childNames: childNames,
-          childOrders: childOrders,
-        });
-        newFamiliesData.push({
-          key: 'F-' + father.name + '-' + sonName,
-          husbandName: father.name,
-          wifeName: fatherWife,
-          childNames: [sonName],
-          childOrders: [1],
-        });
+        // 儿子挂到父亲家庭下（同一父亲多个儿子复用同一 FamilyUnit，避免唯一约束冲突）
+        const fatherFam = getCoupleFamily(father.name, fatherWife);
+        fatherFam.childNames.push(sonName);
+        fatherFam.childOrders.push(fatherFam.childNames.length);
         allMalesArr.push({name: sonName, gen: generation, birth: sonBirth, branch: father.branch, wifeName: wname});
       }
       generation++;
@@ -425,6 +464,8 @@ export class DemoSeedService implements OnModuleInit {
     const newFamiliesInsertData: Array<{clan_id:bigint;husband_id:bigint|null;wife_id:bigint|null;union_type:string;}> = [];
     const newFamilyKeyToIdx = new Map<string, number>();
     for (const fam of newFamiliesData) {
+      // 第5代历史人物（朱桂等）的夫妻家庭已在历史层创建，直接复用，避免唯一约束冲突
+      if (histFamilyIdMap.has(fam.key)) continue;
       const hId = fullPersonMap.get(fam.husbandName);
       if (!hId) continue;
       const wId = fam.wifeName ? fullPersonMap.get(fam.wifeName) : null;
@@ -437,7 +478,8 @@ export class DemoSeedService implements OnModuleInit {
     newFamilyKeyToIdx.forEach((arrIdx, key) => { newFamilyIdMap.set(key, insertedNewFamilies[arrIdx].id); });
     const newChildInserts: Array<{family_id:bigint;child_id:bigint;birth_order:number;}> = [];
     for (const fam of newFamiliesData) {
-      const fId = newFamilyIdMap.get(fam.key);
+      // 历史层已建的家庭复用其 family_id 挂子女
+      const fId = newFamilyIdMap.get(fam.key) ?? histFamilyIdMap.get(fam.key);
       if (!fId) continue;
       for (let c = 0; c < fam.childNames.length; c++) {
         const cId = fullPersonMap.get(fam.childNames[c]);
@@ -450,6 +492,22 @@ export class DemoSeedService implements OnModuleInit {
       }
     }
     this.logger.log('        新子女关系: ' + newChildInserts.length + ' 条');
+
+    // 5.0) 写入 self-record（depth=0）：每个 person 一条 (ancestor=descendant=self, depth=0)
+    // TreeService.getSubTree 依赖 self-record 来定位根节点，缺失会触发 findUnique 降级
+    // 并在每次请求都打 warn。批量插入，skipDuplicates 兜底并发竞态
+    const selfRecordData = Array.from(fullPersonMap.values()).map((pid) => ({
+      ancestor_id: pid,
+      descendant_id: pid,
+      depth: 0,
+    }));
+    for (let i = 0; i < selfRecordData.length; i += CHUNK) {
+      await this.prisma.personAncestry.createMany({
+        data: selfRecordData.slice(i, i + CHUNK),
+        skipDuplicates: true,
+      });
+    }
+    this.logger.log('        self-record: ' + selfRecordData.length + ' 条');
 
     this.logger.log('  [5/5] 构建 PersonAncestry 祖先关系表...');
     const allFC = await this.prisma.familyChild.findMany({

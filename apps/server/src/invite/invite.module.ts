@@ -4,7 +4,6 @@ import { InviteService } from './invite.service';
 import { InviteCleanupService } from './invite-cleanup.service';
 import { MockWechatService } from './mock-wechat.service';
 import { WechatService } from './wechat.service';
-import { PrismaService } from '@geneasphere/db';
 import { NotificationService } from '../common/notification.service';
 import { AdminModule } from '../admin/admin.module';
 
@@ -19,7 +18,6 @@ import { AdminModule } from '../admin/admin.module';
       provide: WechatService,
       useExisting: MockWechatService,
     },
-    PrismaService,
     NotificationService,
   ],
   exports: [InviteService, WechatService],

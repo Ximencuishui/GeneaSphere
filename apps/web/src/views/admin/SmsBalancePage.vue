@@ -69,7 +69,7 @@ onMounted(async () => {
 const fetchBalance = async () => {
   try {
     const res = await axios.get('/api/admin/sms/balance', {
-      params: { clanSlug: clanId.value }
+      params: { clanSlug: clanSlug.value }
     })
     balanceInfo.value = res.data
     newThreshold.value = res.data.low_balance_threshold
@@ -82,7 +82,7 @@ const fetchBalance = async () => {
 const fetchCostStats = async () => {
   try {
     const res = await axios.get('/api/admin/sms/balance/stats', {
-      params: { clanSlug: clanId.value }
+      params: { clanSlug: clanSlug.value }
     })
     costStats.value = res.data
   } catch {
@@ -111,7 +111,7 @@ const handleRecharge = async () => {
   rechargeLoading.value = true
   try {
     const res = await axios.post('/api/admin/sms/recharge', {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       amount,
       paymentMethod: paymentMethod.value,
     })
@@ -138,7 +138,7 @@ const fetchRechargeRecords = async () => {
   try {
     const res = await axios.get('/api/admin/sms/recharge-records', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: rechargePage.value,
         pageSize: 10,
       }
@@ -155,7 +155,7 @@ const fetchCostLogs = async () => {
   try {
     const res = await axios.get('/api/admin/sms/cost-logs', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: costLogsPage.value,
         pageSize: 10,
       }
@@ -176,7 +176,7 @@ const fetchSendRecords = async () => {
   try {
     const res = await axios.get('/api/admin/sms/records', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: sendRecordsPage.value,
         pageSize: 10,
       }
@@ -192,7 +192,7 @@ const fetchSendRecords = async () => {
 const handleSetThreshold = async () => {
   try {
     await axios.put('/api/admin/sms/balance/threshold', {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       threshold: newThreshold.value,
     })
     ElMessage.success('阈值设置成功')

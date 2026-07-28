@@ -1,43 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { useAuthStore } from '@/stores/auth'
-import axios from 'axios'
 import MigrationParticles from '@/components/home/MigrationParticles.vue'
 import SurnameLegend from '@/components/home/SurnameLegend.vue'
 import QuickSearchBar from '@/components/home/QuickSearchBar.vue'
 import DemoRoleModal from '@/components/landing/DemoRoleModal.vue'
 
 const router = useRouter()
-const authStore = useAuthStore()
 const demoModalVisible = ref(false)
 const scrollY = ref(0)
 const currentYear = new Date().getFullYear()
 const highlightedSurname = ref<string | null>(null)
-
-// 检查用户是否为管理员（需求文档: 营销网站后台入口对接）
-const isAdmin = computed(() => {
-  const token = localStorage.getItem('geneasphere_token')
-  if (!token) return false
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return ['OWNER', 'ADMIN'].includes(payload.role)
-  } catch {
-    return false
-  }
-})
-
-const goToAdmin = () => {
-  // 一键体验/演示用户走 slug 直接进入家族后台，避免 /admin/* 重定向到
-  // /select-family 后触发 /api/auth/me/admin-clans 返回 401 被踢回登录页
-  const demoSlug = localStorage.getItem('demo_clan_slug')
-  if (demoSlug) {
-    router.push(`/zupu/${demoSlug}/dashboard`)
-    return
-  }
-  router.push('/admin/dashboard')
-}
 
 const surnames = [
   { name: '李', color: '#C9A96E', description: '发源于陇西（今甘肃东南部）' },
@@ -77,7 +51,7 @@ const onDemoLoginSuccess = async (role: 'admin' | 'member') => {
   }
   const slug = localStorage.getItem('demo_clan_slug')
   if (slug) {
-    await router.push(`/zupu/${slug}/dashboard`)
+    await router.push(`/zupu/${slug}`)
   } else {
     await router.push('/clans')
   }
@@ -116,15 +90,6 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
             @click="openDemoModal"
           >
             立即体验
-          </el-button>
-          <el-button
-            v-if="isAdmin"
-            type="warning"
-            plain
-            class="btn-admin-nav"
-            @click="goToAdmin"
-          >
-            进入后台
           </el-button>
         </div>
       </div>
@@ -461,22 +426,6 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
 .btn-demo-nav:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 15px rgba(201, 169, 110, 0.35);
-}
-
-.btn-admin-nav {
-  border: 1.5px solid #E6A23C;
-  color: #E6A23C;
-  background: transparent;
-  border-radius: 8px;
-  padding: 10px 24px;
-  font-weight: 600;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.btn-admin-nav:hover {
-  background: rgba(230, 162, 60, 0.1);
-  color: #E6A23C;
 }
 
 /* ====== Hero ====== */

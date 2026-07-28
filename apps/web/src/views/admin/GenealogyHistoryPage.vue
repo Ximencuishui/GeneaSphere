@@ -27,7 +27,7 @@ const diffResult = ref<any>(null)
 async function loadList() {
   loading.value = true
   try {
-    const res = await axios.get(`/api/genealogy-documents/${clanId.value}`, {
+    const res = await axios.get(`/api/genealogy-documents/${clanSlug.value}`, {
       params: {
         style: styleFilter.value || undefined,
         page: page.value,
@@ -70,7 +70,7 @@ async function handleDelete(item: any) {
     return
   }
   try {
-    await axios.delete(`/api/genealogy-documents/${clanId.value}/${item.id}`)
+    await axios.delete(`/api/genealogy-documents/${clanSlug.value}/${item.id}`)
     ElMessage.success('已删除')
     loadList()
   } catch (err: any) {
@@ -86,7 +86,7 @@ async function handleDiff() {
     return
   }
   try {
-    const res = await axios.get(`/api/genealogy-documents/${clanId.value}/diff`, {
+    const res = await axios.get(`/api/genealogy-documents/${clanSlug.value}/diff`, {
       params: { idA: selectedForDiff.value[0], idB: selectedForDiff.value[1] },
     })
     diffResult.value = res.data

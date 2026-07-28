@@ -30,7 +30,7 @@ const fetchSettings = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/privacy', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     settings.value = res.data
   } catch (error) {
@@ -44,7 +44,7 @@ const handleSave = async () => {
   saving.value = true
   try {
     await axios.put('/api/admin/settings/privacy', {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       ...settings.value,
     })
     ElMessage.success('隐私配置已保存')
@@ -59,14 +59,14 @@ const handleExportData = async () => {
   try {
     ElMessage.info('正在导出数据...')
     const res = await axios.get('/api/admin/settings/export', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     // 导出为 JSON 文件
     const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `geneasphere_clan_${clanId.value}_${new Date().toISOString().slice(0, 10)}.json`)
+    link.setAttribute('download', `geneasphere_clan_${clanSlug.value}_${new Date().toISOString().slice(0, 10)}.json`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -78,7 +78,7 @@ const handleExportData = async () => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchSettings()
 })
 </script>

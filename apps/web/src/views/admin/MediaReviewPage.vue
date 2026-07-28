@@ -31,7 +31,7 @@ const fetchReviews = async () => {
   try {
     const res = await axios.get('/api/admin/reviews/media', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: activeTab.value,
@@ -210,7 +210,7 @@ const hasSelection = computed(() => selectedReviews.value.length > 0)
 const allSelectedIds = computed(() => selectedReviews.value.map((r) => r.id))
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchReviews()
 })
 </script>

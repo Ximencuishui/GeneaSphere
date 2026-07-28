@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { nextTick, ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserCenterStore } from '@/stores/userCenter'
 import { useAuthStore } from '@/stores/auth'
 import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, Folder } from '@element-plus/icons-vue'
+import PageLoader, { type PageLoaderLog } from '@/components/PageLoader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -159,12 +160,120 @@ function gotoAdminDashboard() {
   router.push('/admin/dashboard')
 }
 
+/**
+ * 用户中心全局加载阶段机：避免初次进入时侧边栏头像/名字/家族名空白，
+ * 让用户清楚看到"正在拉取资料 → 设置 → 通知 → 渲染子页面"的进度。
+ *
+ * - profile:        /api/user/profile（侧边栏关键依赖，必须先到位）
+ * - settings+notif: /api/user/settings + /api/user/notifications/unread-count（并行）
+ * - render:         子页面首帧 DOM 提交
+ * - finalize:       准备就绪
+ */
+type CenterStage = 'profile' | 'settings' | 'render' | 'finalize'
+const STAGES: { key: CenterStage; label: string; desc: string }[] = [
+  { key: 'profile', label: '加载用户资料', desc: '头像/昵称/家族/角色' },
+  { key: 'settings', label: '加载设置与通知', desc: '个人偏好 + 未读数' },
+  { key: 'render', label: '渲染子页面', desc: '提交首帧 DOM' },
+  { key: 'finalize', label: '完成加载', desc: '准备就绪' },
+]
+
+const centerLoading = ref(true)
+const centerStage = ref<CenterStage>('profile')
+const centerError = ref(false)
+const centerErrorMessage = ref('')
+const centerLogs = ref<PageLoaderLog[]>([])
+
+function pushCenterLog(message: string, type: PageLoaderLog['type'] = 'info') {
+  const now = new Date()
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const ss = String(now.getSeconds()).padStart(2, '0')
+  centerLogs.value.push({
+    time: `${hh}:${mm}:${ss}`,
+    stage: centerStage.value,
+    message,
+    type,
+  })
+}
+
+async function loadUserCenter() {
+  centerLoading.value = true
+  centerError.value = false
+  centerErrorMessage.value = ''
+  centerLogs.value = []
+  centerStage.value = 'profile'
+  pushCenterLog('开始加载用户中心')
+
+  try {
+    // ========== 阶段1：profile（关键路径） ==========
+    if (!userStore.isLoggedIn) {
+      pushCenterLog('未登录，跳过用户资料加载', 'warn')
+    } else {
+      pushCenterLog('调用 /api/user/profile')
+      const profile = await userStore.fetchProfile()
+      pushCenterLog(
+        profile
+          ? `资料已就绪：${profile.nickname || profile.phone || '匿名用户'}`
+          : '资料接口未返回数据',
+        profile ? 'success' : 'warn',
+      )
+    }
+
+    // ========== 阶段2：settings + notifications（并行） ==========
+    centerStage.value = 'settings'
+    pushCenterLog('开始并行加载设置与通知')
+    await Promise.all([
+      userStore
+        .fetchSettings()
+        .then((s) => {
+          pushCenterLog(
+            s ? '设置已就绪' : '设置接口未返回数据，使用默认值',
+            s ? 'success' : 'warn',
+          )
+        })
+        .catch((err) => {
+          pushCenterLog(`设置加载失败：${err?.message || err}`, 'error')
+        }),
+      userStore
+        .fetchUnreadCount()
+        .then(() => {
+          pushCenterLog(`未读通知数：${userStore.unreadCount}`, 'success')
+        })
+        .catch((err) => {
+          pushCenterLog(`通知加载失败：${err?.message || err}`, 'error')
+        }),
+    ])
+
+    // ========== 阶段3：渲染子页面 ==========
+    centerStage.value = 'render'
+    await nextTick()
+    pushCenterLog('首屏 DOM 已提交', 'success')
+
+    // ========== 阶段4：完成 ==========
+    centerStage.value = 'finalize'
+    pushCenterLog('用户中心加载完成', 'success')
+  } catch (error: any) {
+    const status: number = error?.response?.status || error?.status || 0
+    const message: string = error?.message || String(error)
+    centerError.value = true
+    if (status === 401) {
+      centerErrorMessage.value = '登录已过期，请重新登录'
+    } else if (status === 403) {
+      centerErrorMessage.value = '当前账号无权访问用户中心'
+    } else if (status >= 500) {
+      centerErrorMessage.value = '服务器开小差了，请稍后重试'
+    } else {
+      centerErrorMessage.value = message || '加载失败，请稍后重试'
+    }
+    pushCenterLog(`失败：${centerErrorMessage.value} (HTTP ${status || '-'})`, 'error')
+    console.error('[userCenterLayout] load failed:', error)
+  } finally {
+    centerLoading.value = false
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([
-    userStore.fetchProfile(),
-    userStore.fetchSettings(),
-    userStore.fetchUnreadCount(),
-  ])
+  await loadUserCenter()
 })
 
 watch(
@@ -473,7 +582,18 @@ watch(
 
         <!-- 内容区 -->
         <ElMain class="content-area">
-          <router-view v-slot="{ Component, route: r }">
+          <!-- 初次加载占位：进度条 + 阶段列表 + 滚动日志 -->
+          <PageLoader
+            v-if="centerLoading || centerError"
+            :visible="centerLoading || centerError"
+            title="正在加载用户中心"
+            :stages="STAGES"
+            :current-stage="centerStage"
+            :logs="centerLogs"
+            :error="centerError"
+            :error-message="centerErrorMessage"
+          />
+          <router-view v-else v-slot="{ Component, route: r }">
             <transition name="fade" mode="out-in">
               <component :is="Component" :key="r.fullPath" />
             </transition>

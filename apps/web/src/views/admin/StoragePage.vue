@@ -18,7 +18,7 @@ const fetchStorage = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/storage', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     storageInfo.value = res.data
   } catch (error) {
@@ -29,7 +29,7 @@ const fetchStorage = async () => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchStorage()
 })
 </script>

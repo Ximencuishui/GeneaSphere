@@ -205,6 +205,7 @@ model Person {
   custody_as_child     ChildCustodyRecord[]   @relation("CustodyChild")
   custody_as_parent    ChildCustodyRecord[]   @relation("CustodyParent")
 
+  @@index([clan_id])
   @@index([clan_id, migration_branch])
   @@map("persons")
 }

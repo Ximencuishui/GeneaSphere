@@ -46,7 +46,7 @@ const form = reactive({
 async function loadList() {
   loading.value = true
   try {
-    const res = await axios.get(`/api/family-events/${clanId.value}`, {
+    const res = await axios.get(`/api/family-events/${clanSlug.value}`, {
       params: {
         event_type: filters.event_type || undefined,
         start_year: filters.start_year || undefined,
@@ -114,10 +114,10 @@ async function handleSubmit() {
   }
   try {
     if (dialogMode.value === 'create') {
-      await axios.post(`/api/family-events/${clanId.value}`, payload)
+      await axios.post(`/api/family-events/${clanSlug.value}`, payload)
       ElMessage.success('事件已创建')
     } else {
-      await axios.put(`/api/family-events/${clanId.value}/${editingId.value}`, payload)
+      await axios.put(`/api/family-events/${clanSlug.value}/${editingId.value}`, payload)
       ElMessage.success('事件已更新')
     }
     dialogVisible.value = false
@@ -138,7 +138,7 @@ async function handleDelete(row: any) {
     return
   }
   try {
-    await axios.delete(`/api/family-events/${clanId.value}/${row.id}`)
+    await axios.delete(`/api/family-events/${clanSlug.value}/${row.id}`)
     ElMessage.success('已删除')
     loadList()
   } catch (err: any) {
@@ -157,7 +157,7 @@ async function handleAutoGenerate() {
     return
   }
   try {
-    const res = await axios.post(`/api/family-events/${clanId.value}/generate-life-events`)
+    const res = await axios.post(`/api/family-events/${clanSlug.value}/generate-life-events`)
     const candidates: any[] = res.data?.candidates ?? []
     if (candidates.length === 0) {
       ElMessage.info('未生成任何候选事件')
@@ -166,7 +166,7 @@ async function handleAutoGenerate() {
     let successCount = 0
     for (const c of candidates) {
       try {
-        await axios.post(`/api/family-events/${clanId.value}`, {
+        await axios.post(`/api/family-events/${clanSlug.value}`, {
           event_name: c.event_name,
           event_type: c.event_type,
           event_date: c.event_date,

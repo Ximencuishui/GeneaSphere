@@ -5,7 +5,6 @@ import { UserController } from './user.controller';
 import { UserService } from './user.service';
 import { UserOcrController } from './user-ocr.controller';
 import { ImportModule } from '../import/import.module';
-import { PrismaService } from '@geneasphere/db';
 
 @Module({
   imports: [
@@ -16,7 +15,7 @@ import { PrismaService } from '@geneasphere/db';
     ImportModule,
   ],
   controllers: [UserController, UserOcrController],
-  providers: [UserService, PrismaService],
+  providers: [UserService],
   exports: [UserService],
 })
 export class UserModule {}

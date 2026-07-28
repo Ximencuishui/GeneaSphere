@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { PrismaService } from '@geneasphere/db';
 import { PersonalSpaceController } from './personal-space.controller';
 import { PersonalSpaceService } from './personal-space.service';
 
@@ -13,6 +12,6 @@ import { PersonalSpaceService } from './personal-space.service';
     }),
   ],
   controllers: [PersonalSpaceController],
-  providers: [PersonalSpaceService, PrismaService],
+  providers: [PersonalSpaceService],
 })
 export class PersonalSpaceModule {}

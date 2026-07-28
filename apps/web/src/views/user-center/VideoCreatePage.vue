@@ -239,7 +239,7 @@ onMounted(async () => {
           <p class="section-desc">选择一位家族成员，系统将自动收集其直系血脉的所有照片</p>
 
           <div class="person-selector">
-            <ElAutoComplete
+            <ElAutocomplete
               v-model="searchQuery"
               :fetch-suggestions="(query: string, cb: any) => { searchPersons(query).then(() => cb(searchResults.map(p => ({ value: p.full_name, person: p })))) }"
               placeholder="搜索家族成员姓名..."
@@ -254,7 +254,7 @@ onMounted(async () => {
                   <span class="person-gender">{{ item.person.gender === 'male' ? '男' : '女' }}</span>
                 </div>
               </template>
-            </ElAutoComplete>
+            </ElAutocomplete>
             <ElButton @click="goToSelectPerson">从族谱选择</ElButton>
           </div>
         </div>

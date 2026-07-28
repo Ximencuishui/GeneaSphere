@@ -28,7 +28,7 @@ const fetchOrders = async () => {
   try {
     const res = await axios.get('/api/admin/orders', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: activeTab.value || undefined,
@@ -77,7 +77,7 @@ const handleReorder = async (order: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchOrders()
 })
 </script>

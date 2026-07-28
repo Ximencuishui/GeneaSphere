@@ -52,7 +52,7 @@ const styleOptions = [
 const branchOptions = ref<string[]>([])
 async function loadBranches() {
   try {
-    const res = await axios.get(`/api/migration/${clanId.value}/branches`)
+    const res = await axios.get(`/api/migration/${clanSlug.value}/branches`)
     branchOptions.value = (res.data?.data ?? []).map((b: any) => b.branch || b)
   } catch {
     branchOptions.value = []
@@ -76,7 +76,7 @@ async function handleGenerate() {
 
   generating.value = true
   try {
-    const res = await axios.post(`/api/genealogy-documents/${clanId.value}`, {
+    const res = await axios.post(`/api/genealogy-documents/${clanSlug.value}`, {
       ...form,
       generation_start: form.generation_start || undefined,
       generation_end: form.generation_end || undefined,

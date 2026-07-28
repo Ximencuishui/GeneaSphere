@@ -30,7 +30,7 @@ const fetchList = async () => {
   try {
     const res = await axios.get('/api/admin/toolbox-usage/list', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
         tool: filters.value.tool || undefined,
@@ -51,7 +51,7 @@ const fetchList = async () => {
 const fetchStats = async () => {
   try {
     const res = await axios.get('/api/admin/toolbox-usage/stats', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     stats.value = res.data
   } catch (e: any) {

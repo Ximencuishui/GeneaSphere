@@ -27,7 +27,7 @@ const fetchPosts = async () => {
   try {
     const res = await axios.get('/api/admin/merge/posts', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
       },
@@ -84,7 +84,7 @@ const handleDelete = async (post: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchPosts()
 })
 </script>

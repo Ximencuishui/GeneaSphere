@@ -35,7 +35,7 @@ const fetchData = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/clan-info', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     const data = res.data
     clanInfo.value = {
@@ -81,7 +81,7 @@ const handleSave = async () => {
       logo_url: clanInfo.value.logo_url,
       settings_json: extraInfo.value,
     }, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('保存成功')
   } catch (e: any) {

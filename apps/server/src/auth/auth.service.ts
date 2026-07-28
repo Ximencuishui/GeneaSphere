@@ -76,7 +76,7 @@ export class AuthService {
   private async getDemoClanWithSlug() {
     let demoClan = await this.prisma.clan.findFirst({
       where: { name: '朱熹族谱（演示）' },
-      select: { id: true, slug: true },
+      select: { id: true, slug: true, name: true },
     });
     if (demoClan && !demoClan.slug) {
       const newSlug = await this.clanResolver.generateUniqueSlug(
@@ -86,7 +86,7 @@ export class AuthService {
       demoClan = await this.prisma.clan.update({
         where: { id: demoClan.id },
         data: { slug: newSlug },
-        select: { id: true, slug: true },
+        select: { id: true, slug: true, name: true },
       });
     }
     return demoClan;
@@ -130,6 +130,7 @@ export class AuthService {
       user: { id: user.id, phone: user.phone, role },
       demoClanId: demoClan ? String(demoClan.id) : null,
       demoClanSlug: demoClan?.slug ?? null,
+      demoClanName: demoClan?.name ?? null,
     };
   }
 

@@ -33,7 +33,7 @@ const fetchData = async () => {
   try {
     const res = await axios.get('/api/admin/announcements', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
       },
@@ -77,13 +77,13 @@ const handleSubmit = async () => {
     if (editingId.value) {
       await axios.put(`/api/admin/announcements/${editingId.value}`, {
         ...formData.value,
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
       })
       ElMessage.success('更新成功')
     } else {
       await axios.post('/api/admin/announcements', {
         ...formData.value,
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
       })
       ElMessage.success('发布成功')
     }
@@ -101,7 +101,7 @@ const handleDelete = async (id: string) => {
       type: 'warning',
     })
     await axios.delete(`/api/admin/announcements/${id}`, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('删除成功')
     fetchData()
@@ -118,7 +118,7 @@ const handleTogglePin = async (row: any) => {
     await axios.patch(`/api/admin/announcements/${row.id}/pin`, {
       isPinned: !row.is_pinned,
     }, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success(row.is_pinned ? '已取消置顶' : '已置顶')
     fetchData()
@@ -133,7 +133,7 @@ const handleToggleStatus = async (row: any) => {
     await axios.patch(`/api/admin/announcements/${row.id}/status`, {
       isActive: !row.is_active,
     }, {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success(row.is_active ? '已下架' : '已发布')
     fetchData()

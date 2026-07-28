@@ -40,7 +40,7 @@ const handleExport = async () => {
   exporting.value = true
   try {
     const params = new URLSearchParams()
-    params.append('clanId', clanId.value as string)
+    params.append('clanId', clanSlug.value as string)
     params.append('type', exportOptions.value.type)
     params.append('format', exportOptions.value.format)
     params.append('includeDeceased', String(exportOptions.value.includeDeceased))

@@ -38,6 +38,7 @@ export const treeApi = {
   getClanFullTree: (clanId: string, userId?: string) =>
     request.get(`/api/tree/clan/${clanId}/full`, {
       params: userId ? { userId } : {},
+      timeout: 120000,
     }),
 
   /**

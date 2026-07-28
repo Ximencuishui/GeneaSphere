@@ -113,8 +113,9 @@ export class TreeController {
 
   /**
    * Get full clan tree data including main lineage path, avatar info, and spouse edges.
-   * 与其他 admin 路由一致：URL 段使用 clanSlug，由 ClanResolverService 解析为 BigInt，
-   * 顺便校验 NORMAL 状态（封禁/审核中家族拒绝访问）。
+   * 与其他 admin 路由一致：URL 段优先按 clanSlug 解析（ClanResolverService 解析为 BigInt，
+   * 顺便校验 NORMAL 状态——封禁/审核中家族拒绝访问）。
+   * 兼容旧链接：若 URL 段是纯数字（数据库 BigInt 的字符串形式），也按 clan.id 解析。
    */
   @Public()
   @Get('clan/:clanSlug/full')
@@ -122,8 +123,35 @@ export class TreeController {
     @Param('clanSlug') clanSlug: string,
     @Query('userId') userId?: string,
   ): Promise<ClanTreeResponse> {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    const clanId = await this.resolveClanId(clanSlug);
     return await this.treeService.getClanFullTree(clanId, userId);
+  }
+
+  /**
+   * 把 URL 段的 clanSlug 解析为 BigInt id。
+   * - 优先按 slug 解析（走 ClanResolverService，顺便校验 NORMAL 状态）
+   * - 兼容旧链接：若参数是纯数字，按 id 解析（同样校验 NORMAL 状态）
+   */
+  private async resolveClanId(clanSlug: string): Promise<bigint> {
+    if (!clanSlug || typeof clanSlug !== 'string') {
+      throw new NotFoundException('clanSlug is required');
+    }
+    if (/^\d+$/.test(clanSlug)) {
+      // 数字 id：直接查表，避免误用 ClanResolverService 的 slug 正则拒绝
+      const clan = await this.treeService['prisma'].clan.findUnique({
+        where: { id: BigInt(clanSlug) },
+        select: { id: true, status: true },
+      });
+      if (!clan) {
+        throw new NotFoundException(`Clan ${clanSlug} not found`);
+      }
+      if (clan.status !== 'NORMAL') {
+        throw new ForbiddenException('家族当前不可用');
+      }
+      return clan.id;
+    }
+    const { id } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return id;
   }
 
   @Patch('move-subtree')

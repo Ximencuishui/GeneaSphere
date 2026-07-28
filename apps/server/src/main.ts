@@ -20,7 +20,8 @@ async function bootstrap() {
   );
   // 统一错误响应：所有路由抛出的异常都经过 GlobalHttpExceptionFilter
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
-  await app.listen(3001);
-  Logger.log('🚀 寻根路后端启动于 http://localhost:3001', 'Bootstrap');
+  const port = Number(process.env.PORT) || 3101;
+  await app.listen(port);
+  Logger.log(`🚀 寻根路后端启动于 http://localhost:${port}`, 'Bootstrap');
 }
 bootstrap();

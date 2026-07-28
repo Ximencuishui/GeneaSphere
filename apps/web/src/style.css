@@ -50,10 +50,20 @@ a:hover {
   color: #8D6E63;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
+}
+
+body {
   min-width: 320px;
   min-height: 100vh;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
 }
 
 h1 {
@@ -70,8 +80,4 @@ button {
   font-family: inherit;
   cursor: pointer;
   transition: border-color 0.25s;
-}
-
-#app {
-  width: 100%;
 }

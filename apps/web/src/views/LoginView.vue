@@ -103,7 +103,7 @@ const handleAdminDemoLogin = async () => {
 
     // 优先用 slug 跳 demo 家族后台（跳过 select-family / admin-clans）
     if (demoClanSlug) {
-      router.push(`/zupu/${demoClanSlug}/dashboard`)
+      router.push(`/zupu/${demoClanSlug}`)
     } else if (demoClanId) {
       router.push(`/tree/${demoClanId}`)
     } else {

@@ -31,7 +31,7 @@ const fetchReviews = async () => {
   try {
     const res = await axios.get('/api/admin/reviews/bio', {
       params: {
-        clanSlug: clanId.value,
+        clanSlug: clanSlug.value,
         page: currentPage.value,
         pageSize: pageSize.value,
         status: activeTab.value,
@@ -181,7 +181,7 @@ const handleBatchRejectWithPreset = async (preset: string) => {
 const hasSelection = computed(() => selectedReviews.value.length > 0)
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchReviews()
 })
 </script>

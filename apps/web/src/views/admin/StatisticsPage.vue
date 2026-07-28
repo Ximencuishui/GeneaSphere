@@ -17,7 +17,7 @@ const activeTab = ref('overview')
 const fetchOverview = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/overview', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     overview.value = res.data
   } catch (e: any) {
@@ -28,7 +28,7 @@ const fetchOverview = async () => {
 const fetchDemographics = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/demographics', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     demographics.value = res.data
   } catch (e: any) {
@@ -39,7 +39,7 @@ const fetchDemographics = async () => {
 const fetchMediaStats = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/media', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     mediaStats.value = res.data
   } catch (e: any) {
@@ -50,7 +50,7 @@ const fetchMediaStats = async () => {
 const fetchMigrationStats = async () => {
   try {
     const res = await axios.get('/api/admin/statistics/migration', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     migrationStats.value = res.data
   } catch (e: any) {

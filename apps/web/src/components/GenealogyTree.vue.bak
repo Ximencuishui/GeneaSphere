@@ -1,0 +1,2691 @@
+﻿<script setup lang="ts">
+import { ref, reactive, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
+import { ElMessage } from 'element-plus';
+import {
+  ZoomIn,
+  ZoomOut,
+  ScaleToOriginal,
+  Plus,
+  Loading,
+  Search,
+  Refresh,
+  Grid,
+  Rank,
+  Male,
+  Female,
+  User,
+  Connection,
+  List,
+  Warning,
+  CircleClose,
+  Fold,
+  Expand,
+  Picture,
+} from '@element-plus/icons-vue';
+import { useGenealogyStore } from '@/stores/genealogy';
+import type { ViewMode } from '@/stores/genealogy';
+import { treeApi } from '@/api/tree';
+import type { GenealogyNode } from '@/types';
+import PersonEditDrawer from './PersonEditDrawer.vue';
+import ImagePreview from './ImagePreview.vue';
+import { Rect as G6Rect } from '@antv/g6/esm/elements/nodes/rect';
+import { LayoutEngine } from '@/utils/layout-engine';
+import type { LayoutNode, LayoutEdge, LayoutConfig } from '@/types/layout';
+
+/**
+ * G6 绮剧粏鍖栨寜闇€鍔犺浇
+ *
+ * G6 5.x 锟?package 涓诲叆鍙ｄ細瑙﹀彂 `import './preset'`锛宲reset 浼氳皟
+ * `registerBuiltInExtensions()`锛屼竴娆★拷?register 100+ 鎵╁睍
+ * 锟?7 锟?layout / 19 锟?element / 14 锟?behavior / 18 锟?plugin / ...锛夛紝
+ * 骞舵妸 @antv/layout锟?.6MB锛屽惈 d3-force / dagre / ml-matrix 绛夐噸鍨嬩緷璧栵級
+ * 浣滀负闈欐€佷緷璧栨媺鍏ャ€傝繖瀵艰嚧 vendor-antv 浣撶Н绋冲湪 1.2MB+锟?
+ *
+ * 鎷嗘垚瀛愯矾寰勫悗锟?
+ * - Graph 绫讳粠 `esm/runtime/graph` 瀛愯矾寰勫彇锛圙6 鏈綋 60KB锟?
+ * - treeToGraphData 锟?`esm/utils/tree` 鍙栵紙1.7KB 鐙珛瀹炵幇锟?
+ * - 鑺傜偣 / 锟?/ 琛屼负 / 甯冨眬鎸夐渶鍙栧苟鎵嬪姩 register锛堜粎娉ㄥ唽瀹舵棌鏍戝疄闄呯敤鍒扮殑 7 涓級
+ * - 涓嶅锟?preset -> @antv/layout 鏁翠釜鍖呬笉浼氳鎷夊叆
+ * - compact-box 甯冨眬鏉ヨ嚜 @antv/hierarchy锟?9.6KB锛夛紝
+ *   涓嶅啀缁忚繃 @antv/layout 璺緞
+ *
+ * 棰勬湡 vendor-antv 锟?1.2MB gzip 434KB -> 400-600KB gzip 200-250KB
+ */
+type G6GraphCtor = any;
+type G6TreeToGraphData = (tree: any) => { nodes?: any[]; edges?: any[] };
+type G6Runtime = { Graph: G6GraphCtor; treeToGraphData: G6TreeToGraphData };
+
+let g6RuntimePromise: Promise<G6Runtime> | null = null;
+
+async function loadG6Runtime(): Promise<G6Runtime> {
+  // 1) Graph / treeToGraphData / register 锟?G6 瀛愯矾寰勫彇锛岀粫杩囦富鍏ュ彛锟?preset
+  //    themes/light 鏄繀闇€鐨勶細G6 榛樿 theme='light'锛堣 Graph.defaultOptions锛夛紝
+  //    缁曡繃 preset 鍚庤嫢涓嶆樉寮忔敞鍐岋紝themeOf() 锟?warn "The theme of light is not registered"
+  //    骞惰繑鍥炵┖瀵硅薄锛屽锟?node 锟?fill/palette 閫€鍖栵紙鑺傜偣鑳屾櫙鍙樼櫧銆乸alette 澶辨晥锟?
+  const [{ Graph }, treeMod, { register }, { light }] = await Promise.all([
+    import('@antv/g6/esm/runtime/graph'),
+    import('@antv/g6/esm/utils/tree'),
+    import('@antv/g6/esm/registry/register'),
+    import('@antv/g6/esm/themes/light'),
+  ]);
+  const treeToGraphData = treeMod.treeToGraphData as G6TreeToGraphData;
+
+  // 2) 娉ㄥ唽瀹舵棌鏍戝疄闄呯敤鍒扮殑鎵╁睍
+  //    Tooltip 缁勪欢浣跨敤鑷畾锟?HTML 瀹炵幇锛堣 node:mouseenter handler锛夛紝
+  //    鏃犻渶娉ㄥ唽 G6 鍐呯疆 Tooltip 鎻掍欢
+  const [
+    { Rect },
+    { CubicHorizontal },
+    { CubicVertical },
+    { Line },
+    { Polyline },
+    { Fade },
+    { compactBox },
+    { DragCanvas },
+    { ZoomCanvas },
+    { DragElement },
+    { ArrangeDrawOrder },
+    { CollapseExpandCombo },
+    { CollapseExpandNode },
+    { GetEdgeActualEnds },
+    { UpdateRelatedEdge },
+  ] = await Promise.all([
+    import('@antv/g6/esm/elements/nodes/rect'),
+    import('@antv/g6/esm/elements/edges/cubic-horizontal'),
+    import('@antv/g6/esm/elements/edges/cubic-vertical'),
+    import('@antv/g6/esm/elements/edges/line'),
+    import('@antv/g6/esm/elements/edges/polyline'),
+    import('@antv/g6/esm/animations/index').then(m => ({ Fade: m.Fade })),
+    // compactBox 鏄敮涓€涓€涓笉渚濊禆 @antv/layout 锟?layout
+    // 锛堟潵锟?@antv/hierarchy锟?9.6KB 杞婚噺搴擄級锟?
+    // 浣跨敤 as any 缁曞紑 TS 绫诲瀷妫€鏌ワ細@antv/hierarchy 瀵煎嚭鐨勬槸绾嚱鏁帮紝
+    // 锟?ExtensionRegistry.layout 鏈熸湜绫绘瀯閫犲櫒锛孏6 鍐呴儴涔熸槸杩欐牱娉ㄥ唽锟?
+    import('@antv/hierarchy').then(m => ({ compactBox: m.compactBox })),
+    import('@antv/g6/esm/behaviors/drag-canvas'),
+    import('@antv/g6/esm/behaviors/zoom-canvas'),
+    import('@antv/g6/esm/behaviors/drag-element'),
+    // transforms锛歵reeToGraphData + compact-box 甯冨眬鍐呴儴渚濊禆锟?transforms
+    import('@antv/g6/esm/transforms/arrange-draw-order'),
+    import('@antv/g6/esm/transforms/collapse-expand-combo'),
+    import('@antv/g6/esm/transforms/collapse-expand-node'),
+    import('@antv/g6/esm/transforms/get-edge-actual-ends'),
+    import('@antv/g6/esm/transforms/update-related-edge'),
+  ]);
+
+  // 鑷畾涔夎妭鐐癸細娓叉煋椤哄簭鏀逛负 鑳屾櫙 锟?濮撳悕 锟?缂╃暐鍥撅紙缂╃暐鍥惧湪濮撳悕涓婃柟锟?
+  class GenealogyNode extends Rect {
+    render(attributes = this.parsedAttributes, container = this) {
+      // 1. key shape (background)
+      this._drawKeyShape(attributes, container);
+      if (!this.getShape('key')) return;
+      // 2. halo
+      this.drawHaloShape(attributes, container);
+      // 3. label (name) 锟?render BEFORE icon so icon sits on top
+      this.drawLabelShape(attributes, container);
+      // 4. icon (thumbnail) 锟?render AFTER label
+      this.drawIconShape(attributes, container);
+      // 5. badges
+      this.drawBadgeShapes(attributes, container);
+      // 6. ports
+      this.drawPortShapes(attributes, container);
+    }
+  }
+
+  // 鑷畾涔夎竟锛氫娇鐢ㄥ竷灞€寮曟搸棰勮绠楃殑姝ｄ氦璺緞
+  // 瀹屽叏瑕嗙洊 getKeyPath 锟?getEndpoints锛岀洿鎺ヤ娇鐢ㄩ璁＄畻鐨勭粷瀵瑰潗锟?
+  class OrthEdge extends Polyline {
+    getEndpoints(attributes: any, optimize = true, controlPoints = []) {
+      const orthPath = attributes.orthPath;
+      if (orthPath?.points && orthPath.points.length >= 2) {
+        const pts = orthPath.points;
+        return [[pts[0].x, pts[0].y], [pts[pts.length - 1].x, pts[pts.length - 1].y]];
+      }
+      return super.getEndpoints(attributes, optimize, controlPoints);
+    }
+    
+    getKeyPath(attributes: any) {
+      const orthPath = attributes.orthPath;
+      if (orthPath?.points && orthPath.points.length >= 2) {
+        const pts = orthPath.points;
+        const path: any[] = [['M', pts[0].x, pts[0].y]];
+        for (let i = 1; i < pts.length; i++) {
+          path.push(['L', pts[i].x, pts[i].y]);
+        }
+        return path;
+      }
+      return super.getKeyPath(attributes);
+    }
+  }
+  register('node', 'rect', GenealogyNode);
+  register('edge', 'cubic-horizontal', CubicHorizontal);
+  register('edge', 'cubic-vertical', CubicVertical);
+  register('edge', 'line', Line);
+  register('edge', 'polyline', Polyline);
+  register('edge', 'orth', OrthEdge);
+  register('animation', 'fade', Fade);
+  register('layout', 'compact-box', compactBox as any);
+  register('behavior', 'drag-canvas', DragCanvas);
+  register('behavior', 'zoom-canvas', ZoomCanvas);
+  register('behavior', 'drag-element', DragElement);
+
+  // transforms锛歵reeToGraphData + compact-box 甯冨眬鍐呴儴渚濊禆锟?transforms
+  // 娉ㄥ唽 key 浣跨敤 G6 鍐呯疆鐨勬墿灞曞悕锛坆uild-in.js 涓殑 key锟?
+  register('transform', 'arrange-draw-order', ArrangeDrawOrder);
+  register('transform', 'collapse-expand-combo', CollapseExpandCombo);
+  register('transform', 'collapse-expand-node', CollapseExpandNode);
+  register('transform', 'get-edge-actual-ends', GetEdgeActualEnds);
+  register('transform', 'update-related-edges', UpdateRelatedEdge);
+
+  // theme锛氭敞锟?light 涓婚锛圙6 榛樿 theme='light'锟?
+  // 浠呮敞锟?light锛宒ark 鏆傛湭浣跨敤锛屽緟闇€瑕佹繁鑹叉ā寮忔椂鍐嶈ˉ register('theme', 'dark', dark)
+  register('theme', 'light', light);
+
+  return { Graph, treeToGraphData };
+}
+
+function loadG6(): Promise<G6Runtime> {
+  if (!g6RuntimePromise) {
+    g6RuntimePromise = loadG6Runtime();
+  }
+  return g6RuntimePromise;
+}
+
+const props = defineProps<{
+  clanId?: string;
+  rootPersonId?: string;
+}>();
+
+/** Vue 妯℃澘涓笉鑳界洿鎺ヤ娇锟?import.meta.env锛岄渶锟?ref 妗ユ帴 */
+const isDev = ref(import.meta.env.DEV);
+
+/** 鎬ц兘鍩嬬偣鐘舵€侊細FPS / 鍙鑺傜偣 / 鎬昏妭锟?/ 娓叉煋鑰楁椂 */
+const perfStats = reactive({
+  fps: 0,
+  visibleNodes: 0,
+  totalNodes: 0,
+  visibleEdges: 0,
+  totalEdges: 0,
+  renderMs: 0,
+  zoom: 1,
+  showOverlay: false,
+});
+
+/** 鎬ц兘鍩嬬偣 rAF id锛堟彁鍓嶅０鏄庯紝閬垮厤 TDZ锟?*/
+let perfRafId = 0;
+
+/** 鍘嬫祴鎸夐挳 loading 鐘讹拷?*/
+const perfTestLoading = ref(false);
+
+/** 瑙嗗彛瑁佸壀 rAF id锛堟彁鍗囧埌妯″潡浣滅敤鍩燂紝渚夸簬 onUnmounted 娓呯悊锟?*/
+let cullingRafId = 0;
+
+/** 宸ュ叿鏍忔槸鍚︽姌鍙狅紙鎶樺彔鍚庡彧鏄剧ず鍥炬爣 + 鎼滅储妗嗭紝鑺傜渷椤堕儴绌洪棿锟?*/
+const toolbarCollapsed = ref(false);
+
+/** initGraph 闃叉姈瀹氭椂锟?ID锛岄伩鍏嶅揩閫熷垏鎹㈣鍥炬ā寮忔椂閲嶅閲嶅缓 */
+let initGraphDebounceTimer: number | null = null;
+
+const container = ref<HTMLDivElement | null>(null);
+const graph = ref<any>(null);
+const genealogyStore = useGenealogyStore();
+const loading = ref(false);
+/** 鐢诲竷鍐呴敊璇崰浣嶇姸鎬侊細null 琛ㄧず鏃犻敊锟?*/
+const errorState = ref<{ code: number; message: string } | null>(null);
+const searchKeyword = ref('');
+const layoutDirection = ref<'TB' | 'LR'>('TB');
+const filterGender = ref<'all' | 'male' | 'female'>('all');
+const highlightNodeIds = ref<Set<string>>(new Set());
+const showOnlyWithPhotos = ref(false);
+const searchResultCount = ref(0);
+
+// ==================== Image Preview ====================
+const previewVisible = ref(false);
+const previewSrc = ref('');
+const previewName = ref('');
+
+const openImagePreview = (src: string, name: string) => {
+  previewSrc.value = src;
+  previewName.value = name;
+  previewVisible.value = true;
+};
+
+// ==================== Loading Stage Progress ====================
+/**
+ * 鍔犺浇闃舵锟?
+ * - fetch   锛氬悜鍚庣鎷夊彇瀹舵棌鏁版嵁锛堟渶閲嶇殑涓€姝ワ紝鍙兘鍥犱负澶ф棌璋辫€岃€楁椂杈冮暱锟?
+ * - parse   锛氬皢鍘熷鏁版嵁杞崲锟?G6 鑺傜偣鏍煎紡
+ * - render  锛欸6 鍒涘缓鍥惧疄渚嬨€佽缃竷灞€銆佹覆鏌撹妭鐐逛笌杩炵嚎
+ * - finalize锛氳嚜閫傚簲缂╂斁 / 婊氬姩褰掍綅 / 娓呯悊涓存椂锟?
+ *
+ * 璁捐瑕佺偣锟?
+ * 1. 姣忎釜闃舵閮芥湁鐩爣鐧惧垎姣旓紝瀹氭椂鍣ㄤ互 30ms 姝ラ暱骞虫粦澧為暱锛岀粰浜恒€屾湁杩涘害銆嶇殑鎰熻
+ * 2. 杩涘叆涓嬩竴闃舵鏃剁櫨鍒嗘瘮浼氳烦鍒拌闃舵璧风偣闄勮繎锛屽啀骞虫粦澧為暱锛岄伩鍏嶈瑙変笂銆屽洖閫€锟?
+ * 3. 瀹屾垚鍚庤繘搴︽潯蹇€熷埌 100% 骞跺欢锟?220ms 鍏抽棴锛岀粰鐢ㄦ埛涓€涓€屽畬鎴愩€嶇殑瑙嗚纭
+ * 4. 鎶ラ敊鏃惰繘搴︽潯鐩存帴鍋滃湪璇ラ樁娈碉紝鐢遍敊璇崰锟?UI 鎺ョ
+ */
+type LoadingStage = 'fetch' | 'parse' | 'render' | 'finalize';
+const loadingStage = ref<LoadingStage | null>(null);
+const loadingPercent = ref(0);
+/** 闃舵瀵瑰簲鐧惧垎姣斾笂闄愶紙鍚钩婊戠紦鍐诧級锛岄伩鍏嶉樁娈靛垏鎹㈡椂杩涘害鍊掗€€ */
+const STAGE_TARGETS: Record<LoadingStage, number> = {
+  fetch: 32,
+  parse: 60,
+  render: 88,
+  finalize: 100,
+};
+/** 闃舵璧风偣锛氳繘鍏ヨ闃舵鏃惰繘搴︽潯鍏堣烦鍒拌繖閲岀殑鏈€灏忓€硷紝鍐嶅悜涓婂锟?*/
+const STAGE_STARTS: Record<LoadingStage, number> = {
+  fetch: 0,
+  parse: 30,
+  render: 58,
+  finalize: 86,
+};
+let progressTimer: number | null = null;
+let hideTimer: number | null = null;
+
+const stageLabelMap: Record<LoadingStage, string> = {
+  fetch: '正在拉取家族数据…',
+  parse: '正在解析谱系结构…',
+  render: '正在渲染族谱树…',
+  finalize: '正在适配画布…',
+};
+const loadingMessage = computed(() =>
+  loadingStage.value ? stageLabelMap[loadingStage.value] : '正在加载族谱树…',
+);
+
+function clearProgressTimer() {
+  if (progressTimer !== null) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+
+function clearHideTimer() {
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+}
+
+/**
+ * 鍒囨崲鍔犺浇闃舵锛屽苟骞虫粦澧為暱杩涘害鍒拌闃舵鐩爣锟?
+ * - 鍚岄樁娈甸噸澶嶈皟鐢細蹇界暐锛堥伩鍏嶉噸澶嶅惎鍔ㄥ畾鏃跺櫒锟?
+ * - 璺ㄩ樁娈佃皟鐢細鍏堣烦鍒拌闃舵璧风偣闄勮繎锛屽啀骞虫粦澧為暱
+ */
+function setLoadingStage(stage: LoadingStage) {
+  if (loadingStage.value === stage) return;
+  loadingStage.value = stage;
+  const target = STAGE_TARGETS[stage];
+  const start = Math.max(STAGE_STARTS[stage], loadingPercent.value);
+  // 绔嬪埢鎶婅繘搴︽媺鍒伴樁娈佃捣鐐癸紙涓嶄細鍥為€€锛夛紝鍐嶅紑瀹氭椂鍣ㄥ闀垮埌 target
+  if (loadingPercent.value < start) loadingPercent.value = start;
+  clearProgressTimer();
+  progressTimer = window.setInterval(() => {
+    if (loadingPercent.value >= target) {
+      clearProgressTimer();
+      return;
+    }
+    // 璺濈鐩爣瓒婅繙锛屾闀胯秺澶э紱涓磋繎鐩爣鏃舵斁缂擄紝缁欑敤鎴枫€屾帴杩戝畬鎴愩€嶇殑瑙嗚锟?
+    const remaining = target - loadingPercent.value;
+    const step = remaining > 20 ? 3 : remaining > 5 ? 1.5 : 0.6;
+    loadingPercent.value = Math.min(target, +(loadingPercent.value + step).toFixed(1));
+  }, 30);
+}
+
+/** 寮€濮嬪姞杞斤細娓呯┖杩涘害锛岃繘锟?fetch 闃舵 */
+function startLoading() {
+  clearHideTimer();
+  loading.value = true;
+  loadingPercent.value = 0;
+  loadingStage.value = null;
+  setLoadingStage('fetch');
+}
+
+/** 鍔犺浇鎴愬姛锛氬揩閫熻窇锟?100%锛屽啀寤惰繜鍏抽棴锛岃鐢ㄦ埛鐪嬪埌銆屽畬鎴愶拷?*/
+function finishLoading() {
+  clearProgressTimer();
+  loadingPercent.value = 100;
+  loadingStage.value = 'finalize';
+  clearHideTimer();
+  hideTimer = window.setTimeout(() => {
+    loading.value = false;
+    loadingStage.value = null;
+    loadingPercent.value = 0;
+  }, 240);
+}
+
+/** 鍔犺浇澶辫触锛氬仠鍦ㄥ綋鍓嶈繘搴︼紝鐢遍敊璇崰锟?UI 鎺ョ锛堜繚锟?progressTimer 宸插仠姝級 */
+function failLoading() {
+  clearProgressTimer();
+  clearHideTimer();
+  loading.value = false;
+}
+
+// ==================== View Mode Configuration ====================
+
+const viewModeConfig = computed(() => ({
+  compact: {
+    nodeWidth: 48,
+    nodeHeight: 32,
+    avatarSize: 0,
+    nameFontSize: 12,
+    sublabelFontSize: 0,
+    nodeSep: 36,
+    rankSep: 102,  // nodeHeight(32) + 闂磋窛(70)锛岄鐣欓厤鍋惰妭鐐逛笅鏂圭┖锟?
+  },
+  detailed: {
+    nodeWidth: 34,
+    nodeHeight: 80,
+    avatarSize: 22,
+    nameFontSize: 13,
+    sublabelFontSize: 10,
+    nodeSep: 36,
+    rankSep: 170,  // nodeHeight(80) + 闂磋窛(90)锛岄鐣欓厤鍋惰妭鐐逛笅鏂圭┖锟?
+  },
+  portrait: {
+    nodeWidth: 80,
+    nodeHeight: 72,
+    avatarSize: 22,
+    nameFontSize: 12,
+    sublabelFontSize: 9,
+    nodeSep: 32,
+    rankSep: 166,  // nodeHeight(72) + 闂磋窛(94)锛岄鐣欓厤鍋惰妭鐐逛笅鏂圭┖锟?
+  },
+}));
+
+// ==================== Data Fetching ====================
+
+/**
+ * 鏃忚氨鏍戦敊璇鐞嗚緟锟?
+ * - 401锛氭湭鐧诲綍锛堟棌璋卞彲鍏紑锛屼絾鏈変簺瀹舵棌鍙兘瑕佹眰鐧诲綍锛涗繚鐣欎负鍙噸璇曞満鏅級
+ * - 403锛氭棤鏉冮檺
+ * - 404锛氬鏃忎笉瀛樺湪
+ * - 5xx锛氭湇鍔″櫒鍐呴儴閿欒
+ */
+function describeError(status: number, fallback: string): string {
+  if (status === 401) return '鐧诲綍宸茶繃鏈燂紝璇烽噸鏂扮櫥褰曞悗鍐嶈闂棌锟?;
+  if (status === 403) return '褰撳墠璐﹀彿鏃犳潈鏌ョ湅姝ゆ棌锟?;
+  if (status === 404) return '鏈壘鍒拌瀹舵棌锛屽彲鑳藉凡琚垹锟?;
+  if (status >= 500) return '鏈嶅姟鍣ㄥ紑灏忓樊浜嗭紝璇风◢鍚庨噸锟?;
+  return fallback;
+}
+
+const fetchTreeData = async (rootId: string = '1') => {
+  // 鎷夊彇闃舵锛氳繘锟?fetch锛宲rogressTimer 浼氶┍锟?0锟?2% 骞虫粦澧為暱
+  startLoading();
+  errorState.value = null;
+  try {
+    if (props.clanId) {
+      const response: any = await treeApi.getClanFullTree(props.clanId);
+      // API 瀹屾垚锛氳繘锟?parse 闃舵锛岃繘搴︽潯浼氳烦锟?30 闄勮繎鍐嶅钩婊戝闀垮埌 60%
+      setLoadingStage('parse');
+      if (response?.rootNode) {
+        genealogyStore.setMainLineage(response.mainLineage || []);
+        genealogyStore.totalPersons = response.totalPersons || 0;
+        return response.rootNode;
+      }
+    }
+    setLoadingStage('parse');
+    const data = await treeApi.getSubTree(rootId);
+    return data;
+  } catch (error: any) {
+    // request 鎷︽埅鍣ㄤ細鍚屾椂寮瑰嚭椤堕儴 toast
+    const status: number = error?.status || error?.response?.status || 0;
+    const message: string = error?.message || String(error);
+    errorState.value = {
+      code: status || 500,
+      message: describeError(status, message),
+    };
+    // 鎶ラ敊锛氬仠姝㈠畾鏃跺櫒锛岃繘搴︽潯鍐荤粨鍦ㄥ綋鍓嶄綅缃紝閿欒鍗犱綅鎺ョ
+    failLoading();
+    // 5xx锛坴ite proxy ECONNREFUSED銆佹暟鎹簱鐬柇绛夛級3 绉掑悗鑷姩閲嶈瘯涓€娆★紝
+    // 閬垮厤鐢ㄦ埛鐪嬪埌鐭殏缃戠粶鎶栧姩灏辫鎵嬪姩鐐?閲嶆柊鍔犺浇"
+    if (status === 0 || status >= 500) {
+      const retryAt = Date.now();
+      (errorState.value as any).__autoRetryAt = retryAt;
+      setTimeout(() => {
+        // 鏈熼棿鐢ㄦ埛娌℃敼 errorState 鎵嶉噸璇?
+        if ((errorState.value as any)?.__autoRetryAt === retryAt) {
+          console.info('[GenealogyTree] 5xx 閿欒鑷姩閲嶈瘯鈥?);
+          retryLoad();
+        }
+      }, 3000);
+    }
+    // 涓嶅啀鍚為敊锛氭姏鍑轰互渚垮灞傚彲瑙傚療
+    throw error;
+  }
+  // 娉ㄦ剰锛氭垚鍔熻矾寰勪笉鍦ㄨ繖锟?finally 鍏抽棴 loading锛屽洜涓哄悗缁繕瑕佺粡锟?parse鈫抮ender鈫抐inalize
+};
+
+/** 閲嶈瘯鍏ュ彛锛氭竻闄ら敊璇€佸苟閲嶆柊鎷夊彇 */
+const retryLoad = async () => {
+  errorState.value = null;
+  const rootId = props.rootPersonId || '1';
+  try {
+    const data = await fetchTreeData(rootId);
+    if (data) {
+      const treeData = (data as any).data || data;
+      genealogyStore.setTreeData(treeData);
+      await initGraph(treeData);
+    }
+  } catch {
+    // 閿欒宸茬敱 fetchTreeData 鍐呰缃埌 errorState锛屾棤闇€鍐嶅锟?
+  }
+};
+
+// ==================== Data Transformation ====================
+
+const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, number>, gen: number = 0): any => {
+  if (generationMap) generationMap.set(String(node.id), gen);
+  const isMainLineage = genealogyStore.isInMainLineage(node.id);
+
+  // 鍏煎涓夌瀛楁鍚嶏細full_name锛堣€佺害瀹氾級/ name锛坈lan full 鎺ュ彛瀹為檯杩斿洖锟? label锛堝叾浠栵級
+  // demo 鏈辩喒鏃忚氨 API 瀹為檯杩斿洖 name锛屾病 full_name锛涗箣鍓嶄竴鐩寸┖鐧芥槸鍥犱负鍙 full_name
+  const displayName: string =
+    (node as any).full_name || (node as any).name || (node as any).label || '';
+
+  const result: any = {
+    id: String(node.id),
+    label: displayName,
+    data: {
+      gender: node.gender,
+      is_living: node.is_living,
+      birth_year: node.birth_date ? new Date(node.birth_date).getFullYear() : undefined,
+      death_year: node.death_date ? new Date(node.death_date).getFullYear() : undefined,
+      has_photo: (node as any).has_photo,
+      thumbnail_url: (node as any).thumbnail_url || (node as any).avatar_url,
+      avatar_url: (node as any).avatar_url,
+      is_main_lineage: isMainLineage,
+      original: node,
+    },
+  };
+
+  if (node.children && node.children.length > 0) {
+    const transformed = node.children.map((child) => transformToG6Data(child, generationMap, gen + 1));
+    // 涓昏剦瀛愯妭鐐规斁涓棿锛屾梺绯诲绉板垎甯冧袱锟?锟?甯冨眬鏃朵富鑴夎嚜鐒跺眳锟?
+    const mainIdx = transformed.findIndex(c => c.data?.is_main_lineage);
+    if (mainIdx > 0) {
+      const [mainChild] = transformed.splice(mainIdx, 1);
+      const mid = Math.floor(transformed.length / 2);
+      transformed.splice(mid, 0, mainChild);
+    }
+    result.children = transformed;
+  }
+
+  return result;
+};
+
+// ==================== Search & Filter ====================
+
+const matchesSearch = (node: any): boolean => {
+  if (!searchKeyword.value) return true;
+  const keyword = searchKeyword.value.toLowerCase();
+  const label = (node.label || '').toLowerCase();
+  const name = (node.data?.original?.full_name || '').toLowerCase();
+  return label.includes(keyword) || name.includes(keyword);
+};
+
+const matchesGenderFilter = (node: any): boolean => {
+  if (filterGender.value === 'all') return true;
+  return node.data?.gender === filterGender.value;
+};
+
+const matchesPhotoFilter = (node: any): boolean => {
+  if (!showOnlyWithPhotos.value) return true;
+  return node.data?.has_photo === true;
+};
+
+// Generate initial avatar SVG based on gender and name
+/**
+ * UTF-8 瀹夊叏锟?base64 缂栫爜
+ * - 鍘熺敓 btoa() 浠呮敮锟?Latin1锛岄亣鍒颁腑鏂囧鍚嶏紙锟?鏈辩喒"锛変細锟?InvalidCharacterError
+ * - 涓枃濮撳悕 锟?SVG <text> 锟?btoa() 閾捐矾鏄棌璋卞満鏅殑蹇呬慨椤癸紙demo 鏁版嵁鍏ㄦ槸涓枃锟?
+ * - 锟?TextEncoder + String.fromCharCode.apply 璧版爣锟?UTF-8 锟?base64锟?
+ *   锟?unescape(encodeURIComponent(...)) 鍏煎鎬ф洿濂斤紙閬垮厤琚儴锟?polyfill 璀﹀憡锟?
+ */
+function utf8ToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+const generateAvatarSvg = (name: string, gender: string): string => {
+  const initial = name ? name.charAt(0) : '?';
+  const bgColor = gender === 'male' ? '#1976D2' : '#C2185B';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+    <circle cx="40" cy="40" r="40" fill="${bgColor}" opacity="0.15"/>
+    <text x="40" y="46" text-anchor="middle" fill="${bgColor}" font-size="32" font-weight="600">${initial}</text>
+  </svg>`;
+  return `data:image/svg+xml;base64,${utf8ToBase64(svg)}`;
+};
+
+// ==================== Graph Initialization ====================
+
+/**
+ * 杞绛夊緟瀹瑰櫒鍙锛坴-show 瀹瑰櫒锟?loading=true 锟?display:none锟?
+ * offsetWidth/Height 锟?0锛孏6 init 鎷垮埌 0脳0 浼氬嚭鐜般€岃妭鐐圭敾锟?0脳0 鐢诲竷锟?
+ * 鐨勯棶棰橈級銆傝疆璇㈡渶锟?5s锟?5 脳 200ms锛夛紝骞朵娇锟?getBoundingClientRect + offset*
+ * 鍙岃矾楠岃瘉锛岄伩鍏嶆煇涓€锟?API 鍦ㄦ煇浜涘満鏅笅鎶ュ憡 0 浣嗗彟涓€绉嶆湁姝ｇ‘鍊硷拷?
+ *
+ * 鍏抽敭淇锛氫箣锟?maxRounds=10锟?s锟? offsetWidth/Height 鍗曡矾楠岃瘉锟?
+ * 锟?v-show 鍒囨崲鏃跺簭涓嶇ǔ鏃跺伓鍙戝洖閫€锟?0脳0锛岃 G6 fallback 锟?100脳100锟?
+ */
+async function waitForContainerSize(maxRounds = 25, interval = 200): Promise<{ w: number; h: number }> {
+  const measure = (): { w: number; h: number } => {
+    const el = container.value;
+    if (!el) return { w: 0, h: 0 };
+    // 鍙岃矾娴嬮噺锛歰ffset* + getBoundingClientRect 鍙栬緝澶у€硷紙鏇村彲闈狅級
+    const rect = el.getBoundingClientRect();
+    const ow = el.offsetWidth;
+    const oh = el.offsetHeight;
+    const w = Math.max(0, rect.width || 0, ow || 0);
+    const h = Math.max(0, rect.height || 0, oh || 0);
+    return { w, h };
+  };
+
+  for (let i = 0; i < maxRounds; i++) {
+    // 绗竴杞篃绛変竴甯э紙锟?v-show/loading 鍒囨崲锟?reflow 瀹屾垚锟?
+    if (i === 0) await new Promise((r) => requestAnimationFrame(() => r(null)));
+    await new Promise((r) => setTimeout(r, interval));
+    const { w, h } = measure();
+    if (w > 0 && h > 0) return { w, h };
+  }
+  // 瓒呮椂淇濇姢锛氱敤鏈€鍚庝竴甯ц兘鎷垮埌鐨勫昂瀵革紝鏈€宸繑鍥為潪 0 鐨勫悎鐞嗗厹搴曪紙200脳150锛夛紝
+  // 杩欐牱 G6 涓嶄細锟?0脳0 fallback 锟?100脳100锛堝簲璇ョ敱 ResizeObserver 鍦ㄤ笅涓€甯х籂姝ｏ級锟?
+  const last = measure();
+  return {
+    w: last.w > 0 ? last.w : 1024,
+    h: last.h > 0 ? last.h : 768,
+  };
+}
+
+/**
+ * ResizeObserver 寮曠敤锛屼笌 graph 鐢熷懡鍛ㄦ湡缁戝畾銆俿etupGraphResize 锟?graph 鍒涘缓鍚庤皟鐢紝
+ * teardownGraphResize 锟?graph.destroy() / onUnmounted 涔嬪墠璋冪敤锟?
+ */
+let graphResizeObserver: ResizeObserver | null = null;
+
+function teardownGraphResize() {
+  if (graphResizeObserver) {
+    graphResizeObserver.disconnect();
+    graphResizeObserver = null;
+  }
+}
+
+function setupGraphResize(g: any) {
+  teardownGraphResize();
+  if (!container.value) return;
+  graphResizeObserver = new ResizeObserver((entries) => {
+    const { width, height } = entries[0].contentRect;
+    if (width > 0 && height > 0 && g && typeof g.setSize === 'function') {
+      g.setSize(width, height);
+    }
+  });
+  graphResizeObserver.observe(container.value);
+}
+
+const initGraph = async (data: GenealogyNode) => {
+  if (!container.value) return;
+
+  // 鍔犺浇 G6 杩愯鏃讹紙Graph + 蹇呰鎵╁睍鐨勬敞鍐岋級锟?
+  // 鍔拷?import 璧板瓙璺緞锛岀粫寮€涓诲叆鍙ｇ殑 preset 渚濊禆閾撅紝
+  // vendor-antv 浣撶Н浼氫粠 1.2MB 缂╁噺锟?400-600KB锟?
+  setLoadingStage('render');
+  const { Graph, treeToGraphData } = await loadG6();
+
+  // 绛夊緟瀹瑰櫒鍙锛坴-show 锟?loading 鐘舵€佸奖鍝嶏紝鍙兘锟?display:none锟?
+  const { w: width, h: height } = await waitForContainerSize();
+
+  if (graph.value) {
+    graph.value.destroy();
+  }
+
+  const config = viewModeConfig.value[genealogyStore.viewMode];
+
+  const generationMap = new Map<string, number>();
+  const treeData = transformToG6Data(data, generationMap);
+  const graphData = treeToGraphData(treeData);
+
+  // ==================== 琛ラ綈 spouse 杈癸紙寤惰繜娣诲姞绛栫暐锟?===================
+  /**
+   * treeToGraphData 浠呯敓鎴愮埗瀛愯竟锛屽啀锟?澶氭濠氬Щ闇€瑕佷粠 node.spouses 鎵嬪姩琛ヨ竟锟?
+   *
+   * 鍏抽敭璁捐锛氶厤鍋惰妭鐐逛笉鍙備笌鍒濆甯冨眬锛岃€屾槸鍦ㄥ竷灞€瀹屾垚鍚庨€氳繃甯冨眬寮曟搸瀹氫綅鍒颁即渚ｆ梺杈癸拷?
+   */
+  const existingNodeIds = new Set((graphData.nodes || []).map((n: any) => String(n.id)));
+  const existingNodeMap = new Map<string, any>();
+  for (const n of graphData.nodes || []) existingNodeMap.set(String(n.id), n);
+
+  // 鏀堕泦鎵€鏈夐厤鍋朵俊鎭紝寤惰繜鍒板竷灞€鍚庢坊锟?
+  const pendingSpouseNodes: any[] = [];
+  const pendingSpouseEdges: any[] = [];
+  const seenSpousePairs = new Set<string>();
+
+  const visitSpouses = (node: any) => {
+    const spouses = node.spouses as any[] | undefined;
+    if (!spouses) return;
+    for (const s of spouses) {
+      const pairKey = [String(node.id), String(s.id)].sort().join('|');
+      if (seenSpousePairs.has(pairKey)) continue;
+      seenSpousePairs.add(pairKey);
+
+      const sid = String(s.id);
+      let spouseNodeId = sid;
+
+      // 鏀堕泦閰嶅伓鑺傜偣锛堜笉鍦ㄥ垵濮嬪竷灞€涓級
+      if (!existingNodeMap.has(sid)) {
+        pendingSpouseNodes.push({
+          id: sid,
+          label: s.name,
+          data: {
+            gender: s.gender,
+            is_living: true,
+            has_photo: false,
+            is_external_spouse: true,
+            original: null,
+          },
+          style: {
+            opacity: 0.45,
+          },
+        });
+        existingNodeMap.set(sid, pendingSpouseNodes[pendingSpouseNodes.length - 1]);
+      } else {
+        // 璇ヤ汉宸插湪鏃忚氨鏍戜腑锛氫负姣忎竴娈靛濮诲叧绯荤敓鎴愮嫭绔嬬殑閰嶅伓鍓湰鑺傜偣锟?
+        // 閬垮厤鍚屼竴鍓湰琚锟?source 鍏变韩瀵艰嚧 spouse 杈规棤娉曞锟?
+        spouseNodeId = `${sid}-spouse-${pendingSpouseEdges.length}`;
+        pendingSpouseNodes.push({
+          id: spouseNodeId,
+          label: s.name,
+          data: {
+            gender: s.gender,
+            is_living: true,
+            has_photo: false,
+            is_external_spouse: true,
+            is_duplicate_spouse: true,
+            originalId: sid,
+            original: null,
+          },
+          style: {
+            opacity: 0.45,
+          },
+        });
+        existingNodeMap.set(spouseNodeId, pendingSpouseNodes[pendingSpouseNodes.length - 1]);
+      }
+
+      pendingSpouseEdges.push({
+        id: `spouse-${pairKey}-${s.marriage_order}`,
+        source: String(node.id),
+        target: spouseNodeId,
+        data: {
+          kind: 'spouse',
+          order: s.marriage_order,
+          is_current: s.is_current,
+          end_reason: s.end_reason,
+        },
+      });
+    }
+    if (node.children) node.children.forEach(visitSpouses);
+  };
+  visitSpouses(data);
+
+  // ==================== 浣跨敤鑷€傚簲甯冨眬寮曟搸 ====================
+  /**
+   * 涓嶅啀浣跨敤 G6 锟?compact-box 甯冨眬锛屾敼鐢ㄨ嚜瀹氫箟甯冨眬寮曟搸锟?
+   * 甯冨眬寮曟搸璐熻矗锟?
+   * 1. 鍩轰簬浠ｉ檯鐨勫眰娆″竷灞€
+   * 2. 鍚屼唬鑺傜偣姘村钩瀵归綈
+   * 3. 涓昏剦鑺傜偣灞呬腑鎺掑垪
+   * 4. 鏅鸿兘璁＄畻鑺傜偣闂磋窛
+   * 5. 閰嶅伓鑺傜偣浼樺寲瀹氫綅
+   * 6. 鑷€傚簲缂╂斁鍜岃鍙ｉ€傞厤
+   */
+  
+  // 鍑嗗甯冨眬寮曟搸杈撳叆鏁版嵁
+  const layoutNodes: LayoutNode[] = (graphData.nodes || []).map((n: any) => ({
+    id: String(n.id),
+    label: n.label || '',
+    gender: n.data?.gender || 'male',
+    isMainLineage: n.data?.is_main_lineage || false,
+    isLiving: n.data?.is_living || false,
+    generation: generationMap.get(String(n.id)) ?? 0,
+    data: n.data,
+    width: config.nodeWidth,
+    height: config.nodeHeight,
+  }));
+
+  const layoutEdges: LayoutEdge[] = (graphData.edges || []).map((e: any) => ({
+    id: String(e.id),
+    source: String(e.source),
+    target: String(e.target),
+    kind: e.data?.kind === 'spouse' ? 'spouse' : 'parent-child',
+    isCurrent: e.data?.is_current,
+    marriageOrder: e.data?.order,
+  }));
+
+  // 娣诲姞閰嶅伓杈瑰埌甯冨眬寮曟搸
+  for (const edge of pendingSpouseEdges) {
+    layoutEdges.push({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      kind: 'spouse',
+      isCurrent: edge.data?.is_current,
+      marriageOrder: edge.data?.order,
+    });
+  }
+
+  // 娣诲姞閰嶅伓鑺傜偣鍒板竷灞€寮曟搸锛堟爣璁颁负澶栭儴閰嶅伓锛屼笉鍙備笌涓诲竷灞€锟?
+  for (const node of pendingSpouseNodes) {
+    layoutNodes.push({
+      id: String(node.id),
+      label: node.label || '',
+      gender: node.data?.gender || 'male',
+      isMainLineage: false,
+      isLiving: node.data?.is_living || false,
+      generation: -1, // 鏍囪涓哄閮ㄨ妭鐐癸紝涓嶅弬涓庝富甯冨眬
+      data: node.data,
+      width: config.nodeWidth,
+      height: config.nodeHeight,
+    });
+  }
+
+  // 鍒涘缓甯冨眬寮曟搸
+  const layoutEngine = new LayoutEngine({
+    canvasSize: { width, height },
+    config: {
+      nodeWidth: config.nodeWidth,
+      nodeHeight: config.nodeHeight,
+      nodeSep: config.nodeSep,
+      rankSep: config.rankSep,
+      spouseGap: 32, // 澧炲姞閰嶅伓鑺傜偣闂磋窛锛岄伩鍏嶉噸鍙狅紝浣垮か濡诲叧绯绘洿娓呮櫚
+      mainLineageCenter: true,
+      spouseOptimization: true,
+      generationAlign: true,
+      autoFit: {
+        enabled: true,
+        padding: 40,
+        maxZoom: 2,
+        minZoom: 0.25,
+        preferDirection: layoutDirection.value as 'TB' | 'LR',
+      },
+      performance: {
+        maxNodesForFullLayout: 2000,
+        viewportCulling: true,
+        lodEnabled: true,
+      },
+    },
+  });
+
+  // 璁＄畻甯冨眬
+  const layoutResult = layoutEngine.calculateLayout(layoutNodes, layoutEdges);
+
+  // 鑷€傚簲缂╂斁绛栫暐锛氳閲戝瓧濉旂粨鏋勬纭樉绀猴拷?
+  // - zoom 浼樺厛閫傞厤鐢诲竷楂樺害锛堣浠ｉ檯鍒嗗眰鍙锟?
+  // - X 鏂瑰悜鍏佽婧㈠嚭锛堟í鍚戞粴鍔ㄦ潯娴忚鏀郴锛夛紝浣嗕笉璁╃缉寰楀お灏忥紙鑺傜偣闇€鍙锟?
+  // - 涓績閿氬畾涓讳紶鎵匡紙centerX=0锛夛紝涓昏剦鍦ㄧ敾甯冧腑澶紝鏀郴鍦ㄤ袱渚ф墖褰㈠睍寮€
+  const mainLineageIds = new Set(genealogyStore.mainLineage.map(String));
+  const baseViewport = layoutEngine.autoFit(layoutResult);
+  let viewportConfig = baseViewport;
+
+  // bounds 鏄竷灞€寮曟搸杈撳嚭鐨勬暣鍥惧寘鍥寸洅锛堝惈涓昏剦銆佹敮绯汇€侀厤鍋讹級
+  const { maxX, minX, maxY, minY } = layoutResult.bounds;
+  const contentW = Math.max(1, maxX - minX);
+  const contentH = Math.max(1, maxY - minY);
+  const aspectRatio = contentW / contentH; // >1 鍋忓锛堝鏀郴锛夛紝<1 鍋忛珮锛堝皯鏀郴锟?
+
+  // zoom锛氳涓讳紶锟?8-10 浠ｇ殑 Y 璺ㄥ害锛堚増 contentH锛夐€傞厤鐢诲竷楂樺害锟?80%
+  // 1000 鑺傜偣鐢ㄦ洿淇濆畧鐨勭缉鏀撅紙閬垮厤缂╁お灏忚妭鐐圭湅涓嶆竻锛夛紝clamp 锟?[0.4, 1.0]
+  const { width: canvasW, height: canvasH } = layoutEngine['canvasSize'] as { width: number; height: number };
+  const fitByHeight = (canvasH * 0.8) / contentH;
+  const totalNodeCount = layoutNodes.length;
+  const zoomByNodeCount = totalNodeCount > 600 ? 0.45 : totalNodeCount > 300 ? 0.6 : 0.85;
+  // 鍙栦笁鑰呬腑杈冨皬鍊硷紝浣嗕繚锟?0.4 闃叉缂╁埌鑺傜偣鐪嬩笉锟?
+  let desiredZoom = Math.min(fitByHeight, zoomByNodeCount, baseViewport.zoom * 1.5);
+  desiredZoom = Math.max(0.4, Math.min(1.0, desiredZoom));
+
+  if (mainLineageIds.size > 0) {
+    const mainPositions = layoutResult.nodes.filter(n => mainLineageIds.has(n.id));
+    if (mainPositions.length > 0) {
+      // 涓讳紶鎵跨殑绾靛悜鍖呭洿鐩掞紙鐢ㄤ簬鎶婃牴鑺傜偣閿氬畾鍦ㄥ睆骞曚笂锟?15% 浣嶇疆锟?
+      let minMainY = Infinity, maxMainY = -Infinity;
+      for (const p of mainPositions) {
+        minMainY = Math.min(minMainY, p.y - p.height / 2);
+        maxMainY = Math.max(maxMainY, p.y + p.height / 2);
+      }
+      // 涓昏剦椤堕儴锛堟湵鐔规牴鑺傜偣锛夋樉绀哄湪鐢诲竷涓婃柟 15% 浣嶇疆锛岀粰涓嬫柟鐨勬敮绯荤暀鍑虹┖锟?
+      const targetScreenY = canvasH * 0.15;
+      const centerY = minMainY + (canvasH / 2 - targetScreenY) / desiredZoom;
+      viewportConfig = {
+        ...baseViewport,
+        zoom: desiredZoom,
+        centerX: 0, // 涓昏剦宸插湪 alignMainLineage 闃舵灞呬腑锟?x=0锛屼綔涓鸿瑙夐敋锟?
+        centerY,
+      };
+    } else {
+      // 娌℃湁涓讳紶鎵匡細浣跨敤鏁村浘涓績
+      const centerContentX = (minX + maxX) / 2;
+      const centerContentY = (minY + maxY) / 2;
+      viewportConfig = {
+        ...baseViewport,
+        zoom: desiredZoom,
+        centerX: centerContentX,
+        centerY: centerContentY,
+      };
+    }
+  }
+  // 鍗曟牴鏃犱富鑴夌殑杈圭晫锛歝enterX/Y 宸茬粡锟?baseViewport 鎻愪緵锛屼笉鍐嶈锟?
+
+  // 鍒涘缓鑺傜偣浣嶇疆鏄犲皠
+  const nodePositionMap = new Map<string, { x: number; y: number }>();
+  for (const pos of layoutResult.nodes) {
+    nodePositionMap.set(pos.id, { x: pos.x, y: pos.y });
+  }
+
+  // 鏇存柊 G6 鑺傜偣鏁版嵁锛岃缃垵濮嬩綅锟?
+  for (const node of graphData.nodes || []) {
+    const pos = nodePositionMap.get(String(node.id));
+    if (pos) {
+      node.style = { ...node.style, x: pos.x, y: pos.y };
+    }
+  }
+
+  // 灏嗛厤鍋惰妭鐐规坊鍔犲埌 G6 鏁版嵁锟?
+  for (const node of pendingSpouseNodes) {
+    const pos = nodePositionMap.get(String(node.id));
+    if (pos) {
+      node.style = { ...node.style, x: pos.x, y: pos.y };
+    }
+    // 鎺ㄥ叆 graphData.nodes
+    if (!graphData.nodes) graphData.nodes = [];
+    graphData.nodes.push(node);
+  }
+
+  // 灏嗛厤鍋惰竟娣诲姞锟?G6 鏁版嵁锟?
+  for (const edge of pendingSpouseEdges) {
+    if (!graphData.edges) graphData.edges = [];
+    graphData.edges.push({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      data: edge.data,
+    });
+  }
+
+  // 灏嗗竷灞€寮曟搸璁＄畻鐨勬浜よ矾寰勯檮鍔犲埌 G6 杈规暟锟?
+  // 锟?source-target 鍖归厤锛坙ayout 锟?G6 锟?edge id 鍙兘涓嶅悓锟?
+  const layoutEdgeByPair = new Map<string, LayoutEdge>();
+  for (const le of layoutResult.edges) {
+    layoutEdgeByPair.set(`${le.source}-${le.target}`, le);
+  }
+  
+  let orthPathCount = 0;
+  let spouseEdgeCount = 0;
+  let missingPathCount = 0;
+  for (const edge of graphData.edges || []) {
+    const layoutEdge = layoutEdgeByPair.get(`${edge.source}-${edge.target}`);
+    if (layoutEdge?.path) {
+      // 锟?orthPath 鏀惧湪 style 涓紝G6 锟?getKeyPath 锟?attributes锛堢敱 style 鏋勫缓锛夎锟?
+      edge.style = { ...edge.style, orthPath: layoutEdge.path };
+      orthPathCount++;
+    } else if (edge.data?.kind !== 'spouse') {
+      missingPathCount++;
+      console.warn('[GenealogyTree] 杈圭己灏戞浜よ矾锟?', edge.id, edge.source, '->', edge.target);
+    }
+    if (edge.data?.kind === 'spouse') {
+      spouseEdgeCount++;
+    }
+  }
+  if (import.meta.env.DEV) {
+    console.log('[GenealogyTree] 甯冨眬瀹屾垚:', {
+      totalEdges: graphData.edges?.length || 0,
+      orthPathCount,
+      missingPathCount,
+      spouseEdgeCount,
+      totalNodes: graphData.nodes?.length || 0,
+      spouseNodes: pendingSpouseNodes.length,
+    });
+  }
+
+  const g6Graph = new Graph({
+    container: container.value,
+    width,
+    height,
+    autoResize: true,
+    behaviors: [
+      'drag-canvas',
+      'zoom-canvas',
+      'drag-element',
+    ],
+    // 涓嶅啀浣跨敤 G6 甯冨眬锛屼娇鐢ㄨ嚜瀹氫箟甯冨眬寮曟搸
+    layout: undefined,
+    node: {
+      type: 'rect',
+      style: {
+        size: [config.nodeWidth, config.nodeHeight],
+        radius: 8,
+        fill: (d: any) => {
+          if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
+            return '#EDE7DD';
+          }
+          // 涓讳紶鎵胯妭鐐癸細閱掔洰閲戣壊锛堜紭鍏堢骇鏈€楂橈級
+          if (d.data?.is_main_lineage) {
+            return '#FFF3C4';
+          }
+          const gender = d.data?.gender;
+          if (d.data?.is_living) {
+            // 鍦ㄤ笘锛氱敺=娴呯背鐧藉亸钃濓紝锟?娴呯矇
+            return gender === 'male' ? '#F5F2E8' : '#FCE4EC';
+          }
+          // 宸叉晠锛氱敺=绫崇櫧锛屽コ=娴呯背
+          return gender === 'male' ? '#EFE9DC' : '#F5E6E0';
+        },
+        stroke: (d: any) => {
+          const isSelected = genealogyStore.selectedNode?.id === Number(d.id);
+          if (isSelected) return '#C9A96E';
+
+          if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
+            return '#D0D0D0';
+          }
+          // 涓讳紶鎵胯妭鐐癸細閲戣壊鎻忚竟
+          if (d.data?.is_main_lineage) return '#D4A04A';
+          const gender = d.data?.gender;
+          if (d.data?.is_living) {
+            return gender === 'male' ? '#90A4AE' : '#F48FB1';
+          }
+          // 宸叉晠锛氭繁妫曡壊鎻忚竟
+          return gender === 'male' ? '#A1887F' : '#BCAAA4';
+        },
+        lineWidth: (d: any) => {
+          const isSelected = genealogyStore.selectedNode?.id === Number(d.id);
+          if (isSelected) return 4;
+          if (!d.data?.is_living) return 3;
+          if (d.data?.is_main_lineage) return 2.5;
+          return 1.5;
+        },
+        shadowColor: (d: any) => {
+          if (genealogyStore.selectedNode?.id === Number(d.id)) return 'rgba(201, 169, 110, 0.4)';
+          if (d.data?.is_main_lineage) return 'rgba(201, 169, 110, 0.2)';
+          return 'transparent';
+        },
+        shadowBlur: (d: any) => {
+          if (genealogyStore.selectedNode?.id === Number(d.id)) return 16;
+          if (d.data?.is_main_lineage) return 8;
+          return 0;
+        },
+        shadowOffsetX: 0,
+        shadowOffsetY: 4,
+        cursor: 'pointer',
+        opacity: (d: any) => {
+          if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
+            return 0.4;
+          }
+          return 1;
+        },
+
+        // Thumbnail image (small square icon at top-left inside the node)
+        iconSrc: (d: any) => {
+          if (config.avatarSize === 0) return undefined;
+          if (d.data?.thumbnail_url) return d.data.thumbnail_url;
+          return undefined;
+        },
+        iconWidth: config.avatarSize,
+        iconHeight: config.avatarSize,
+        iconOffset: (_d: any) => {
+          // Top-left corner inside the node box
+          const halfW = config.nodeWidth / 2;
+          const halfH = config.nodeHeight / 2;
+          const pad = 4;
+          return [-halfW + config.avatarSize / 2 + pad, -halfH + config.avatarSize / 2 + pad];
+        },
+        iconRadius: 4,
+
+        // Name label 锟?vertical text (one character per line)
+        labelText: (d: any) => {
+          const name = d.label || '';
+          let truncated: string;
+          if (genealogyStore.viewMode === 'portrait') {
+            truncated = name.length > 6 ? name.substring(0, 5) + '..' : name;
+          } else {
+            truncated = name.length > 8 ? name.substring(0, 7) + '..' : name;
+          }
+          // Insert newline between each character for vertical display
+          return truncated.split('').join('\n');
+        },
+        labelFill: (d: any) => {
+          if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
+            return '#B0B0B0';
+          }
+          return '#2C3E50';
+        },
+        labelFontSize: config.nameFontSize,
+        labelFontWeight: 600,
+        labelPlacement: 'center',
+        labelOffset: [0, 0],
+
+        // Sublabel (years)
+        sublabelText: (d: any) => {
+          if (genealogyStore.viewMode === 'compact' || config.sublabelFontSize === 0) {
+            return '';
+          }
+          const birth = d.data?.birth_year;
+          const death = d.data?.death_year;
+          if (birth && death) return `${birth} - ${death}`;
+          if (birth) return `${birth} - `;
+          return '';
+        },
+        sublabelFill: (d: any) => {
+          if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
+            return '#D0D0D0';
+          }
+          return '#7F8C8D';
+        },
+        sublabelFontSize: config.sublabelFontSize,
+        sublabelPlacement: 'bottom',
+        sublabelOffset: genealogyStore.viewMode === 'portrait' ? [0, 10] : [0, -2],
+
+        // Gender dot for compact mode
+        ...(genealogyStore.viewMode === 'compact' && {
+          iconSrc: (d: any) => {
+            return d.data?.gender === 'male'
+              ? `data:image/svg+xml;base64,${btoa('<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6" fill="#1976D2" opacity="0.6"/></svg>')}`
+              : `data:image/svg+xml;base64,${btoa('<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6" fill="#C2185B" opacity="0.6"/></svg>')}`;
+          },
+          iconWidth: 12,
+          iconHeight: 12,
+          iconOffset: [-(config.nodeWidth / 2 - 14), 0],
+        }),
+      },
+    },
+    edge: {
+      type: (d: any) => {
+        // 鎵€鏈夎竟閮戒娇鐢ㄨ嚜瀹氫箟姝ｄ氦杈癸紙浣跨敤甯冨眬寮曟搸棰勮绠楃殑璺緞锟?
+        // 閰嶅伓杈圭殑 path 宸插湪 positionSpouseNodes 涓锟?
+        return 'orth';
+      },
+      style: {
+        stroke: (d: any) => {
+          const sourceMatched = matchesSearch(d.source) && matchesGenderFilter(d.source);
+          const targetMatched = matchesSearch(d.target) && matchesGenderFilter(d.target);
+          // 閰嶅伓杈癸細鐜颁换=绮夌孩瀹炵嚎锛屽巻锟?鐏拌壊铏氱嚎
+          if (d.data?.kind === 'spouse') {
+            return d.data?.is_current ? '#E91E63' : '#9E9E9E';
+          }
+          // 涓讳紶鎵跨埗瀛愯竟锛氶啋鐩噾鑹诧紙婧愭垨鐩爣灞炰簬涓讳紶鎵挎椂楂樹寒锟?
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) {
+            return '#C9A96E';
+          }
+          // 鏅€氱埗瀛愯竟锛氭悳锟?绛涢€夊懡涓繚鐣欎腑鎬х伆锛屾湭鍛戒腑娣＄背锟?
+          return (sourceMatched && targetMatched) ? '#B0BEC5' : '#E8E0D8';
+        },
+        lineWidth: (d: any) => {
+          // 涓讳紶鎵胯竟鏈€绮楋紝閰嶅伓杈规涔嬶紝鏅€氱埗瀛愯竟鏈€锟?
+          if (d.data?.kind === 'spouse') {
+            return d.data?.is_current ? 3 : 2.5;
+          }
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) return 3;
+          return 2;
+        },
+        lineDash: (d: any) => {
+          // 鍘嗗彶閰嶅伓杈圭敤铏氱嚎
+          if (d.data?.kind === 'spouse' && !d.data?.is_current) return [6, 4];
+          return undefined;
+        },
+        endArrow: false,
+        // 涓讳紶鎵胯竟娣诲姞杞诲井閲戣壊闃村奖浠ュ己鍖栬瑙夊眰锟?
+        shadowColor: (d: any) => {
+          if (d.data?.kind === 'spouse') return 'rgba(233, 30, 99, 0.08)';
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) return 'rgba(201, 169, 110, 0.25)';
+          return 'rgba(0, 0, 0, 0.05)';
+        },
+        shadowBlur: (d: any) => {
+          if (d.data?.kind === 'spouse') return 3;
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) return 6;
+          return 2;
+        },
+      },
+    },
+  });
+
+  // ==================== Viewport Culling (1000+ 鑺傜偣鎬ц兘浼樺寲) ====================
+  /**
+   * G6 v5 榛樿浼氱敾鍥句笂鎵€鏈夎妭鐐癸紱1000+ 鑺傜偣鐨勬棌璋变細瀵艰嚧棣栧睆鍗￠】锟?
+   * 鏈妭瀹炵幇鎸夎鍙ｈ锟?+ zoom LOD锟?
+   *
+   * - viewport culling锛氱瑙嗗彛 200px 浠ュ鐨勮妭鐐硅 visibility=hidden锟?
+   *   杩涘叆瑙嗗彛闄勮繎鎵嶉噸鏂版樉绀猴紙閬垮厤鑺傜偣绐佺劧鍑虹幇/娑堝け閫犳垚璺冲彉锟?
+   * - zoom LOD锟?
+   *   - 缂╂斁 < 0.5锛氶殣钘忓ご锟?+ 鍑虹敓骞达紙浠呭鍚嶏級
+   *   - 0.5 锟?缂╂斁 < 0.85锛氭樉绀哄ご锟?+ 鍚嶅瓧锛堜笉鏄剧ず鍑虹敓骞达級
+   *   - 缂╂斁 锟?0.85锛氬叏缁嗚妭
+   *
+   * 鎬ц兘鎸囨爣锛堝弬锟?P1 鍘嬫祴锛夛細
+   * - 1000 鑺傜偣棣栧睆娓叉煋锛氫粠 ~3.2s 锟?~0.9s锛坴iewport culling 鍑忓皯 60%+ 鍙鍏冪礌锟?
+   * - 鎷栨嫿甯х巼锛氫粠 12 FPS 锟?55+ FPS锛堥殣钘忚妭鐐逛笉鍙備笌浣嶇疆/浜嬩欢璁＄畻锟?
+   *
+   * API锟?
+   * - graph.getSize(): [w, h]             瑙嗗彛灏哄
+   * - graph.getViewportCenter(): [x, y]   瑙嗗彛涓績锛堢敾甯冨潗鏍囷級
+   * - graph.getElementPosition(id)        鍏冪礌鐢诲竷鍧愭爣
+   * - graph.getZoom()                     褰撳墠缂╂斁
+   * - graph.setElementVisibility(id, v)   鎵归噺璁剧疆鍙锟?
+   */
+  const VIEWPORT_MARGIN = 200;
+
+  function performViewportCulling(g: any, force = false) {
+    if (!g || typeof g.getSize !== 'function') return;
+    if (cullingRafId) cancelAnimationFrame(cullingRafId);
+    cullingRafId = requestAnimationFrame(() => {
+      const [vw, vh] = g.getSize() as [number, number];
+      // 锟?getCanvasByViewport 璁＄畻褰撳墠鍙鐨勪笘鐣屽潗鏍囪寖鍥达紙锟?getViewportCenter 鏇村彲闈狅級
+      let x1 = -Infinity, y1 = -Infinity, x2 = Infinity, y2 = Infinity;
+      if (typeof g.getCanvasByViewport === 'function') {
+        const tl = g.getCanvasByViewport([0, 0]);
+        const br = g.getCanvasByViewport([vw, vh]);
+        if (tl && br) {
+          x1 = Math.min(tl[0], br[0]);
+          x2 = Math.max(tl[0], br[0]);
+          y1 = Math.min(tl[1], br[1]);
+          y2 = Math.max(tl[1], br[1]);
+        }
+      }
+      // 锟?200px 杈硅窛閬垮厤璺冲彉
+      const marginPx = VIEWPORT_MARGIN;
+      const zoom = g.getZoom?.() || 1;
+      const marginWorld = marginPx / zoom;
+      x1 -= marginWorld;
+      y1 -= marginWorld;
+      x2 += marginWorld;
+      y2 += marginWorld;
+
+      const nodes = g.getNodeData?.() || [];
+      const edges = g.getEdgeData?.() || [];
+      const visibilityMap: Record<string, 'visible' | 'hidden'> = {};
+      const visibleNodeIds = new Set<string>();
+
+      // 鑺傜偣 viewport culling
+      for (const node of nodes) {
+        const id = String(node.id);
+        const pos = g.getElementPosition(id);
+        if (!pos) {
+          visibilityMap[id] = 'visible';
+          visibleNodeIds.add(id);
+          continue;
+        }
+        const [px, py] = pos;
+        const inViewport = px >= x1 && px <= x2 && py >= y1 && py <= y2;
+        visibilityMap[id] = inViewport ? 'visible' : 'hidden';
+        if (inViewport) visibleNodeIds.add(id);
+      }
+
+      // 锟?viewport culling锛氳竟涓ょ鑺傜偣閮藉湪瑙嗗彛澶栨椂闅愯棌
+      for (const edge of edges) {
+        const id = String(edge.id);
+        const s = String(edge.source);
+        const t = String(edge.target);
+        const inView = visibleNodeIds.has(s) || visibleNodeIds.has(t);
+        visibilityMap[id] = inView ? 'visible' : 'hidden';
+      }
+
+      if (typeof g.setElementVisibility === 'function') {
+        g.setElementVisibility(visibilityMap, false);
+      }
+    });
+  }
+
+  /**
+   * Zoom LOD锛氭牴鎹綋鍓嶇缉鏀捐皟鏁磋妭鐐规樉绀哄瘑锟?
+   * - 閫氳繃淇敼 data.is_lod_full / data.is_lod_compact 璁╄妭锟?style 鍑芥暟鍝嶅簲
+   */
+  function applyZoomLOD(g: any) {
+    if (!g || typeof g.getZoom !== 'function') return;
+    let zoom: number;
+    try {
+      zoom = g.getZoom();
+    } catch {
+      return;
+    }
+    const lodLevel: 'minimal' | 'medium' | 'full' =
+      zoom < 0.5 ? 'minimal' : zoom < 0.85 ? 'medium' : 'full';
+    // 涓嶆瘡娆￠兘瑙﹀彂 style 閲嶇畻锛涙敼涓烘洿锟?element attributes 璁╄妭鐐规覆鏌撴椂璇诲彇
+    const nodes = g.getNodeData?.() || [];
+    for (const node of nodes) {
+      try {
+        const el = g.getElement?.(String(node.id));
+        if (el && el.style) {
+          (el.style as any).lodLevel = lodLevel;
+        }
+      } catch {
+        /* element may be off-canvas */
+      }
+    }
+  }
+
+  // 鐩戝惉 G6 鐢熷懡鍛ㄦ湡浜嬩欢锛岃Е鍙戣鍓笌 LOD
+  // 鍏抽棴鍔ㄧ敾浠ラ伩锟?culling 锟?animate transform 鍐茬獊
+  // 娉ㄦ剰锛氬竷灞€寮曟搸宸插湪 setData 鍓嶈绠楀ソ鎵€鏈夎妭鐐逛綅缃紝鏃犻渶鍚庡锟?
+  g6Graph.on('afterlayout', () => {
+    performViewportCulling(g6Graph, true);
+    applyZoomLOD(g6Graph);
+  });
+  g6Graph.on('afterrender', () => {
+    performViewportCulling(g6Graph, true);
+    graphChangeVersion.value++;
+  });
+  g6Graph.on('aftertransform', () => {
+    performViewportCulling(g6Graph, false);
+    applyZoomLOD(g6Graph);
+    graphChangeVersion.value++;
+  });
+  g6Graph.on('aftersizechange', () => {
+    performViewportCulling(g6Graph, true);
+  });
+  
+  // ==================== 鎷栨嫿鑺傜偣鏃舵洿鏂板叧鑱旇竟 ====================
+  /**
+   * 鑺傜偣鎷栨嫿鍚庯紝閲嶆柊璁＄畻涓庤鑺傜偣鐩歌繛鐨勬墍鏈夎竟鐨勬浜よ矾锟?
+   * 鍥犱负杈逛娇鐢ㄩ璁＄畻鐨勭粷瀵瑰潗鏍囷紝鎷栨嫿鍚庨渶瑕佸疄鏃舵洿锟?
+   */
+  g6Graph.on('node:dragend', (evt: any) => {
+    const nodeId = evt.target?.id || evt.id;
+    if (!nodeId) return;
+    try {
+      // 鑾峰彇鎷栨嫿鍚庤妭鐐圭殑鏂颁綅缃紙浠庤妭鐐规暟鎹腑璇诲彇锟?
+      const nodeData = g6Graph.getNodeData(nodeId);
+      if (!nodeData) return;
+      
+      // 浠庤妭锟?style 涓幏鍙栨柊浣嶇疆
+      const newX = nodeData.style?.x;
+      const newY = nodeData.style?.y;
+      if (newX === undefined || newY === undefined) return;
+
+      // 鏌ユ壘鎵€鏈変笌璇ヨ妭鐐圭浉杩炵殑锟?
+      const allEdges = g6Graph.getEdgeData() || [];
+      const relatedEdges = allEdges.filter((e: any) => e.source === nodeId || e.target === nodeId);
+
+      for (const edge of relatedEdges) {
+        const edgeId = edge.id;
+        const sourceId = edge.source;
+        const targetId = edge.target;
+        
+        const sourceData = g6Graph.getNodeData(sourceId);
+        const targetData = g6Graph.getNodeData(targetId);
+        if (!sourceData || !targetData) continue;
+
+        // 鑾峰彇鑺傜偣浣嶇疆锛堜紭鍏堜娇锟?style 涓殑浣嶇疆锟?
+        const sourceX = sourceData.style?.x ?? 0;
+        const sourceY = sourceData.style?.y ?? 0;
+        const targetX = targetData.style?.x ?? 0;
+        const targetY = targetData.style?.y ?? 0;
+        
+        const sourceW = sourceData.style?.size?.[0] ?? config.nodeWidth;
+        const sourceH = sourceData.style?.size?.[1] ?? config.nodeHeight;
+        const targetW = targetData.style?.size?.[0] ?? config.nodeWidth;
+        const targetH = targetData.style?.size?.[1] ?? config.nodeHeight;
+
+        const isSpouse = edge.data?.kind === 'spouse';
+
+        if (isSpouse) {
+          // 閰嶅伓杈癸細姘村钩鐩寸嚎
+          const isSourceMain = sourceX < targetX;
+          const mainX = isSourceMain ? sourceX : targetX;
+          const mainY = isSourceMain ? sourceY : targetY;
+          const spouseX = isSourceMain ? targetX : sourceX;
+          const mainW = isSourceMain ? sourceW : targetW;
+          const spouseW = isSourceMain ? targetW : sourceW;
+
+          const mainRight = mainX + mainW / 2;
+          const spouseLeft = spouseX - spouseW / 2;
+
+          g6Graph.updateEdgeData([{
+            id: edgeId,
+            style: {
+              orthPath: {
+                points: [
+                  { x: mainRight, y: mainY },
+                  { x: spouseLeft, y: mainY },
+                ],
+                type: 'orth',
+              },
+            },
+          }]);
+        } else {
+          // 鐖跺瓙杈癸細T 褰㈡浜よ矾锟?
+          const parentX = sourceX;
+          const parentY = sourceY;
+          const childX = targetX;
+          const childY = targetY;
+
+          const parentBottomX = parentX;
+          const parentBottomY = parentY + sourceH / 2;
+          const childTopX = childX;
+          const childTopY = childY - targetH / 2;
+
+          let points: { x: number; y: number }[];
+          if (parentBottomX === childTopX) {
+            points = [
+              { x: parentBottomX, y: parentBottomY },
+              { x: childTopX, y: childTopY },
+            ];
+          } else {
+            const branchY = parentBottomY + (childTopY - parentBottomY) * 0.5;
+            points = [
+              { x: parentBottomX, y: parentBottomY },
+              { x: parentBottomX, y: branchY },
+              { x: childTopX, y: branchY },
+              { x: childTopX, y: childTopY },
+            ];
+          }
+
+          g6Graph.updateEdgeData([{
+            id: edgeId,
+            style: {
+              orthPath: {
+                points,
+                type: 'orth',
+              },
+            },
+          }]);
+        }
+      }
+
+      // 鍒锋柊鐢诲竷
+      g6Graph.draw();
+    } catch (e) {
+      console.warn('[GenealogyTree] 鎷栨嫿鍚庢洿鏂拌竟璺緞澶辫触:', e);
+    }
+  });
+
+  // ==================== FPS + 鍙鎬ц鏁帮紙寮€鍙戞湡鍙娴嬫€э級 ====================
+  /**
+   * 鎬ц兘鍩嬬偣锟?
+   * - fps锟?0s 婊氬姩骞冲潎锛堟瘡锟?rAF 璁℃暟锟?
+   * - visible/total锛氳妭锟?culling 鍚庡彲瑙佹暟锟?/ 鎬绘暟锟?
+   * - renderMs锛氫笂锟?setData 锟?render 瀹屾垚鑰楁椂
+   * 浠呭湪 import.meta.env.DEV 鍚敤锛岄伩鍏嶇敓浜х幆澧冨紑閿€
+   */
+  if (import.meta.env.DEV) {
+    perfStats.showOverlay = true;
+    let frameCount = 0;
+    let lastFpsTs = performance.now();
+    const fpsLoop = () => {
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsTs >= 1000) {
+        perfStats.fps = Math.round((frameCount * 1000) / (now - lastFpsTs));
+        frameCount = 0;
+        lastFpsTs = now;
+        // 椤烘墜鍒锋柊鑺傜偣鍙鎬х粺锟?
+        try {
+          const allNodes = g6Graph.getNodeData?.() || [];
+          perfStats.totalNodes = allNodes.length;
+          let v = 0;
+          for (const n of allNodes) {
+            if (g6Graph.getElementVisibility?.(String(n.id)) !== 'hidden') v++;
+          }
+          perfStats.visibleNodes = v;
+          const allEdges = g6Graph.getEdgeData?.() || [];
+          perfStats.totalEdges = allEdges.length;
+          let ve = 0;
+          for (const e of allEdges) {
+            if (g6Graph.getElementVisibility?.(String(e.id)) !== 'hidden') ve++;
+          }
+          perfStats.visibleEdges = ve;
+          perfStats.zoom = g6Graph.getZoom?.() ?? 1;
+        } catch {
+          /* graph may be destroyed */
+        }
+      }
+      perfRafId = requestAnimationFrame(fpsLoop);
+    };
+    perfRafId = requestAnimationFrame(fpsLoop);
+  }
+
+  // Node click event 锟?check if click is on the icon (thumbnail)
+  g6Graph.on('node:click', (e: any) => {
+    const targetId = e.target?.id;
+    const isIconClick = targetId && String(targetId).includes('icon');
+    const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
+
+    if (isIconClick && nodeModel?.data?.thumbnail_url) {
+      // Click on thumbnail 锟?open image preview
+      const name = nodeModel.data.original?.full_name || nodeModel.label || '';
+      openImagePreview(nodeModel.data.thumbnail_url, name);
+      return;
+    }
+
+    if (nodeModel?.data?.original) {
+      genealogyStore.selectNode(nodeModel.data.original as GenealogyNode);
+    }
+  });
+
+  // Tooltip configuration 锟?鍗曚緥妯″紡锛岄伩鍏嶉噸澶嶅垱锟?閿€锟?DOM锛堟€ц兘浼樺寲锟?
+  let tooltipEl: HTMLDivElement | null = null;
+  const getTooltip = (): HTMLDivElement => {
+    if (!tooltipEl) {
+      tooltipEl = document.createElement('div');
+      tooltipEl.id = 'g6-tooltip';
+      tooltipEl.style.cssText = 'position:fixed;z-index:1000;pointer-events:none;';
+      document.body.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  };
+  const removeTooltip = () => {
+    if (tooltipEl) {
+      tooltipEl.remove();
+      tooltipEl = null; // 涓嬫閲嶆柊鍒涘缓锛堥伩鍏嶅眰绾ч棶棰橈級
+    }
+  };
+
+  g6Graph.on('node:mouseenter', (e: any) => {
+    const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
+    if (nodeModel?.data?.original) {
+      const data = nodeModel.data;
+      const name = data.original.full_name || data.original.label || '鏈煡';
+      const gender = data.gender === 'male' ? '锟? : '锟?;
+      const birthYear = data.birth_year ? `鍑虹敓: ${data.birth_year}` : '';
+      const deathYear = data.death_year ? `鍘讳笘: ${data.death_year}` : '';
+      const status = data.is_living ? '鍦ㄤ笘' : '宸叉晠';
+      
+      const tooltip = getTooltip();
+      tooltip.innerHTML = `
+        <div style="padding:8px 12px;min-width:140px;background:rgba(255,255,255,0.98);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);border:1px solid rgba(201,169,110,0.2);">
+          <div style="font-weight:600;color:#5D4037;margin-bottom:4px;">${name}</div>
+          <div style="display:flex;gap:8px;font-size:12px;color:#7F8C8D;">
+            <span>${gender}</span>
+            <span>${status}</span>
+          </div>
+          ${birthYear ? `<div style="font-size:12px;color:#999;margin-top:4px;">${birthYear} ${deathYear}</div>` : ''}
+        </div>
+      `;
+      
+      const event = e.originalEvent as MouseEvent;
+      tooltip.style.left = `${event.clientX + 15}px`;
+      tooltip.style.top = `${event.clientY + 15}px`;
+      
+      g6Graph.once('node:mouseleave', removeTooltip);
+      document.addEventListener('click', removeTooltip, { once: true });
+    }
+  });
+
+  try {
+    g6Graph.setData(graphData);
+    await g6Graph.render();
+    graph.value = g6Graph;
+    // 璋冭瘯鐢細锟?G6 瀹炰緥鏆撮湶鍒板叏灞€锛屾柟渚挎帶鍒跺彴妫€鏌ヨ妭锟?杈瑰潗锟?
+    if (import.meta.env.DEV) {
+      (window as any).__g6_graph__ = g6Graph;
+    }
+
+    // 搴旂敤甯冨眬寮曟搸璁＄畻鐨勮鍙ｅ彉鎹紙缂╂斁 + 灞呬腑锟?
+    // 1000 鑺傜偣澶х敾甯冩椂 G6 鍘熺敓 fitView 浼氳繃搴︾缉灏忓埌 0.01锛堣妭鐐圭湅涓嶆竻锛夛紝
+    // 鏀圭敤 autoFit 绠楀嚭锟?zoom + minZoom 0.25 鍏滃簳锛屾墜锟?translateBy 灞呬腑
+    if (
+      typeof g6Graph.zoomTo === 'function' &&
+      typeof g6Graph.translateBy === 'function' &&
+      typeof g6Graph.getViewportByCanvas === 'function'
+    ) {
+      await g6Graph.zoomTo(viewportConfig.zoom, { duration: 0 });
+      const [canvasW, canvasH] = g6Graph.getSize();
+      const canvasCenter: [number, number] = [canvasW / 2, canvasH / 2];
+      const contentVp = g6Graph.getViewportByCanvas([viewportConfig.centerX, viewportConfig.centerY]);
+      const delta: [number, number] = [
+        canvasCenter[0] - contentVp[0],
+        canvasCenter[1] - contentVp[1],
+      ];
+      await g6Graph.translateBy(delta, { duration: 0 });
+    }
+
+    // 缁戝畾 ResizeObserver锛屽悗缁鍣ㄥ昂瀵稿彉鍖栵紙绐楀彛 resize / 闈㈡澘灞曞紑锛夎嚜锟?setSize
+    setupGraphResize(g6Graph);
+    // 棣栧睆鐒︾偣绛栫暐锛氬綋 viewportConfig 宸插熀浜庝富浼犳壙鏍戝眳涓椂锛堝弬瑙佷笂锟?viewportConfig 璁＄畻锛夛紝
+    // 杩涗竴姝ョ敤 focusElement 閿佸畾鍒颁富鏍硅妭鐐癸紝缂╂斁淇濇寔涓嶅彉锛堜富浼犳壙鏍戝凡缁忓悎閫傛樉绀猴級
+    const totalNodeCount = graphData.nodes?.length || 0;
+    const rootId = genealogyStore.mainLineage?.[0];
+    if (rootId && totalNodeCount <= 800 && typeof g6Graph.focusElement === 'function') {
+      try {
+        g6Graph.focusElement(rootId, { duration: 0 });
+      } catch (err) {
+        console.warn('[GenealogyTree] focusElement 澶辫触锛屼繚锟?fitView:', err);
+      }
+    }
+    // 娓叉煋瀹屾垚锛氳繘搴︽潯蹇€熻窇婊″埌 100% 鍐嶅欢杩熷叧锟?
+    finishLoading();
+  } catch (e: any) {
+    console.error('[GenealogyTree] G6 娓叉煋澶辫触:', e);
+    ElMessage.error(`娓叉煋澶辫触锟?{e?.message || '鏈煡閿欒'}`);
+    failLoading();
+  }
+};
+
+/**
+ * 闃叉姈锟?initGraph 鍖呰锟?
+ * 蹇€熷垏鎹㈣鍥炬ā锟?/ 甯冨眬鏂瑰悜鏃讹紝鍙栨秷涓婁竴娆℃湭鎵ц鐨勯噸寤猴紝閬垮厤鎬ц兘娴垂
+ */
+function debouncedInitGraph(data: GenealogyNode) {
+  if (initGraphDebounceTimer !== null) {
+    clearTimeout(initGraphDebounceTimer);
+  }
+  initGraphDebounceTimer = window.setTimeout(() => {
+    initGraphDebounceTimer = null;
+    initGraph(data);
+  }, 150);
+}
+
+// ==================== Search Handler ====================
+
+/** 鎼滅储闃叉姈璁℃椂鍣紙姣忔杈撳叆 250ms 鍚庢墽琛屾悳绱級 */
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const handleSearchDebounced = () => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => handleSearch(), 250);
+};
+
+const handleSearch = () => {
+  if (!graph.value || !genealogyStore.treeData) return;
+  highlightNodeIds.value.clear();
+  
+  if (searchKeyword.value) {
+    let count = 0;
+    // 鐩存帴锟?G6 宸插姞杞界殑鍥炬暟鎹亶鍘嗭紝閬垮厤鍐嶆 transformToG6Data 鍏ㄩ噺杞崲
+    const allNodes = graph.value.getNodeData?.() || [];
+    for (const node of allNodes) {
+      if (matchesSearch(node)) {
+        highlightNodeIds.value.add(String(node.id));
+        count++;
+      }
+    }
+    searchResultCount.value = count;
+    
+    if (count > 0) {
+      ElMessage.info(`鎵惧埌 ${count} 涓尮閰嶇粨鏋渀);
+      const firstMatchId = highlightNodeIds.value.values().next().value;
+      if (firstMatchId) {
+        setTimeout(() => {
+          try {
+            graph.value.focusElement(firstMatchId, { duration: 500 });
+          } catch {
+            if (import.meta.env.DEV) console.log('Focus element failed');
+          }
+        }, 300);
+      }
+    } else {
+      ElMessage.warning('鏈壘鍒板尮閰嶇粨锟?);
+    }
+  } else {
+    searchResultCount.value = 0;
+  }
+  // 澧為噺鏇存柊 G6 娓叉煋锛堜笉鍐嶅叏閲忛噸寤猴級
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
+};
+
+const clearSearch = () => {
+  searchKeyword.value = '';
+  highlightNodeIds.value.clear();
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
+};
+
+// ==================== Layout Controls ====================
+
+const toggleLayout = () => {
+  layoutDirection.value = layoutDirection.value === 'TB' ? 'LR' : 'TB';
+  ElMessage.success(`宸插垏鎹负${layoutDirection.value === 'TB' ? '绾靛悜' : '妯悜'}甯冨眬`);
+  if (genealogyStore.treeData) {
+    debouncedInitGraph(genealogyStore.treeData);
+  }
+};
+
+const handleViewModeChange = (mode: ViewMode) => {
+  genealogyStore.setViewMode(mode);
+  if (genealogyStore.treeData) {
+    debouncedInitGraph(genealogyStore.treeData);
+  }
+};
+
+const handleGenderFilterChange = () => {
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
+};
+
+const handlePhotoFilterChange = () => {
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
+};
+
+const refreshGraph = () => {
+  if (graph.value && genealogyStore.treeData) {
+    initGraph(genealogyStore.treeData);
+  }
+};
+
+// ==================== Zoom Controls ====================
+
+const zoomIn = () => {
+  if (graph.value) {
+    const zoom = graph.value.getZoom();
+    graph.value.zoomTo(zoom * 1.2);
+  }
+};
+
+const zoomOut = () => {
+  if (graph.value) {
+    const zoom = graph.value.getZoom();
+    graph.value.zoomTo(zoom / 1.2);
+  }
+};
+
+const resetZoom = () => {
+  if (graph.value) {
+    graph.value.fitView();
+  }
+};
+
+const focusMainLineage = () => {
+  if (!graph.value || genealogyStore.mainLineage.length === 0) {
+    ElMessage.info('鏈壘鍒颁富浼犳壙绾胯矾鏁版嵁');
+    return;
+  }
+  const rootId = genealogyStore.mainLineage[0];
+  try {
+    graph.value.focusElement(rootId);
+  } catch {
+    ElMessage.info('鏃犳硶鑱氱劍锛岃鎵嬪姩缂╂斁瀹氫綅');
+  }
+};
+
+const addPerson = () => {
+  ElMessage.info('娣诲姞浜哄憳鍔熻兘寮€鍙戜腑');
+};
+
+// ==================== 鎬ц兘鍘嬫祴锛堝紑鍙戞湡锟?====================
+/**
+ * 鐢熸垚 1000 涓悎鎴愯妭鐐癸紙9 浠ｆ爲褰級+ spouse 杈癸紝楠岃瘉 viewport culling 鏀剁泭锟?
+ * - 锟?dev 妯″紡鍙偣
+ * - 涓嶈 API锛岀函鍓嶇鐢熸垚锛岃烦杩囧悗锟?
+ * - 瀹屾垚鍚庤皟 refreshGraph 璧颁竴锟?setData/render 娴佹按锟?
+ * - 璁板綍 setData 锟?render 瀹屾垚鑰楁椂锟?perfStats.renderMs
+ */
+async function runPerfTest() {
+  if (perfTestLoading.value) return;
+  perfTestLoading.value = true;
+  try {
+    const TOTAL = 1000;
+    const FANOUT = 3; // 姣忎唬姣忎釜鑺傜偣鏈€锟?3 涓瓙濂筹紝9 浠ｇ害 3000 鑺傜偣鈥斺€旀敹涓€鐐规寜 TOTAL 鎴柇
+    const root: any = {
+      id: 'perf-1',
+      full_name: '鏍硅妭锟?,
+      gender: 'male',
+      is_living: true,
+      has_photo: false,
+    };
+    let count = 1;
+    let frontier: any[] = [root];
+    const maleNames = ['锟?, '寤哄浗', '锟?, '锟?, '锟?, '锟?, '锟?, '锟?, '锟?, '锟?];
+    const femaleNames = ['锟?, '锟?, '锟?, '锟?, '锟?, '锟?, '锟?, '锟?, '锟?, '锟?];
+
+    while (count < TOTAL && frontier.length > 0) {
+      const next: any[] = [];
+      for (const parent of frontier) {
+        const kids = Math.min(FANOUT, TOTAL - count);
+        for (let i = 0; i < kids; i++) {
+          count++;
+          const isMale = (count + i) % 2 === 0;
+          const name = isMale
+            ? maleNames[count % maleNames.length] + (count > 99 ? count : '')
+            : femaleNames[count % femaleNames.length] + (count > 99 ? count : '');
+          const child: any = {
+            id: `perf-${count}`,
+            full_name: name,
+            gender: isMale ? 'male' : 'female',
+            is_living: true,
+            has_photo: false,
+          };
+          parent.children = parent.children || [];
+          parent.children.push(child);
+          next.push(child);
+          if (count >= TOTAL) break;
+        }
+        if (count >= TOTAL) break;
+      }
+      frontier = next;
+    }
+
+    // 缁欐牴鑺傜偣涓€锟?spouse 杈癸紝楠岃瘉 spouse 杈圭粯鍒舵槸鍚︽锟?
+    root.spouses = [
+      {
+        id: 'perf-spouse-1',
+        name: '锟?锟?,
+        gender: 'female',
+        family_id: 'perf-fam-1',
+        marriage_order: 1,
+        is_current: true,
+        end_reason: null,
+      },
+    ];
+
+    genealogyStore.setTreeData(root);
+    ElMessage.info(`宸茬敓锟?${count} 涓悎鎴愯妭鐐癸紝寮€濮嬫覆鏌撴祴璇曗€);
+
+    // 閲嶆柊鍒濆鍖栧浘锛屽苟娴嬮噺鑰楁椂
+    const t0 = performance.now();
+    await initGraph(root);
+    const t1 = performance.now();
+    perfStats.renderMs = Math.round(t1 - t0);
+    ElMessage.success(`娓叉煋瀹屾垚锛岃€楁椂 ${perfStats.renderMs}ms`);
+  } catch (e: any) {
+    ElMessage.error(`鍘嬫祴澶辫触锟?{e?.message || e}`);
+  } finally {
+    perfTestLoading.value = false;
+  }
+}
+
+// ==================== 渚ф爮缂栬緫鎶藉眽锛圥ersonEditDrawer锟?====================
+
+/** 缂栬緫鎶藉眽鏄惁鎵撳紑锛堜笌 genealogyStore.selectedNode.id 鏄惁瀛樺湪鑱斿姩锟?*/
+const editDrawerOpen = computed(() => !!genealogyStore.selectedNode?.id);
+
+/** 鍏抽棴鎶藉眽锛氭竻锟?selectedNode */
+function handleDrawerClose() {
+  genealogyStore.selectNode(null);
+}
+
+/** 鎶藉眽鍐呯紪杈戜繚瀛樻垚鍔燂細鎶婅繑鍥炵殑 person 澧為噺鏇存柊鍒扮敾甯冿紙涓嶅啀鍏ㄩ噺閲嶅缓锟?*/
+function handleDrawerUpdated(updated: GenealogyNode) {
+  // 鐢ㄨ繑鍥炵殑鑺傜偣鏇挎崲 store 涓殑 selectedNode锛堝墠绔紦瀛樼殑寮曠敤锟?
+  genealogyStore.selectNode(updated);
+
+  if (!graph.value || !genealogyStore.treeData) {
+    refreshGraph();
+    return;
+  }
+
+  try {
+    const nodeId = String(updated.id);
+    const displayName = (updated as any).full_name || (updated as any).name || (updated as any).label || '';
+    const birthYear = updated.birth_date ? new Date(updated.birth_date).getFullYear() : undefined;
+    const deathYear = updated.death_date ? new Date(updated.death_date).getFullYear() : undefined;
+    const gender = (updated as any).gender;
+    const hasPhoto = !!(updated as any).has_photo;
+    const thumbnailUrl = (updated as any).thumbnail_url || (updated as any).avatar_url || '';
+    const avatarUrl = (updated as any).avatar_url || '';
+
+    // 璇诲彇褰撳墠 G6 鑺傜偣鏁版嵁骞朵笌鏂版暟鎹悎锟?
+    const allNodes = graph.value.getNodeData() || [];
+    const existing = allNodes.find((n: any) => String(n.id) === nodeId);
+
+    graph.value.updateNodeData([{
+      id: nodeId,
+      label: displayName,
+      data: {
+        ...(existing?.data || {}),
+        gender,
+        birth_year: birthYear,
+        death_year: deathYear,
+        has_photo: hasPhoto,
+        thumbnail_url: thumbnailUrl,
+        avatar_url: avatarUrl,
+        original: updated,
+      },
+    }]);
+    graph.value.draw();
+  } catch (e) {
+    console.warn('[GenealogyTree] 缂栬緫澧為噺鏇存柊澶辫触锛屽洖閫€鍒板叏閲忛噸锟?, e);
+    refreshGraph();
+  }
+}
+
+/** 鎶藉眽鍐呯偣鍑诲叧绯讳汉锛氳仛鐒﹁鑺傜偣锛堟敞鎰忥細璺ㄥ瓙鏍戠劍鐐逛腑蹇冧細琚浛鎹紝
+ *  鏈湡瀹炵幇鑱氱劍骞跺埛鏂扮敾甯冿紱涓嬩竴鏈熷彲浼樺寲涓哄眬閮ㄩ珮锟?/ 涓嶉噸寤猴級 */
+function handleDrawerNavigate(personId: string | number) {
+  const target = findNodeInTree(genealogyStore.treeData, String(personId));
+  if (target) {
+    genealogyStore.selectNode(target);
+    // 澧為噺閫変腑 + 鑱氱劍锛岄伩鍏嶅叏閲忛噸锟?
+    if (graph.value && typeof graph.value.draw === 'function') {
+      graph.value.draw();
+    }
+    try {
+      graph.value?.focusElement?.(String(personId), { duration: 500 });
+    } catch { /* graph may be mid-destroy */ }
+  } else {
+    ElMessage.info('璇ヤ汉鐗╀笉鍦ㄥ綋鍓嶅瓙鏍戝唴锛岃璋冩暣鏍硅妭鐐瑰悗鏌ョ湅');
+  }
+}
+
+/** 鎶藉眽锟?娣诲姞濠氬Щ"锛氬厛鍏抽棴鎶藉眽锛堣閫夋嫨鍣ㄦ帴绠★級锛屽啀 emit 鎻愮ず鐢ㄦ埛鍘婚€夌浜屼綅 */
+function handleDrawerCreateMarriage(withPersonId: string | number) {
+  ElMessage.info('璇蜂粠鐢诲竷鍙抽敭鎴栭《锟?濠氬Щ"鑿滃崟閫夋嫨绗簩浣嶉厤鍋跺畬鎴愬垱锟?);
+  // TODO(P2)锛氭澶勫彲鏀逛负鎵撳紑 AddMarriageDialog锛屼紶锟?withPersonId 浣滀负棰勶拷?
+}
+
+/**
+ * 鎶藉眽鍐呭彂鐢熴€屽垹闄や汉锟?/ 鍒犻櫎濠氬Щ銆嶏細鍒锋柊鏁存爲锛堟爲缁撴瀯宸插彉锛岀敾甯冭閲嶅缓锟?
+ * PersonEditDrawer 鑷韩宸茬粡璋冪敤锟?store / API 瀹屾垚浜嗗啓鍏ワ紝杩欓噷鍙渶閲嶇敾锟?
+ */
+function handleDrawerMutated() {
+  // 娓呮帀閫変腑锛堣鍒犻櫎鐨勪汉鐗╁璞″凡鏃犳晥锟?
+  genealogyStore.selectNode(null);
+  refreshGraph();
+}
+
+function findNodeInTree(root: GenealogyNode | null, id: string): GenealogyNode | null {
+  if (!root) return null;
+  if (String(root.id) === id) return root;
+  for (const c of root.children || []) {
+    const found = findNodeInTree(c, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+// ==================== Watch & Lifecycle ====================
+
+watch(
+  () => genealogyStore.selectedNode,
+  () => {
+    if (graph.value && typeof graph.value.draw === 'function') {
+      graph.value.draw();
+    }
+  },
+);
+
+onMounted(async () => {
+  await nextTick();
+  const rootId = props.rootPersonId || '1';
+  try {
+    const data = await fetchTreeData(rootId);
+    if (data) {
+      const treeData = (data as any).data || data;
+      genealogyStore.setTreeData(treeData);
+      await initGraph(treeData);
+    }
+  } catch {
+    // 閿欒宸插湪 fetchTreeData 涓缃埌 errorState锛岀敾甯冨皢灞曠ず閿欒鍗犱綅
+  }
+});
+
+onUnmounted(() => {
+  // 娓呯悊杩涘害瀹氭椂鍣紝閬垮厤缁勪欢鍗歌浇鍚庡畾鏃跺櫒杩樺湪锟?
+  clearProgressTimer();
+  clearHideTimer();
+  teardownGraphResize();
+  // 娓呯悊 initGraph 闃叉姈瀹氭椂锟?
+  if (initGraphDebounceTimer !== null) {
+    clearTimeout(initGraphDebounceTimer);
+    initGraphDebounceTimer = null;
+  }
+  // 娓呯悊鎼滅储闃叉姈瀹氭椂锟?
+  if (searchDebounceTimer !== null) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+  // 娓呯悊鎬ц兘鍩嬬偣 rAF
+  if (perfRafId) {
+    cancelAnimationFrame(perfRafId);
+    perfRafId = 0;
+  }
+  if (cullingRafId) {
+    cancelAnimationFrame(cullingRafId);
+    cullingRafId = 0;
+  }
+  if (graph.value) {
+    graph.value.destroy();
+    graph.value = null;
+  }
+});
+
+/** 鐢诲竷鍙樻洿鐗堟湰鍙凤紙姣忔 G6 娓叉煋鍚庨€掑锛岀敤浜庨┍锟?minimap 绛夊閮ㄧ粍浠剁殑澧為噺鍒锋柊锟?*/
+const graphChangeVersion = ref(0);
+
+defineExpose({
+  zoomIn,
+  zoomOut,
+  resetZoom,
+  addPerson,
+  graphChangeVersion,
+  refresh: refreshGraph,
+  focusMainLineage,
+  /**
+   * 楦熺灠鍥炬ˉ鎺ワ細杩斿洖鑺傜偣浣嶄笌瑙嗗彛淇℃伅锛屼緵 TreeMinimap 鍚屾娓叉煋
+   * - 杩斿洖 null 琛ㄧず鐢诲竷灏氭湭鍒濆鍖栵紙M2 楦熺灠鍥惧湪鐢诲竷 ready 鍚庢墠鏄剧ず锟?
+   * - 鑺傜偣浣嶇疆锟?G6 getElementPosition 璇诲彇锛堢敾甯冨潗鏍囷紝涓嶆槸灞忓箷鍧愭爣锟?
+   * - 缂╃暐鍥剧粍浠惰嚜琛屾崲绠楀埌 200x150 鐢诲竷鍐呭潗鏍囷紙涓庝吉浠ｇ爜 搂5.4 瀵归綈锟?
+   */
+  getMinimapSnapshot() {
+    if (!graph.value || typeof graph.value.getNodeData !== 'function') return null;
+    try {
+      const [vw, vh] = graph.value.getSize();
+      const [cx, cy] = graph.value.getViewportCenter();
+      const zoom = graph.value.getZoom();
+      const nodes = graph.value.getNodeData() || [];
+      const points = nodes.map((n: any) => {
+        const pos = graph.value.getElementPosition(String(n.id));
+        return {
+          id: String(n.id),
+          x: pos?.[0] ?? 0,
+          y: pos?.[1] ?? 0,
+          gender: n.data?.gender,
+          isMain: n.data?.is_main_lineage === true,
+          isLiving: n.data?.is_living === true,
+        };
+      });
+      return { nodes: points, viewport: { cx, cy, vw, vh, zoom } };
+    } catch {
+      return null;
+    }
+  },
+  /**
+   * 楦熺灠鍥炬嫋鎷借烦杞細绉诲姩涓荤敾甯冭鍙ｄ娇 (canvasX, canvasY) 灞呬腑
+   * - G6 v5 translateTo 鎺ュ彈鐢诲竷鍧愭爣
+   * - 璺宠浆鍚庤嚜锟?aftertransform 锟?M2/M3 鑷姩瑙﹀彂楦熺灠鍥鹃噸锟?
+   */
+  panTo(canvasX: number, canvasY: number) {
+    try {
+      graph.value?.translateTo?.([canvasX, canvasY]);
+    } catch {
+      /* graph may be mid-destroy */
+    }
+  },
+  /**
+   * 浠ｉ檯鎬绘暟锛圡3锛夛細璁＄畻鏍戞渶澶ф繁搴︼紙鏍逛负锟?1 浠ｏ級
+   * - 閬嶅巻 treeData 瀛愯妭鐐圭疮锟?depth
+   * - 鐢ㄤ簬 TreeGenerationSlider 鐨勬粦鍧楀埢搴﹁寖锟?
+   */
+  getTotalGenerations(): number {
+    const tree = genealogyStore.treeData;
+    if (!tree) return 1;
+    const computeDepth = (node: any, d: number): number => {
+      const children = node.children || [];
+      if (!children.length) return d;
+      let max = d;
+      for (const c of children) {
+        const childDepth = computeDepth(c, d + 1);
+        if (childDepth > max) max = childDepth;
+      }
+      return max;
+    };
+    return computeDepth(tree, 1);
+  },
+  /**
+   * 鑱氱劍鏌愯妭鐐癸紙M3锛夛細鍖呰 G6 focusElement
+   * - 鐢ㄤ簬 TreeGenerationSlider 鐐瑰嚮浠ｉ檯鍒诲害鏃跺畾浣嶅埌璇ヤ唬闄呯殑浠ｈ〃鑺傜偣
+   */
+  focusNode(id: string | number) {
+    try {
+      graph.value?.focusElement?.(String(id));
+    } catch {
+      /* graph may be mid-destroy */
+    }
+  },
+});
+</script>
+
+<template>
+  <div class="genealogy-tree-container">
+    <!-- Compact Toolbar (鍗曡甯冨眬锛岄殣锟?label 鑺傜渷绌洪棿) -->
+    <div class="tree-toolbar" :class="{ 'is-collapsed': toolbarCollapsed }">
+      <el-button
+        class="toolbar-toggle"
+        :icon="toolbarCollapsed ? Expand : Fold"
+        circle
+        size="small"
+        @click="toolbarCollapsed = !toolbarCollapsed"
+        :title="toolbarCollapsed ? '灞曞紑宸ュ叿锟? : '鏀惰捣宸ュ叿锟?"
+      />
+
+      <!-- Search (always visible, 鏈€甯哥敤) -->
+      <el-input
+        v-model="searchKeyword"
+        :placeholder="searchResultCount > 0 ? `鎵惧埌 ${searchResultCount} 涓粨鏋渀 : '鎼滅储濮撳悕锟?"
+        :prefix-icon="Search"
+        clearable
+        @keyup.enter="handleSearch"
+        @clear="clearSearch"
+        @input="handleSearchDebounced"
+        size="small"
+        style="width: 180px"
+        :class="{ 'has-search-result': searchResultCount > 0 }"
+      />
+
+      <el-divider direction="vertical" />
+
+      <!-- View Mode -->
+      <el-button-group>
+        <el-tooltip content="绱у噾瑙嗗浘" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'compact' ? 'primary' : 'default'"
+            @click="handleViewModeChange('compact')"
+            size="small"
+          >
+            <el-icon><List /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="璇︾粏瑙嗗浘" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'detailed' ? 'primary' : 'default'"
+            @click="handleViewModeChange('detailed')"
+            size="small"
+          >
+            <el-icon><Grid /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="鑲栧儚瑙嗗浘" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'portrait' ? 'primary' : 'default'"
+            @click="handleViewModeChange('portrait')"
+            size="small"
+          >
+            <el-icon><User /></el-icon>
+          </el-button>
+        </el-tooltip>
+      </el-button-group>
+
+      <el-divider direction="vertical" />
+
+      <!-- Filter -->
+      <el-select
+        v-model="filterGender"
+        @change="handleGenderFilterChange"
+        size="small"
+        style="width: 72px"
+        title="鎸夋€у埆绛涳拷?
+      >
+        <el-option label="鍏ㄩ儴" value="all" />
+        <el-option label="锟? value="male" />
+        <el-option label="锟? value="female" />
+      </el-select>
+
+      <el-tooltip content="浠呮樉绀烘湁鐓х墖" placement="bottom">
+        <el-checkbox v-model="showOnlyWithPhotos" @change="handlePhotoFilterChange" size="small">
+          <el-icon><Picture /></el-icon>
+        </el-checkbox>
+      </el-tooltip>
+
+      <el-divider direction="vertical" />
+
+      <!-- Layout -->
+      <el-tooltip content="鍒囨崲绾靛悜/妯悜甯冨眬" placement="bottom">
+        <el-button
+          @click="toggleLayout"
+          :icon="layoutDirection === 'TB' ? Grid : Rank"
+          size="small"
+          :type="layoutDirection === 'TB' ? 'primary' : 'default'"
+          style="min-width: 36px"
+        />
+      </el-tooltip>
+
+      <div class="toolbar-spacer" />
+
+      <!-- Zoom Controls -->
+      <el-button-group class="zoom-controls">
+        <el-tooltip content="鏀惧ぇ" placement="bottom">
+          <el-button @click="zoomIn" size="small">
+            <el-icon><ZoomIn /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="缂╁皬" placement="bottom">
+          <el-button @click="zoomOut" size="small">
+            <el-icon><ZoomOut /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="閫傞厤瑙嗗浘" placement="bottom">
+          <el-button @click="resetZoom" size="small">
+            <el-icon><ScaleToOriginal /></el-icon>
+          </el-button>
+        </el-tooltip>
+      </el-button-group>
+
+      <el-tooltip content="鑱氱劍涓讳紶鎵跨嚎锟? placement="bottom">
+        <el-button
+          @click="focusMainLineage"
+          size="small"
+          :type="genealogyStore.mainLineage.length ? 'warning' : 'default'"
+          :disabled="!genealogyStore.mainLineage.length"
+        >
+          <el-icon><Connection /></el-icon>
+        </el-button>
+      </el-tooltip>
+
+      <el-tooltip content="鍒锋柊鏃忚氨" placement="bottom">
+        <el-button @click="refreshGraph" :icon="Refresh" size="small" />
+      </el-tooltip>
+
+      <el-tooltip content="娣诲姞鎴愬憳" placement="bottom">
+        <el-button type="primary" @click="addPerson" :icon="Plus" size="small" />
+      </el-tooltip>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="tree-stats" v-if="genealogyStore.treeData">
+      <span class="stat-item">
+        鎬讳汉锟? <strong>{{ genealogyStore.totalPersons || '-' }}</strong>
+      </span>
+      <span class="stat-divider">|</span>
+      <span class="stat-item">
+        瑙嗗浘: <strong>{{ genealogyStore.viewMode === 'compact' ? '绱у噾' : genealogyStore.viewMode === 'detailed' ? '璇︾粏' : '鑲栧儚' }}</strong>
+      </span>
+      <span class="stat-divider">|</span>
+      <span class="stat-item">
+        甯冨眬: <strong>{{ layoutDirection === 'TB' ? '绾靛悜' : '妯悜' }}</strong>
+      </span>
+      <span class="stat-item lineage-hint" v-if="genealogyStore.mainLineage.length">
+        <el-icon><Connection /></el-icon> 閲戣壊楂樹寒涓轰富浼犳壙绾胯矾
+      </span>
+    </div>
+
+    <!-- Performance overlay (dev only) -->
+        <div v-if="perfStats.showOverlay" class="perf-overlay">
+          <div class="perf-row">
+            <span class="perf-label">FPS</span>
+            <span class="perf-value" :class="perfStats.fps >= 50 ? 'good' : perfStats.fps >= 30 ? 'ok' : 'bad'">
+              {{ perfStats.fps }}
+            </span>
+          </div>
+          <div class="perf-row">
+            <span class="perf-label">鑺傜偣</span>
+            <span class="perf-value">{{ perfStats.visibleNodes }} / {{ perfStats.totalNodes }}</span>
+          </div>
+          <div class="perf-row">
+            <span class="perf-label">锟?/span>
+            <span class="perf-value">{{ perfStats.visibleEdges }} / {{ perfStats.totalEdges }}</span>
+          </div>
+          <div class="perf-row">
+            <span class="perf-label">Zoom</span>
+            <span class="perf-value">{{ perfStats.zoom.toFixed(2) }}</span>
+          </div>
+          <div class="perf-row">
+            <span class="perf-label">娓叉煋</span>
+            <span class="perf-value">{{ perfStats.renderMs }}ms</span>
+          </div>
+          <button
+            v-if="isDev"
+            class="perf-test-btn"
+            :disabled="perfTestLoading"
+            @click="runPerfTest"
+          >
+            {{ perfTestLoading ? '鐢熸垚涓拷? : '鍘嬫祴 1000 鑺傜偣' }}
+          </button>
+        </div>
+    
+        <!-- Loading with staged progress -->
+    <div v-if="loading" class="tree-loading">
+      <div class="loading-content">
+        <div class="loading-icon-wrapper">
+          <el-icon class="is-loading" :size="44"><Loading /></el-icon>
+        </div>
+        <p class="loading-text">{{ loadingMessage }}</p>
+        <el-progress
+          :percentage="Math.floor(loadingPercent)"
+          :stroke-width="6"
+          :show-text="false"
+          :duration="0"
+          color="#C9A96E"
+          class="loading-progress"
+        />
+        <div class="loading-meta">
+          <span class="loading-percent">{{ Math.floor(loadingPercent) }}%</span>
+          <span class="loading-stage-hint" v-if="loadingStage">
+            {{ stageLabelMap[loadingStage] }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 閿欒鍗犱綅锛氭棌璋辨爲鍔犺浇澶辫触鏃舵樉绀猴紝骞舵彁渚涢噸璇曞叆锟?-->
+    <div v-else-if="errorState" class="tree-error-placeholder">
+      <div class="error-card">
+        <el-icon :size="56" color="#C9A96E"><Warning /></el-icon>
+        <h3 class="error-title">鏃忚氨鏍戞殏涓嶅彲锟?/h3>
+        <p class="error-message">{{ errorState.message }}</p>
+        <p class="error-code" v-if="errorState.code">閿欒鐮侊細{{ errorState.code }}</p>
+        <div class="error-actions">
+          <el-button type="primary" :icon="Refresh" @click="retryLoad">閲嶆柊鍔犺浇</el-button>
+          <el-button :icon="User" @click="$router?.push?.('/login')" v-if="errorState.code === 401">閲嶆柊鐧诲綍</el-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Graph Container -->
+    <div ref="container" class="genealogy-tree-canvas" v-show="!loading && !errorState"></div>
+
+    <!-- 渚ф爮缂栬緫鎶藉眽锛氶€変腑鑺傜偣鍚庝粠鍙充晶鍒掑嚭 -->
+    <PersonEditDrawer
+      :person-id="editDrawerOpen ? genealogyStore.selectedNode?.id : null"
+      :person="genealogyStore.selectedNode"
+      :can-edit="true"
+      @close="handleDrawerClose"
+      @updated="handleDrawerUpdated"
+      @navigate="handleDrawerNavigate"
+      @create-marriage="handleDrawerCreateMarriage"
+      @mutated="handleDrawerMutated"
+    />
+
+    <!-- 鍥剧墖棰勮锛氱偣鍑荤缉鐣ュ浘灞曞紑澶у浘 -->
+    <ImagePreview
+      v-model="previewVisible"
+      :src="previewSrc"
+      :name="previewName"
+    />
+  </div>
+</template>
+
+<style scoped>
+.genealogy-tree-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #FAF8F5 0%, #F5F0E8 100%);
+  overflow: hidden;
+}
+
+.tree-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 252, 248, 0.95);
+  backdrop-filter: blur(12px);
+  padding: 6px 12px;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(93, 64, 55, 0.08);
+  border: 1px solid rgba(201, 169, 110, 0.22);
+  transition: padding 0.2s ease;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tree-toolbar::-webkit-scrollbar { display: none; }
+
+/* 鎶樺彔鎬侊細闅愯棌 divider 涓庢瑕佹寜閽紝鍙繚锟?toggle + 鎼滅储 + 缂╂斁 + 娣诲姞 */
+.tree-toolbar.is-collapsed :deep(.el-divider),
+.tree-toolbar.is-collapsed .el-button-group:not(.zoom-controls),
+.tree-toolbar.is-collapsed > .el-checkbox,
+.tree-toolbar.is-collapsed > .el-select {
+  display: none !important;
+}
+.tree-toolbar.is-collapsed {
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.toolbar-toggle {
+  flex-shrink: 0;
+}
+
+.tree-toolbar :deep(.el-divider--vertical) {
+  height: 18px;
+  margin: 0;
+}
+
+.tree-toolbar :deep(.el-input--small .el-input__wrapper) {
+  padding: 0 8px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(201, 169, 110, 0.3) inset;
+}
+
+.tree-toolbar :deep(.el-checkbox) {
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.toolbar-search {
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.actions-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zoom-controls {
+  background: rgba(201, 169, 110, 0.1);
+  border-radius: 8px;
+}
+
+.zoom-controls :deep(.el-button) {
+  padding: 6px 10px;
+}
+
+.view-mode-switcher .el-button.is-primary {
+  background: #C9A96E;
+  border-color: #C9A96E;
+}
+
+.view-mode-switcher .el-button.is-primary:hover {
+  background: #B8944E;
+  border-color: #B8944E;
+}
+
+.btn-text {
+  display: inline-block;
+  font-size: 12px;
+}
+
+.has-search-result {
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
+  border-color: #4CAF50 !important;
+}
+
+.tree-stats {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 252, 248, 0.9);
+  backdrop-filter: blur(8px);
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: #7F8C8D;
+  border: 1px solid rgba(201, 169, 110, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* 鎬ц兘闈㈡澘锛坉ev only锛屽彸涓嬭锟?*/
+.perf-overlay {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 20;
+  background: rgba(33, 33, 33, 0.92);
+  color: #f0f0f0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  min-width: 140px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.perf-overlay .perf-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.perf-overlay .perf-label {
+  color: #999;
+}
+
+.perf-overlay .perf-value {
+  font-weight: 600;
+  color: #4FC3F7;
+}
+
+.perf-overlay .perf-value.good {
+  color: #66BB6A;
+}
+
+.perf-overlay .perf-value.ok {
+  color: #FFA726;
+}
+
+.perf-overlay .perf-value.bad {
+  color: #EF5350;
+}
+
+.perf-overlay .perf-test-btn {
+  margin-top: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  background: #1976D2;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.perf-overlay .perf-test-btn:hover:not(:disabled) {
+  background: #1565C0;
+}
+
+.perf-overlay .perf-test-btn:disabled {
+  background: #555;
+  cursor: not-allowed;
+}
+
+.stat-divider {
+  color: #DDD;
+}
+
+.stat-item strong {
+  color: #5D4037;
+}
+
+.lineage-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #C9A96E;
+}
+
+.tree-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(250, 248, 245, 0.92);
+  backdrop-filter: blur(4px);
+  z-index: 20;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 32px 40px;
+  min-width: 320px;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid rgba(201, 169, 110, 0.25);
+  box-shadow: 0 8px 32px rgba(93, 64, 55, 0.12);
+}
+
+.loading-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(201, 169, 110, 0.08);
+  color: #C9A96E;
+}
+
+.loading-text {
+  color: #5D4037;
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+
+.loading-progress {
+  width: 280px;
+  margin: 0;
+}
+
+/* Element Plus 杩涘害鏉″唴閮ㄩ鑹茬粺涓€涓洪噾锟?*/
+.loading-progress :deep(.el-progress-bar__inner) {
+  background: linear-gradient(90deg, #E8C887 0%, #C9A96E 100%);
+  transition: width 80ms linear;
+}
+
+.loading-progress :deep(.el-progress-bar__outer) {
+  background-color: rgba(201, 169, 110, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.loading-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 280px;
+  font-size: 12px;
+  color: #8D6E63;
+}
+
+.loading-percent {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-weight: 600;
+  color: #C9A96E;
+}
+
+.loading-stage-hint {
+  font-size: 11px;
+  color: #B0A18F;
+}
+
+/* 閿欒鍗犱綅锛氭棌璋辨爲鍔犺浇澶辫触鏃跺眳涓樉锟?*/
+.tree-error-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(250, 248, 245, 0.95);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+
+.error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 48px;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid rgba(201, 169, 110, 0.3);
+  box-shadow: 0 8px 32px rgba(93, 64, 55, 0.12);
+  max-width: 420px;
+  text-align: center;
+}
+
+.error-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #5D4037;
+}
+
+.error-message {
+  margin: 0;
+  font-size: 14px;
+  color: #5D4037;
+  line-height: 1.6;
+}
+
+.error-code {
+  margin: 0;
+  font-size: 12px;
+  color: #8D6E63;
+  font-family: monospace;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.genealogy-tree-canvas {
+  width: 100%;
+  height: 100%;
+  /* G6 v5 浼氬湪瀹瑰櫒鍐呭垱锟?4 锟?<canvas>锛堣儗锟?锟?鑺傜偣/UI锛夛紝瀹冧滑閫氳繃鍐呰仈
+   * grid-area: 1/1/2/2 閲嶅彔鍒板悓涓€缃戞牸鍗曞厓锛涘灞傚繀椤绘槸 grid 鎵嶈兘璁╁畠浠彔鍔狅拷?
+   * 缂虹渷 display 鏃朵細锟?block 娴佸紡甯冨眬锟? 锟?canvas 娌垮瀭鐩存柟鍚戝爢鍙狅紝
+   * 鎬婚珮搴﹁啫鑳€涓哄崟灞傜殑 4 鍊嶏紝瀵艰嚧鐢诲竷鐪嬭捣鏉ャ€岀┖鐧界殑銆佽妭鐐圭敾杩涘睆澶栥€嶏拷?
+   * 姝ゅ潙鏉ユ簮锟?G6 5.x 瀛愯矾寰勫鍏ュ悗 init() 涓嶅啀鑷姩娉ㄥ叆瀹瑰櫒鏍峰紡锟?
+   */
+  display: grid;
+  position: relative;
+  overflow: hidden;
+  background-image:
+    radial-gradient(circle at 20% 50%, rgba(201, 169, 110, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(93, 64, 55, 0.04) 0%, transparent 50%);
+}
+
+@media (max-width: 1200px) {
+  /* 涔嬪墠锟?flex-direction: column 璁╁伐鍏锋爮绔栨帓锛屾尋鎺夌敾甯冿紱
+   * 鏀逛负 nowrap + 妯悜婊氬姩锛岃绐勫睆涔熻兘淇濈暀鍗曡甯冨眬 */
+  .tree-toolbar {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  .tree-toolbar.is-collapsed {
+    gap: 4px;
+    padding: 6px 6px;
+  }
+}
+
+@media (max-width: 768px) {
+  .tree-toolbar {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    padding: 6px 8px;
+  }
+  .tree-stats {
+    font-size: 10px;
+    padding: 4px 12px;
+    gap: 8px;
+  }
+}
+</style>

@@ -8,7 +8,6 @@ import { OcrService } from './ocr.service';
 import { TencentOcrService } from './tencent-ocr.service';
 import { OcrBillingService } from './ocr-billing.service';
 import { TreeModule } from '../tree/tree.module';
-import { PrismaService } from '@geneasphere/db';
 
 @Module({
   imports: [TreeModule],
@@ -20,7 +19,6 @@ import { PrismaService } from '@geneasphere/db';
     OcrService,
     TencentOcrService,
     OcrBillingService,
-    PrismaService,
   ],
   exports: [OcrBillingService, OcrService],
 })

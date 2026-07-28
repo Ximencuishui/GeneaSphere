@@ -18,7 +18,7 @@ const fetchXipai = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/admin/settings/xipai', {
-      params: { clanSlug: clanId.value },
+      params: { clanSlug: clanSlug.value },
     })
     xipaiList.value = res.data
   } catch (error) {
@@ -36,7 +36,7 @@ const handleAdd = async () => {
   saving.value = true
   try {
     await axios.post('/api/admin/settings/xipai', {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       generation: newXipai.value.generation,
       character: newXipai.value.character,
       note: newXipai.value.note,
@@ -96,7 +96,7 @@ const handleDelete = async (item: any) => {
 }
 
 onMounted(() => {
-  clanId.value = route.params.slug as string || '1'
+  clanSlug.value = route.params.slug as string || '1'
   fetchXipai()
 })
 </script>

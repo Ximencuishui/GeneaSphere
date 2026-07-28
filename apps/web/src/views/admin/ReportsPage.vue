@@ -16,7 +16,7 @@ const fetchData = async () => {
   loading.value = true
   try {
     const params: any = {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       page: pagination.value.page,
       pageSize: pagination.value.pageSize,
     }
@@ -40,7 +40,7 @@ const handleConfirm = async (id: string) => {
   try {
     await ElMessageBox.confirm('确认该举报内容违规并处理？', '提示', { type: 'warning' })
     await axios.post(`/api/admin/reports/${id}/confirm`, {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       result: '已确认违规并处理',
     })
     ElMessage.success('已确认处理')
@@ -56,7 +56,7 @@ const handleReject = async (id: string) => {
   try {
     await ElMessageBox.confirm('驳回该举报？', '提示', { type: 'info' })
     await axios.post(`/api/admin/reports/${id}/reject`, {
-      clanSlug: clanId.value,
+      clanSlug: clanSlug.value,
       result: '举报已驳回',
     })
     ElMessage.success('已驳回')

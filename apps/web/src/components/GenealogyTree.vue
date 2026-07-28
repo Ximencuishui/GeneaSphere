@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
@@ -30,7 +30,7 @@ import PersonEditDrawer from './PersonEditDrawer.vue';
 import ImagePreview from './ImagePreview.vue';
 import { Rect as G6Rect } from '@antv/g6/esm/elements/nodes/rect';
 import { LayoutEngine } from '@/utils/layout-engine';
-import type { LayoutNode, LayoutEdge, LayoutConfig } from '@/types/layout';
+import type { LayoutNode, LayoutEdge, LayoutConfig, ViewportConfig } from '@/types/layout';
 
 /**
  * G6 精细化按需加载
@@ -102,6 +102,10 @@ async function loadG6Runtime(): Promise<G6Runtime> {
     // 而 ExtensionRegistry.layout 期望类构造器，G6 内部也是这样注册的
     import('@antv/hierarchy').then(m => ({ compactBox: m.compactBox })),
     import('@antv/g6/esm/behaviors/drag-canvas'),
+    // zoom-canvas 行为：绑定 canvas 滚轮事件实现缩放。
+    // 注意：MCP browser-use 的 evaluate_script 注入合成 wheel 事件时不会触发此行为
+    // （G6 v5 + 按需子模块导入场景下事件绑定在特定渲染层，CDP 注入事件不冒泡）。
+    // 自动化测试时请改用工具栏 zoomIn/zoomOut 按钮或直接调 graph.value.zoomTo()。
     import('@antv/g6/esm/behaviors/zoom-canvas'),
     import('@antv/g6/esm/behaviors/drag-element'),
     // transforms：treeToGraphData + compact-box 布局内部依赖的 transforms
@@ -219,6 +223,13 @@ const perfTestLoading = ref(false);
 /** 视口裁剪 rAF id（提升到模块作用域，便于 onUnmounted 清理） */
 let cullingRafId = 0;
 
+/**
+ * 最近一次布局引擎算出的视口配置（zoom + centerX + centerY + layoutDirection）
+ * - 用途：工具栏「重置缩放」按钮复用，避免直接调 G6 内置 fitView() 把宽族谱压成 0.04
+ * - 取值时机：每次 layout 计算完成后立即赋值；onUnmounted 清空
+ */
+let lastViewportConfig: ViewportConfig | null = null;
+
 /** 工具栏是否折叠（折叠后只显示图标 + 搜索框，节省顶部空间） */
 const toolbarCollapsed = ref(false);
 
@@ -251,13 +262,13 @@ const openImagePreview = (src: string, name: string) => {
 
 // ==================== Loading Stage Progress ====================
 /**
- * 加载阶段：
- * - fetch   ：向后端拉取家族数据（最重的一步，可能因为大族谱而耗时较长）
- * - parse   ：将原始数据转换为 G6 节点格式
- * - render  ：G6 创建图实例、设置布局、渲染节点与连线
- * - finalize：自适应缩放 / 滚动归位 / 清理临时态
+ * 鍔犺浇闃舵锛? * - fetch   锛氬悜鍚庣鎷夊彇瀹舵棌鏁版嵁锛堟渶閲嶇殑涓€姝ワ紝鍙兘鍥犱负澶ф棌璋辫€岃€楁椂杈冮暱锛? * - parse   锛氬皢鍘熷鏁版嵁杞崲涓?G6 鑺傜偣鏍煎紡
+ * - fetch   锛氬悜鍚庣鎷夊彇瀹舵棌鏁版嵁锛堟渶閲嶇殑涓€姝ワ紝鍙兘鍥犱负澶ф棌璋辫€岃€楁椂杈冮暱锟?
+ * - parse   锛氬皢鍘熷鏁版嵁杞崲锟?G6 鑺傜偣鏍煎紡
+ * - render  锛欸6 鍒涘缓鍥惧疄渚嬨€佽缃竷灞€銆佹覆鏌撹妭鐐逛笌杩炵嚎
+ * - finalize锛氳嚜閫傚簲缂╂斁 / 婊氬姩褰掍綅 / 娓呯悊涓存椂鎬? *
  *
- * 设计要点：
+ * - fetch   ：向后端拉取家族数据（最重的一步，可能因为大族谱而耗时较长）
  * 1. 每个阶段都有目标百分比，定时器以 30ms 步长平滑增长，给人「有进度」的感觉
  * 2. 进入下一阶段时百分比会跳到该阶段起点附近，再平滑增长，避免视觉上「回退」
  * 3. 完成后进度条快速到 100% 并延迟 220ms 关闭，给用户一个「完成」的视觉确认
@@ -365,12 +376,12 @@ function failLoading() {
 
 const viewModeConfig = computed(() => ({
   compact: {
-    nodeWidth: 28,
-    nodeHeight: 64,
+    nodeWidth: 48,
+    nodeHeight: 32,
     avatarSize: 0,
     nameFontSize: 12,
     sublabelFontSize: 0,
-    nodeSep: 20,
+    nodeSep: 36,
     rankSep: 110,  // nodeHeight(64) + 间距(46)，预留配偶节点下方空间
   },
   detailed: {
@@ -379,7 +390,7 @@ const viewModeConfig = computed(() => ({
     avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 10,
-    nodeSep: 24,
+    nodeSep: 36,
     rankSep: 130,  // nodeHeight(80) + 间距(50)，预留配偶节点下方空间
   },
   portrait: {
@@ -388,7 +399,7 @@ const viewModeConfig = computed(() => ({
     avatarSize: 22,
     nameFontSize: 12,
     sublabelFontSize: 9,
-    nodeSep: 20,
+    nodeSep: 32,
     rankSep: 128,  // nodeHeight(72) + 间距(56)，预留配偶节点下方空间
   },
 }));
@@ -438,6 +449,19 @@ const fetchTreeData = async (rootId: string = '1') => {
     };
     // 报错：停止定时器，进度条冻结在当前位置，错误占位接管
     failLoading();
+    // 5xx锛坴ite proxy ECONNREFUSED銆佹暟鎹簱鐬柇绛夛級3 绉掑悗鑷姩閲嶈瘯涓€娆★紝
+    // 閬垮厤鐢ㄦ埛鐪嬪埌鐭殏缃戠粶鎶栧姩灏辫鎵嬪姩鐐?閲嶆柊鍔犺浇"
+    if (status === 0 || status >= 500) {
+      const retryAt = Date.now();
+      (errorState.value as any).__autoRetryAt = retryAt;
+      setTimeout(() => {
+        // 鏈熼棿鐢ㄦ埛娌℃敼 errorState 鎵嶉噸璇?
+        if ((errorState.value as any)?.__autoRetryAt === retryAt) {
+          console.info('[GenealogyTree] 5xx 错误自动重试…');
+          retryLoad();
+        }
+      }, 3000);
+    }
     // 不再吞错：抛出以便外层可观察
     throw error;
   }
@@ -552,21 +576,38 @@ const generateAvatarSvg = (name: string, gender: string): string => {
 
 /**
  * 轮询等待容器可见（v-show 容器在 loading=true 时 display:none，
- * offsetWidth/Height 为 0，G6 init 拿到 0×0 会出现「节点画进 0×0 画布」
- * 的问题）。最多等 2s（10 × 200ms），超时后用最后一帧能拿到的尺寸。
+ * getBoundingClientRect / offsetWidth 都会报 0 的问题）。
+ * 最多等 5s（25 × 200ms），超时后用最后一帧能拿到的尺寸。
+ *
+ * 关键修复：之前 maxRounds=10（2s）+ offsetWidth/Height 单路验证，
+ * 在 v-show 切换时序不稳时偶发回退到 0×0，让 G6 fallback 到 100×100，
+ * 现改为双路测量（offset* + getBoundingClientRect 取较大值，更可靠）。
  */
-async function waitForContainerSize(maxRounds = 10, interval = 200): Promise<{ w: number; h: number }> {
+async function waitForContainerSize(maxRounds = 25, interval = 200): Promise<{ w: number; h: number }> {
+  const measure = (): { w: number; h: number } => {
+    const el = container.value;
+    if (!el) return { w: 0, h: 0 };
+    // 鍙岃矾娴嬮噺锛歰ffset* + getBoundingClientRect 鍙栬緝澶у€硷紙鏇村彲闈狅級
+    const rect = el.getBoundingClientRect();
+    const ow = el.offsetWidth;
+    const oh = el.offsetHeight;
+    const w = Math.max(0, rect.width || 0, ow || 0);
+    const h = Math.max(0, rect.height || 0, oh || 0);
+    return { w, h };
+  };
+
   for (let i = 0; i < maxRounds; i++) {
+    // 绗竴杞篃绛変竴甯э紙锟?v-show/loading 鍒囨崲锟?reflow 瀹屾垚锟?
+    if (i === 0) await new Promise((r) => requestAnimationFrame(() => r(null)));
     await new Promise((r) => setTimeout(r, interval));
-    if (!container.value) continue;
-    const w = container.value.offsetWidth;
-    const h = container.value.offsetHeight;
+    const { w, h } = measure();
     if (w > 0 && h > 0) return { w, h };
   }
   // 超时保护：返回当前值（可能仍为 0）
+  const last = measure();
   return {
-    w: container.value?.offsetWidth ?? 0,
-    h: container.value?.offsetHeight ?? 0,
+    w: last.w > 0 ? last.w : 1024,
+    h: last.h > 0 ? last.h : 768,
   };
 }
 
@@ -789,11 +830,66 @@ const initGraph = async (data: GenealogyNode) => {
 
   // 计算布局
   const layoutResult = layoutEngine.calculateLayout(layoutNodes, layoutEdges);
-  
+
+  // 鑷€傚簲缂╂斁绛栫暐锛氳閲戝瓧濉旂粨鏋勬纭樉绀猴拷?
+  // - zoom 浼樺厛閫傞厤鐢诲竷楂樺害锛堣浠ｉ檯鍒嗗眰鍙锟?
+  // - X 鏂瑰悜鍏佽婧㈠嚭锛堟í鍚戞粴鍔ㄦ潯娴忚鏀郴锛夛紝浣嗕笉璁╃缉寰楀お灏忥紙鑺傜偣闇€鍙锟?
+  // - 涓績閿氬畾涓讳紶鎵匡紙centerX=0锛夛紝涓昏剦鍦ㄧ敾甯冧腑澶紝鏀郴鍦ㄤ袱渚ф墖褰㈠睍寮€
+  const mainLineageIds = new Set(genealogyStore.mainLineage.map(String));
+  const baseViewport = layoutEngine.autoFit(layoutResult);
+  let viewportConfig = baseViewport;
+
+  // bounds 鏄竷灞€寮曟搸杈撳嚭鐨勬暣鍥惧寘鍥寸洅锛堝惈涓昏剦銆佹敮绯汇€侀厤鍋讹級
+  const { maxX, minX, maxY, minY } = layoutResult.bounds;
+  const contentW = Math.max(1, maxX - minX);
+  const contentH = Math.max(1, maxY - minY);
+  const aspectRatio = contentW / contentH; // >1 鍋忓锛堝鏀郴锛夛紝<1 鍋忛珮锛堝皯鏀郴锟?
+
+  // zoom锛氳涓讳紶锟?8-10 浠ｇ殑 Y 璺ㄥ害锛堚増 contentH锛夐€傞厤鐢诲竷楂樺害锟?80%
+  // 1000 鑺傜偣鐢ㄦ洿淇濆畧鐨勭缉鏀撅紙閬垮厤缂╁お灏忚妭鐐圭湅涓嶆竻锛夛紝clamp 锟?[0.4, 1.0]
+  const { width: canvasW, height: canvasH } = layoutEngine['canvasSize'] as { width: number; height: number };
+  const fitByHeight = (canvasH * 0.8) / contentH;
+  const totalNodeCount = layoutNodes.length;
+  const zoomByNodeCount = totalNodeCount > 600 ? 0.45 : totalNodeCount > 300 ? 0.6 : 0.85;
+  // 鍙栦笁鑰呬腑杈冨皬鍊硷紝浣嗕繚锟?0.4 闃叉缂╁埌鑺傜偣鐪嬩笉锟?
+  let desiredZoom = Math.min(fitByHeight, zoomByNodeCount, baseViewport.zoom * 1.5);
+  desiredZoom = Math.max(0.4, Math.min(1.0, desiredZoom));
+
+  if (mainLineageIds.size > 0) {
+    const mainPositions = layoutResult.nodes.filter(n => mainLineageIds.has(n.id));
+    if (mainPositions.length > 0) {
+      // 涓讳紶鎵跨殑绾靛悜鍖呭洿鐩掞紙鐢ㄤ簬鎶婃牴鑺傜偣閿氬畾鍦ㄥ睆骞曚笂锟?15% 浣嶇疆锟?
+      let minMainY = Infinity, maxMainY = -Infinity;
+      for (const p of mainPositions) {
+        minMainY = Math.min(minMainY, p.y - p.height / 2);
+        maxMainY = Math.max(maxMainY, p.y + p.height / 2);
+      }
+      // 涓昏剦椤堕儴锛堟湵鐔规牴鑺傜偣锛夋樉绀哄湪鐢诲竷涓婃柟 15% 浣嶇疆锛岀粰涓嬫柟鐨勬敮绯荤暀鍑虹┖锟?
+      const targetScreenY = canvasH * 0.15;
+      const centerY = minMainY + (canvasH / 2 - targetScreenY) / desiredZoom;
+      viewportConfig = {
+        ...baseViewport,
+        zoom: desiredZoom,
+        centerX: 0, // 涓昏剦宸插湪 alignMainLineage 闃舵灞呬腑锟?x=0锛屼綔涓鸿瑙夐敋锟?
+        centerY,
+      };
+    } else {
   // 自适应缩放
-  const viewportConfig = layoutEngine.autoFit(layoutResult);
+      const centerContentX = (minX + maxX) / 2;
+      const centerContentY = (minY + maxY) / 2;
+      viewportConfig = {
+        ...baseViewport,
+        zoom: desiredZoom,
+        centerX: centerContentX,
+        centerY: centerContentY,
+      };
+    }
+  }
+  // 鍗曟牴鏃犱富鑴夌殑杈圭晫锛歝enterX/Y 宸茬粡锟?baseViewport 鎻愪緵锛屼笉鍐嶈锟?
 
   // 创建节点位置映射
+  // 缓存当前 layout 的视口配置，供工具栏「重置缩放」按钮复用
+  lastViewportConfig = viewportConfig;
   const nodePositionMap = new Map<string, { x: number; y: number }>();
   for (const pos of layoutResult.nodes) {
     nodePositionMap.set(pos.id, { x: pos.x, y: pos.y });
@@ -883,15 +979,19 @@ const initGraph = async (data: GenealogyNode) => {
         radius: 8,
         fill: (d: any) => {
           if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
-            return '#F5F0E8';
+            return '#EDE7DD';
           }
+          // 涓讳紶鎵胯妭鐐癸細閱掔洰閲戣壊锛堜紭鍏堢骇鏈€楂橈級
           if (d.data?.is_main_lineage) {
-            return '#FFF8E7';
+            return '#FFF3C4';
           }
+          const gender = d.data?.gender;
           if (d.data?.is_living) {
             return d.data?.gender === 'male' ? '#E8F4FD' : '#FDE8F0';
+            return gender === 'male' ? '#F5F2E8' : '#FCE4EC';
           }
           return '#FAFAFA';
+          return gender === 'male' ? '#EFE9DC' : '#F5E6E0';
         },
         stroke: (d: any) => {
           const isSelected = genealogyStore.selectedNode?.id === Number(d.id);
@@ -901,8 +1001,13 @@ const initGraph = async (data: GenealogyNode) => {
             return '#D0D0D0';
           }
           if (d.data?.is_main_lineage) return '#C9A96E';
-          if (!d.data?.is_living) return '#A1887F';
-          return d.data?.gender === 'male' ? '#90CAF9' : '#F48FB1';
+          if (d.data?.is_main_lineage) return '#D4A04A';
+          const gender = d.data?.gender;
+          if (d.data?.is_living) {
+            return gender === 'male' ? '#90A4AE' : '#F48FB1';
+          }
+          // 已故：深棕色描边
+          return gender === 'male' ? '#A1887F' : '#BCAAA4';
         },
         lineWidth: (d: any) => {
           const isSelected = genealogyStore.selectedNode?.id === Number(d.id);
@@ -1015,21 +1120,48 @@ const initGraph = async (data: GenealogyNode) => {
         stroke: (d: any) => {
           const sourceMatched = matchesSearch(d.source) && matchesGenderFilter(d.source);
           const targetMatched = matchesSearch(d.target) && matchesGenderFilter(d.target);
+          // 閰嶅伓杈癸細鐜颁换=绮夌孩瀹炵嚎锛屽巻锟?鐏拌壊铏氱嚎
           if (d.data?.kind === 'spouse') {
             return d.data?.is_current ? '#E91E63' : '#9E9E9E';
           }
+          // 涓讳紶鎵跨埗瀛愯竟锛氶啋鐩噾鑹诧紙婧愭垨鐩爣灞炰簬涓讳紶鎵挎椂楂樹寒锟?
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) {
+            return '#C9A96E';
+          }
+          // 鏅€氱埗瀛愯竟锛氭悳锟?绛涢€夊懡涓繚鐣欎腑鎬х伆锛屾湭鍛戒腑娣＄背锟?
           return (sourceMatched && targetMatched) ? '#B0BEC5' : '#E8E0D8';
         },
         lineWidth: (d: any) => {
-          return d.data?.kind === 'spouse' ? 2.5 : 2;
+          if (d.data?.kind === 'spouse') {
+            return d.data?.is_current ? 3 : 2.5;
+          }
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) return 3;
+          return 2;
         },
         lineDash: (d: any) => {
+          // 历史配偶边用虚线
           if (d.data?.kind === 'spouse' && !d.data?.is_current) return [6, 4];
           return undefined;
         },
         endArrow: false,
-        shadowColor: 'rgba(0, 0, 0, 0.05)',
-        shadowBlur: 2,
+        shadowColor: (d: any) => {
+          if (d.data?.kind === 'spouse') return 'rgba(233, 30, 99, 0.08)';
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) return 'rgba(201, 169, 110, 0.25)';
+          return 'rgba(0, 0, 0, 0.05)';
+        },
+        shadowBlur: (d: any) => {
+          if (d.data?.kind === 'spouse') return 3;
+          const sourceOnMain = d.source?.data?.is_main_lineage;
+          const targetOnMain = d.target?.data?.is_main_lineage;
+          if (sourceOnMain && targetOnMain) return 6;
+          return 2;
+        },
       },
     },
   });
@@ -1065,13 +1197,25 @@ const initGraph = async (data: GenealogyNode) => {
     cullingRafId = requestAnimationFrame(() => {
       const [vw, vh] = g.getSize() as [number, number];
       const center = g.getViewportCenter() as [number, number];
-      // 视口矩形（左上 / 右下）
-      const halfW = vw / 2 + VIEWPORT_MARGIN;
-      const halfH = vh / 2 + VIEWPORT_MARGIN;
-      const x1 = center[0] - halfW;
-      const y1 = center[1] - halfH;
-      const x2 = center[0] + halfW;
-      const y2 = center[1] + halfH;
+      let x1 = -Infinity, y1 = -Infinity, x2 = Infinity, y2 = Infinity;
+      if (typeof g.getCanvasByViewport === 'function') {
+        const tl = g.getCanvasByViewport([0, 0]);
+        const br = g.getCanvasByViewport([vw, vh]);
+        if (tl && br) {
+          x1 = Math.min(tl[0], br[0]);
+          x2 = Math.max(tl[0], br[0]);
+          y1 = Math.min(tl[1], br[1]);
+          y2 = Math.max(tl[1], br[1]);
+        }
+      }
+      // 锟?200px 杈硅窛閬垮厤璺冲彉
+      const marginPx = VIEWPORT_MARGIN;
+      const zoom = g.getZoom?.() || 1;
+      const marginWorld = marginPx / zoom;
+      x1 -= marginWorld;
+      y1 -= marginWorld;
+      x2 += marginWorld;
+      y2 += marginWorld;
 
       const nodes = g.getNodeData?.() || [];
       const edges = g.getEdgeData?.() || [];
@@ -1356,7 +1500,7 @@ const initGraph = async (data: GenealogyNode) => {
     const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
     if (nodeModel?.data?.original) {
       const data = nodeModel.data;
-      const name = data.original.full_name || data.original.label || '未知';
+      const name = data.original.full_name || data.original.label || 'δ֪';
       const gender = data.gender === 'male' ? '男' : '女';
       const birthYear = data.birth_year ? `出生: ${data.birth_year}` : '';
       const deathYear = data.death_year ? `去世: ${data.death_year}` : '';
@@ -1394,6 +1538,7 @@ const initGraph = async (data: GenealogyNode) => {
 
     // 应用布局引擎计算的视口变换（缩放 + 居中）
     // 必须在 render() 完成后执行，否则 canvas 变换矩阵未初始化会报 transform undefined
+    // 鏀圭敤 autoFit 绠楀嚭锟?zoom + minZoom 0.25 鍏滃簳锛屾墜锟?translateBy 灞呬腑
     if (
       typeof g6Graph.zoomTo === 'function' &&
       typeof g6Graph.translateBy === 'function' &&
@@ -1413,6 +1558,17 @@ const initGraph = async (data: GenealogyNode) => {
     // 绑定 ResizeObserver，后续容器尺寸变化（窗口 resize / 面板展开）自动 setSize
     setupGraphResize(g6Graph);
     // 渲染完成：进度条快速跑满到 100% 再延迟关闭
+    // 进一步用 focusElement 锁定到主根节点，缩放保持不变（主传承树已经合适显示）
+    const totalNodeCount = graphData.nodes?.length || 0;
+    const rootId = genealogyStore.mainLineage?.[0];
+    if (rootId && totalNodeCount <= 800 && typeof g6Graph.focusElement === 'function') {
+      try {
+        g6Graph.focusElement(rootId, { duration: 0 });
+      } catch (err) {
+        console.warn('[GenealogyTree] focusElement 失败:', err);
+      }
+    }
+    // 娓叉煋瀹屾垚锛氳繘搴︽潯蹇€熻窇婊″埌 100% 鍐嶅欢杩熷叧锟?
     finishLoading();
   } catch (e: any) {
     console.error('[GenealogyTree] G6 渲染失败:', e);
@@ -1544,8 +1700,20 @@ const zoomOut = () => {
 };
 
 const resetZoom = () => {
-  if (graph.value) {
-    graph.value.fitView();
+  const g: any = graph.value;
+  if (!g) return;
+  // 优先复用最近一次布局引擎算出的视口（zoom + centerX/Y），
+  // 否则 G6 内置 fitView() 会把 ~4000px 宽族谱压到 zoom≈0.04，节点看不清
+  const vp = lastViewportConfig;
+  if (vp && typeof g.zoomTo === 'function' && typeof g.translateTo === 'function') {
+    g.zoomTo(vp.zoom, { duration: 200 });
+    // translateTo 以视口坐标移动，使 centerX/Y 对齐画布中心
+    g.translateTo({ x: vp.centerX, y: vp.centerY }, { duration: 200 });
+    return;
+  }
+  // 兜底：尚未完成 layout 时走 G6 内置 fitView
+  if (typeof g.fitView === 'function') {
+    g.fitView();
   }
 };
 
@@ -1961,7 +2129,7 @@ defineExpose({
       >
         <el-option label="全部" value="all" />
         <el-option label="男" value="male" />
-        <el-option label="女" value="female" />
+        <el-option label="Ů" value="female" />
       </el-select>
 
       <el-tooltip content="仅显示有照片" placement="bottom">
@@ -2119,7 +2287,7 @@ defineExpose({
 
     <!-- 侧栏编辑抽屉：选中节点后从右侧划出 -->
     <PersonEditDrawer
-      :person-id="editDrawerOpen ? genealogyStore.selectedNode?.id : null"
+      :person-id="editDrawerOpen ? (genealogyStore.selectedNode?.id ?? null) : null"
       :person="genealogyStore.selectedNode"
       :can-edit="true"
       @close="handleDrawerClose"
