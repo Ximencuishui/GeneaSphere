@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
 import { Role } from '@prisma/client';
+import { serializeBigInt } from '../../common/bigint-serializer';
 
 @ApiTags('admin/settings')
 @Controller('api/admin/settings')
@@ -27,7 +28,8 @@ export class SettingsController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     let settings = await this.prisma.privacySetting.findUnique({
       where: { clan_id: clanId },
@@ -63,7 +65,8 @@ export class SettingsController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
 
     const settings = await this.prisma.privacySetting.upsert({
       where: { clan_id: clanId },
@@ -111,7 +114,8 @@ export class SettingsController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const xipai = await this.prisma.xipai.findMany({
       where: { clan_id: clanId },
@@ -136,7 +140,8 @@ export class SettingsController {
     @Body() body: { clanSlug: string; generation: number; character: string; note?: string },
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
 
     const xipai = await this.prisma.xipai.create({
       data: {
@@ -156,7 +161,7 @@ export class SettingsController {
       details: `Added character ${body.character} for generation ${body.generation}`,
     });
 
-    return { message: 'Xipai added successfully', data: xipai };
+    return { message: 'Xipai added successfully', data: serializeBigInt(xipai) };
   }
 
   /**
@@ -198,7 +203,7 @@ export class SettingsController {
       targetId: xipaiIdStr,
     });
 
-    return { message: 'Xipai updated successfully', data: updated };
+    return { message: 'Xipai updated successfully', data: serializeBigInt(updated) };
   }
 
   /**
@@ -250,7 +255,8 @@ export class SettingsController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     // 获取各类文件大小
     // 说明：云存储分项计数（视频/其他文件）暂仅返回 0，
@@ -303,7 +309,8 @@ const [photos, videos, others] = await Promise.all([
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     // 收集所有家族数据
     const [
@@ -401,7 +408,8 @@ const [photos, videos, others] = await Promise.all([
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const clan = await this.prisma.clan.findUnique({
       where: { id: clanId },
@@ -439,7 +447,8 @@ const [photos, videos, others] = await Promise.all([
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
 
     const updateData: any = {};
 

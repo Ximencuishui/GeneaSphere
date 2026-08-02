@@ -14,6 +14,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { Role, NotificationType } from '@prisma/client';
 import { CosService } from '../cos/cos.service';
 import { ImageProcessorService } from '../cos/image-processor.service';
+import { sanitizeUserText } from '../common/sanitize';
 
 @Injectable()
 export class UserService {
@@ -125,7 +126,7 @@ export class UserService {
    */
   async updateProfile(userId: string, dto: UpdateProfileDto) {
     const data: any = {};
-    if (dto.nickname !== undefined) data.nickname = dto.nickname;
+    if (dto.nickname !== undefined) data.nickname = sanitizeUserText(dto.nickname);
     if (dto.email !== undefined) data.email = dto.email;
     if (dto.gender !== undefined) data.gender = dto.gender;
     if (dto.birth_date !== undefined) {
@@ -173,11 +174,20 @@ export class UserService {
       throw new BadRequestException('头像仅支持 jpg/png/webp');
     }
 
+    const imageBuffer = Buffer.from(match[2], 'base64');
+    const magic = imageBuffer.slice(0, 12);
+    const validMagic =
+      (magic[0] === 0xff && magic[1] === 0xd8 && magic[2] === 0xff) ||
+      (magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4e && magic[3] === 0x47) ||
+      (magic.toString('ascii', 0, 4) === 'RIFF' && magic.toString('ascii', 8, 12) === 'WEBP');
+    if (!validMagic) {
+      throw new BadRequestException('头像文件内容与图片格式不符');
+    }
+
     const useCos = this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true';
 
     if (useCos) {
       // COS 模式：上传头像至热 Bucket
-      const imageBuffer = Buffer.from(match[2], 'base64');
       const avatarKey = `media/display/avatar/${userId}.${ext}`;
       const result = await this.cosService.uploadFile(avatarKey, imageBuffer, {
         contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,

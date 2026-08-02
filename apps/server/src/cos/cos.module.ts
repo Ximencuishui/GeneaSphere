@@ -14,6 +14,6 @@ import { DatabaseBackupService } from './database-backup.service';
     ImageProcessorService,
     DatabaseBackupService,
   ],
-  exports: [CosService, ImageProcessorService],
+  exports: [CosService, ImageProcessorService, DatabaseBackupService],
 })
 export class CosModule {}

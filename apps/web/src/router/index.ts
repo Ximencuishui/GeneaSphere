@@ -3,6 +3,18 @@ import type { RouteRecordRaw } from 'vue-router'
 
 const TOKEN_KEY = 'geneasphere_token'
 
+function hasUsableToken(token: string | null): boolean {
+  if (!token) return false
+  try {
+    const [, encodedPayload] = token.split('.')
+    if (!encodedPayload) return false
+    const payload = JSON.parse(atob(encodedPayload.replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof payload.exp !== 'number' || payload.exp * 1000 > Date.now()
+  } catch {
+    return false
+  }
+}
+
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
@@ -195,19 +207,19 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   {
-    // 兼容旧链接：/admin/* 整体改跳平台后台（/admin 原为各族谱后台，平台后台走 /platform-admin）
-    // 智能判断：
-    //   - 家族管理员（familyToken 存在）→ /select-family 进入家族选择器
-    //   - 未登录或平台管理员 → /platform-admin/<restPath>
+    // 兼容旧链接：/admin/* 整体跳到家族后台（默认）
+    // 优先级：
+    //   1. 未登录 → /login（保留原意图）
+    //   2. 已登录 → /select-family 让用户选择家族
+    //   3. 平台管理员走 /platform-admin 仅在显式访问时
     path: '/admin/:restPath(.*)*',
     redirect: (to) => {
       const familyToken = localStorage.getItem(TOKEN_KEY)
-      if (familyToken) {
-        return { path: '/select-family' }
+      if (!familyToken) {
+        return { path: '/login', query: { redirect: to.fullPath } }
       }
-      return {
-        path: `/platform-admin/${(to.params.restPath as string) || ''}`.replace(/\/+$/, ''),
-      }
+      // 已登录：默认走家族选择器（避免 /platform-admin/<restPath> 不存在的子路由导致空白页）
+      return { path: '/select-family' }
     },
   },
   {
@@ -529,10 +541,17 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   const platformToken = localStorage.getItem('geneasphere_platform_token')
   const familyToken = localStorage.getItem(TOKEN_KEY)
-  const requiresPlatformAdmin = to.meta.requiresPlatformAdmin
-  const requiresAuth = to.meta.requiresAuth
-  const isLoggedInFamily = !!familyToken
-  const isLoggedInPlatform = !!platformToken
+  const requiresPlatformAdmin = to.matched.some((record) => record.meta.requiresPlatformAdmin === true)
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth === true)
+  const isLoggedInFamily = hasUsableToken(familyToken)
+  const isLoggedInPlatform = hasUsableToken(platformToken)
+
+  if (!isLoggedInFamily && familyToken) {
+    localStorage.removeItem(TOKEN_KEY)
+  }
+  if (!isLoggedInPlatform && platformToken) {
+    localStorage.removeItem('geneasphere_platform_token')
+  }
 
   // 营销首页始终可访问（无论登录状态）
   if (to.path === '/') {
@@ -553,7 +572,7 @@ router.beforeEach((to, _from, next) => {
       return
     }
     try {
-      const payload = JSON.parse(atob(platformToken!.split('.')[1]))
+      const payload = JSON.parse(atob(platformToken!.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
       const role = payload.role
       const allowed = ['super', 'operator', 'finance', 'auditor']
       if (!allowed.includes(role)) {
@@ -578,7 +597,7 @@ router.beforeEach((to, _from, next) => {
   // 家族管理员页面校验：检查用户角色
   if (to.meta.requiresAdmin && isLoggedInFamily) {
     try {
-      const tokenPayload = JSON.parse(atob(familyToken!.split('.')[1]))
+      const tokenPayload = JSON.parse(atob(familyToken!.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
       const userRole = tokenPayload.role || ''
       const allowedRoles = ['OWNER', 'ADMIN']
       if (!allowedRoles.includes(userRole)) {

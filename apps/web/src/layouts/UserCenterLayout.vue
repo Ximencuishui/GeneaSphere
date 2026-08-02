@@ -3,7 +3,7 @@ import { nextTick, ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserCenterStore } from '@/stores/userCenter'
 import { useAuthStore } from '@/stores/auth'
-import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, Folder } from '@element-plus/icons-vue'
+import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, Folder, SwitchButton } from '@element-plus/icons-vue'
 import PageLoader, { type PageLoaderLog } from '@/components/PageLoader.vue'
 
 const route = useRoute()
@@ -303,6 +303,17 @@ watch(
       >
         <ElButton icon="Bell" text circle size="large" />
       </ElBadge>
+      <!-- P1-3 修复：移动端直接露出登出入口，不再依赖打开抽屉 -->
+      <ElButton
+        class="mobile-logout-btn"
+        :icon="SwitchButton"
+        text
+        circle
+        size="large"
+        :title="'退出登录'"
+        aria-label="退出登录"
+        @click="handleLogout"
+      />
     </div>
 
     <div class="layout-body">

@@ -40,64 +40,75 @@ export class VideoProcessorService implements OnModuleInit {
     this.isProcessing = true;
 
     try {
-      // 检查是否有正在处理的任务
-      const processingCount = await this.prisma.videoProject.count({
-        where: { status: VideoProjectStatus.processing },
-      });
-
-      if (processingCount > 0) {
-        this.logger.debug('已有任务正在处理，跳过');
-        return;
-      }
-
-      // 获取下一个任务
-      const nextTask = await this.videoQueueService.getNextTask();
-
-      if (!nextTask) {
-        this.logger.debug('队列为空');
-        return;
-      }
-
-      this.logger.log(`开始处理项目: ${nextTask.projectId}`);
-
-      // 更新状态为处理中
-      await this.prisma.videoProject.update({
-        where: { id: nextTask.projectId },
-        data: { status: VideoProjectStatus.processing },
-      });
-
-      // 调用视频生成服务
       try {
-        const result = await this.videoGeneratorService.generateVideo(nextTask.projectId);
-
-        // 更新为完成状态
-        await this.prisma.videoProject.update({
-          where: { id: nextTask.projectId },
-          data: {
-            status: VideoProjectStatus.completed,
-            video_url: result.videoUrl,
-            duration_seconds: result.durationSeconds,
-            completed_at: new Date(),
-          },
+        // 原有队列逻辑
+        // 检查是否有正在处理的任务
+        const processingCount = await this.prisma.videoProject.count({
+          where: { status: VideoProjectStatus.processing },
         });
 
-        this.logger.log(`项目 ${nextTask.projectId} 生成完成`);
-      } catch (error: any) {
-        this.logger.error(`项目 ${nextTask.projectId} 生成失败: ${error.message}`);
+        if (processingCount > 0) {
+          this.logger.debug('已有任务正在处理，跳过');
+          return;
+        }
 
-        // 更新为失败状态
+        // 获取下一个任务
+        const nextTask = await this.videoQueueService.getNextTask();
+
+        if (!nextTask) {
+          this.logger.debug('队列为空');
+          return;
+        }
+
+        this.logger.log(`开始处理项目: ${nextTask.projectId}`);
+
+        // 更新状态为处理中
         await this.prisma.videoProject.update({
           where: { id: nextTask.projectId },
-          data: {
-            status: VideoProjectStatus.failed,
-            error_message: error.message || '生成失败',
-            completed_at: new Date(),
-          },
+          data: { status: VideoProjectStatus.processing },
         });
+
+        // 调用视频生成服务
+        try {
+          const result = await this.videoGeneratorService.generateVideo(nextTask.projectId);
+
+          // 更新为完成状态
+          await this.prisma.videoProject.update({
+            where: { id: nextTask.projectId },
+            data: {
+              status: VideoProjectStatus.completed,
+              video_url: result.videoUrl,
+              duration_seconds: result.durationSeconds,
+              completed_at: new Date(),
+            },
+          });
+
+          this.logger.log(`项目 ${nextTask.projectId} 生成完成`);
+        } catch (error: any) {
+          this.logger.error(`项目 ${nextTask.projectId} 生成失败: ${error.message}`);
+
+          // 更新为失败状态
+          await this.prisma.videoProject.update({
+            where: { id: nextTask.projectId },
+            data: {
+              status: VideoProjectStatus.failed,
+              error_message: error.message || '生成失败',
+              completed_at: new Date(),
+            },
+          });
+        }
+
+        // 更新队列位置
+        await this.videoQueueService.updateQueuePositions();
+      } catch (dbErr: any) {
+        // P0-1 修复：捕获 Prisma 调用引发的未处理异常（数据库瞬断、连接超时），
+        // 不能再让其向上冒泡到 setInterval 回调，否则节点进程会被 unhandledRejection
+        // 路径退出，整个后端 3101 端口会随之死掉。
+        this.logger.error(
+          `[video-processor] 队列处理失败（已隔离）: ${dbErr?.message}`,
+          dbErr?.stack,
+        );
       }
-
-      // 更新队列位置
-      await this.videoQueueService.updateQueuePositions();
     } finally {
       this.isProcessing = false;
     }

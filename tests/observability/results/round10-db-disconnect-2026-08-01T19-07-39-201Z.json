@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-08-01T19:08:13.762Z",
+  "target": "isolated process on port 3121",
+  "checks": [
+    {
+      "name": "baseline real server /api/health/ready status=ready",
+      "ok": true,
+      "detail": "http=200"
+    },
+    {
+      "name": "isolated server /api/health returns 200 (liveness survives DB outage)",
+      "ok": false
+    },
+    {
+      "name": "isolated instance terminated",
+      "ok": true
+    },
+    {
+      "name": "real server /api/health/ready still status=ready",
+      "ok": true,
+      "detail": "http=200"
+    },
+    {
+      "name": "recovered instance /api/health/ready status=ready & db.ok=true",
+      "ok": false
+    }
+  ],
+  "pass": 3,
+  "fail": 2,
+  "goNoGo": "FAIL"
+}

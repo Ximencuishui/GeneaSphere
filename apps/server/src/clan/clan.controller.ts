@@ -35,12 +35,19 @@ export class ClanController {
   }
 
   /**
-   * Get a specific clan by ID
+   * Get a specific clan by ID or slug
+   * Supports both numeric ID (e.g., '4') and slug (e.g., 'zhuxi-demo')
    */
   @Get(':id')
-  @ApiOperation({ summary: 'Get a clan by ID' })
+  @ApiOperation({ summary: 'Get a clan by ID or slug' })
   async findOne(@Param('id') id: string) {
-    return this.clanService.findOne(BigInt(id));
+    // 判断是数字ID还是slug
+    if (/^\d+$/.test(id)) {
+      return this.clanService.findOne(BigInt(id));
+    } else {
+      // slug 查询
+      return this.clanService.findBySlug(id);
+    }
   }
 
   /**

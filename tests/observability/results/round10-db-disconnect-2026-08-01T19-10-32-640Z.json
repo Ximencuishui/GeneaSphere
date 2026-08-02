@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-08-01T19:11:16.240Z",
+  "scenarios": [
+    "baseline real server healthy",
+    "bad-DB instance fail-fast (PRISMA_CONNECT_MAX_RETRIES=1)",
+    "bad-DB instance fail-fast (PRISMA_CONNECT_MAX_RETRIES=5)",
+    "recovery instance with real DB starts healthy",
+    "real server unaffected by isolated failures"
+  ],
+  "checks": [
+    {
+      "name": "baseline real server /api/health/ready status=ready",
+      "ok": true,
+      "detail": "http=200"
+    },
+    {
+      "name": "baseline real server /api/health returns 200",
+      "ok": true,
+      "detail": "http=200"
+    },
+    {
+      "name": "bad-DB isolated process exits (fail-fast) instead of pretending healthy",
+      "ok": false,
+      "detail": "exitCode=null after 1.5s"
+    },
+    {
+      "name": "production-retry isolated process also fails within 5s window",
+      "ok": false,
+      "detail": "exitCode=null"
+    },
+    {
+      "name": "recovery — isolated instance with real DB starts and reports ready",
+      "ok": false
+    },
+    {
+      "name": "real server /api/health/ready still status=ready after drill",
+      "ok": true,
+      "detail": "http=200"
+    }
+  ],
+  "pass": 3,
+  "fail": 3,
+  "goNoGo": "FAIL",
+  "notes": [
+    "PrismaService.onModuleInit 会在 DB 不可用时按重试策略失败，进程退出不会被错误标记为 ready",
+    "运行时 DB 抖动由 queryWithRetry 包裹（PRISMA_QUERY_MAX_RETRIES=2, 300ms 退避），可用于 SELECT 1 之类的健康检查",
+    "5xx 异常会自动触发 webhook 告警（已在 Round 5 验证）",
+    "生产环境建议：liveness 探针用 /api/health；readiness 探针用 /api/health/ready；K8s/Helm 会自动隔离未 ready 的实例"
+  ]
+}

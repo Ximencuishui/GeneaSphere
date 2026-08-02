@@ -1699,21 +1699,33 @@ const zoomOut = () => {
   }
 };
 
-const resetZoom = () => {
+const resetZoom = async () => {
   const g: any = graph.value;
   if (!g) return;
   // 优先复用最近一次布局引擎算出的视口（zoom + centerX/Y），
   // 否则 G6 内置 fitView() 会把 ~4000px 宽族谱压到 zoom≈0.04，节点看不清
   const vp = lastViewportConfig;
-  if (vp && typeof g.zoomTo === 'function' && typeof g.translateTo === 'function') {
-    g.zoomTo(vp.zoom, { duration: 200 });
-    // translateTo 以视口坐标移动，使 centerX/Y 对齐画布中心
-    g.translateTo({ x: vp.centerX, y: vp.centerY }, { duration: 200 });
+  if (
+    vp &&
+    typeof g.zoomTo === 'function' &&
+    typeof g.translateBy === 'function' &&
+    typeof g.getViewportByCanvas === 'function' &&
+    typeof g.getSize === 'function'
+  ) {
+    // G6 每次视口变换都会取消上一段动画，因此必须等待 zoomTo 完成后再平移。
+    await g.zoomTo(vp.zoom, { duration: 200 });
+    const [canvasW, canvasH] = g.getSize();
+    const contentVp = g.getViewportByCanvas([vp.centerX, vp.centerY]);
+    const delta: [number, number] = [
+      canvasW / 2 - contentVp[0],
+      canvasH / 2 - contentVp[1],
+    ];
+    await g.translateBy(delta, { duration: 200 });
     return;
   }
   // 兜底：尚未完成 layout 时走 G6 内置 fitView
   if (typeof g.fitView === 'function') {
-    g.fitView();
+    await g.fitView();
   }
 };
 

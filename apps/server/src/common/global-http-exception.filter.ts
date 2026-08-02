@@ -5,8 +5,10 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { AlertService } from './alert.service';
 
 /**
  * 统一错误响应格式
@@ -46,6 +48,8 @@ export interface ApiErrorBody {
 @Catch()
 export class GlobalHttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalHttpExceptionFilter.name);
+
+  constructor(@Optional() private readonly alertService?: AlertService) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -90,9 +94,24 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       ...(details !== undefined ? { details } : {}),
     };
 
-    // 4xx 警告，5xx 错误
+    // 4xx 警告，5xx 错误 + 触发告警 webhook（如果可用）
     if (status >= 500) {
       this.logger.error(`${req?.method} ${req?.url} → ${status} ${message}`);
+      if (this.alertService && process.env.NODE_ENV !== 'test') {
+        this.alertService.send({
+          level: status >= HttpStatus.INTERNAL_SERVER_ERROR ? 'P0' : 'P1',
+          title: `${req?.method} ${req?.url || ''} ${status}`,
+          source: 'exception',
+          details: {
+            status,
+            code,
+            message,
+            path: req?.url || '',
+            method: req?.method || '',
+            stack: exception instanceof Error ? exception.stack?.slice(0, 800) : undefined,
+          },
+        });
+      }
     } else if (status >= 400) {
       this.logger.warn(`${req?.method} ${req?.url} → ${status} ${message}`);
     }

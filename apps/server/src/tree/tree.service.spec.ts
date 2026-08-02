@@ -44,6 +44,8 @@ describe('TreeService', () => {
         thumbnail_url: null,
         created_at: new Date(),
         updated_at: new Date(),
+        deleted_at: null,
+        deleted_by: null,
       };
 
       prisma.person.create.mockResolvedValue(person);
@@ -86,6 +88,8 @@ describe('TreeService', () => {
         thumbnail_url: null,
         created_at: new Date(),
         updated_at: new Date(),
+        deleted_at: null,
+        deleted_by: null,
       };
 
       prisma.person.create.mockResolvedValue(childPerson);
@@ -139,6 +143,8 @@ describe('TreeService', () => {
         thumbnail_url: null,
         created_at: new Date(),
         updated_at: new Date(),
+        deleted_at: null,
+        deleted_by: null,
       };
 
       prisma.person.create.mockResolvedValue(childPerson);

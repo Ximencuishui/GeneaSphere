@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import {
   Monitor,
@@ -76,10 +77,22 @@ const fetchPendingCount = async () => {
       bio_count: stats.pending_bio_reviews || 0,
       merge_count: stats.pending_applications || 0,
     }
-  } catch {
+  } catch (err: any) {
     pendingCount.value = 0
+    // 家族 slug 不存在（404）：提示用户并跳回家族选择页，
+    // 避免 main 区域空白造成"页面打不开"的体感
+    if (err?.response?.status === 404 && err?.response?.data?.code === 'NOT_FOUND') {
+      ElMessage.error('家族不存在或已被删除，正在返回家族列表…')
+      router.replace('/clans')
+    }
   }
 }
+
+// 监听路由变化（slug 切换）时重新拉取待办
+watch(
+  () => route.params.slug,
+  () => fetchPendingCount(),
+)
 
 onMounted(() => {
   fetchPendingCount()
@@ -658,3 +671,5 @@ const handleLogout = () => {
   }
 }
 </style>
+
+

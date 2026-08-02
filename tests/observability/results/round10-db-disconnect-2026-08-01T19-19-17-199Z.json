@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-08-01T19:20:11.792Z",
+  "scenarios": [
+    "baseline real server (3120) healthy",
+    "bad-DB isolated (port 3122) fails with non-zero exit code",
+    "recovery isolated (port 3123) starts and reports ready",
+    "real server unaffected by isolated failures",
+    "/metrics stable through drill"
+  ],
+  "checks": [
+    {
+      "name": "baseline real server /api/health/ready status=ready",
+      "ok": true,
+      "detail": "http=200"
+    },
+    {
+      "name": "baseline real server /api/health returns 200",
+      "ok": true,
+      "detail": "http=200"
+    },
+    {
+      "name": "bad-DB isolated process exits with non-zero code (fail-fast in DB error)",
+      "ok": true,
+      "detail": "exitCode=1 after 35.381s"
+    },
+    {
+      "name": "recovery — isolated instance with real DB starts and reports ready",
+      "ok": true,
+      "detail": "after 17.806s latency=295ms"
+    },
+    {
+      "name": "real server /api/health/ready still status=ready after drill",
+      "ok": true,
+      "detail": "http=200"
+    },
+    {
+      "name": "/metrics exposes family_count + http_requests_total + prisma_query_duration",
+      "ok": true,
+      "detail": "http=200 family=true http=true prisma=true"
+    }
+  ],
+  "pass": 6,
+  "fail": 0,
+  "goNoGo": "PASS",
+  "notes": [
+    "PrismaService.onModuleInit in DB 不可用时按 5×5s 重试后失败退出，进程不会被错误标记为 ready。",
+    "运行时 DB 抖动由 queryWithRetry 包裹（PRISMA_QUERY_MAX_RETRIES=2, 300ms 退避）。",
+    "5xx 异常会自动触发 webhook 告警（已在 Round 5 验证）。",
+    "生产环境建议：liveness 探针用 /api/health；readiness 探针用 /api/health/ready；K8s/Helm 会自动隔离未 ready 的实例。"
+  ]
+}

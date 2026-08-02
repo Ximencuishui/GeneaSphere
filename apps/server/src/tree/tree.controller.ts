@@ -116,15 +116,19 @@ export class TreeController {
    * 与其他 admin 路由一致：URL 段优先按 clanSlug 解析（ClanResolverService 解析为 BigInt，
    * 顺便校验 NORMAL 状态——封禁/审核中家族拒绝访问）。
    * 兼容旧链接：若 URL 段是纯数字（数据库 BigInt 的字符串形式），也按 clan.id 解析。
+   *
+   * @param depth 可选参数，控制加载代数。默认 0 表示全部加载。正数表示只加载到指定代数。
    */
   @Public()
   @Get('clan/:clanSlug/full')
   async getClanFullTree(
     @Param('clanSlug') clanSlug: string,
     @Query('userId') userId?: string,
+    @Query('depth') depth?: string,
   ): Promise<ClanTreeResponse> {
     const clanId = await this.resolveClanId(clanSlug);
-    return await this.treeService.getClanFullTree(clanId, userId);
+    const maxDepth = depth ? parseInt(depth, 10) : 0;
+    return await this.treeService.getClanFullTree(clanId, userId, maxDepth);
   }
 
   /**

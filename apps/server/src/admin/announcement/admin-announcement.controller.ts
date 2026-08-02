@@ -7,6 +7,7 @@ import {
   Patch,
   Body,
   Param,
+  ParseIntPipe,
   Query,
   UseGuards,
   Request,
@@ -15,6 +16,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
+import { sanitizeUserText } from '../../common/sanitize';
 
 @ApiTags('admin/announcements')
 @Controller('api/admin/announcements')
@@ -39,7 +41,8 @@ export class AdminAnnouncementController {
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -98,11 +101,12 @@ export class AdminAnnouncementController {
   @ApiOperation({ summary: '获取公告详情' })
   async getAnnouncement(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const announcement = await this.prisma.clanAnnouncement.findUnique({
       where: { id: BigInt(id) },
@@ -142,13 +146,18 @@ export class AdminAnnouncementController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
+
+    // 安全：content/title 服务端转义，防存储型 XSS
+    const safeTitle = sanitizeUserText(body.title);
+    const safeContent = sanitizeUserText(body.content);
 
     const announcement = await this.prisma.clanAnnouncement.create({
       data: {
         clan_id: clanId,
-        title: body.title,
-        content: body.content,
+        title: safeTitle,
+        content: safeContent,
         cover_url: body.cover_url,
         is_pinned: body.is_pinned || false,
         is_active: body.is_active !== false,
@@ -163,7 +172,7 @@ export class AdminAnnouncementController {
       action: 'CREATE_ANNOUNCEMENT',
       targetType: 'ClanAnnouncement',
       targetId: announcement.id.toString(),
-      details: `创建公告: ${body.title}`,
+      details: `创建公告: ${safeTitle}`,
     });
 
     return {
@@ -184,17 +193,21 @@ export class AdminAnnouncementController {
   @ApiOperation({ summary: '编辑公告' })
   async updateAnnouncement(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
+
+    const safeTitle = body.title !== undefined ? sanitizeUserText(body.title) : undefined;
+    const safeContent = body.content !== undefined ? sanitizeUserText(body.content) : undefined;
 
     const announcement = await this.prisma.clanAnnouncement.update({
       where: { id: BigInt(id) },
       data: {
-        title: body.title,
-        content: body.content,
+        title: safeTitle,
+        content: safeContent,
         cover_url: body.cover_url,
         is_active: body.is_active,
         is_pinned: body.is_pinned,
@@ -227,11 +240,12 @@ export class AdminAnnouncementController {
   @ApiOperation({ summary: '删除公告' })
   async deleteAnnouncement(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const announcement = await this.prisma.clanAnnouncement.findUnique({
       where: { id: BigInt(id) },
@@ -250,7 +264,7 @@ export class AdminAnnouncementController {
       userId,
       action: 'DELETE_ANNOUNCEMENT',
       targetType: 'ClanAnnouncement',
-      targetId: id,
+      targetId: id.toString(),
       details: `删除公告: ${announcement.title}`,
     });
 
@@ -264,12 +278,13 @@ export class AdminAnnouncementController {
   @ApiOperation({ summary: '置顶/取消置顶公告' })
   async togglePin(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Query('clanSlug') clanSlug: string,
     @Body() body: { isPinned: boolean },
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     // 最多置顶3条
     if (body.isPinned) {
@@ -291,7 +306,7 @@ export class AdminAnnouncementController {
       userId,
       action: body.isPinned ? 'PIN_ANNOUNCEMENT' : 'UNPIN_ANNOUNCEMENT',
       targetType: 'ClanAnnouncement',
-      targetId: id,
+      targetId: id.toString(),
       details: `${body.isPinned ? '置顶' : '取消置顶'}公告: ${announcement.title}`,
     });
 
@@ -308,12 +323,13 @@ export class AdminAnnouncementController {
   @ApiOperation({ summary: '下架/上架公告' })
   async toggleStatus(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Query('clanSlug') clanSlug: string,
     @Body() body: { isActive: boolean },
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     // 先获取当前状态
     const current = await this.prisma.clanAnnouncement.findUnique({
@@ -339,7 +355,7 @@ export class AdminAnnouncementController {
       userId,
       action: body.isActive ? 'PUBLISH_ANNOUNCEMENT' : 'UNPUBLISH_ANNOUNCEMENT',
       targetType: 'ClanAnnouncement',
-      targetId: id,
+      targetId: id.toString(),
       details: `${body.isActive ? '发布' : '下架'}公告: ${announcement.title}`,
     });
 

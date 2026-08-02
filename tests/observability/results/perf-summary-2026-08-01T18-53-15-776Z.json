@@ -1,0 +1,97 @@
+{
+  "timestamp": "2026-08-01T18:54:10.731Z",
+  "base": "http://127.0.0.1:3120",
+  "phases": [
+    {
+      "name": "health-baseline-5x200",
+      "concurrency": 5,
+      "total": 200,
+      "durationMs": 222,
+      "rps": 900.9,
+      "avgMs": 5.27,
+      "p50Ms": 4.38,
+      "p95Ms": 13.19,
+      "p99Ms": 15.06,
+      "maxMs": 16.07,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "health-burst-50x100",
+      "concurrency": 50,
+      "total": 100,
+      "durationMs": 83,
+      "rps": 1204.8,
+      "avgMs": 37.22,
+      "p50Ms": 36.39,
+      "p95Ms": 62.2,
+      "p99Ms": 65.07,
+      "maxMs": 65.81,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "statistics-5x100",
+      "concurrency": 5,
+      "total": 100,
+      "durationMs": 26676,
+      "rps": 3.7,
+      "avgMs": 1309.43,
+      "p50Ms": 1208.88,
+      "p95Ms": 2048.69,
+      "p99Ms": 2340.57,
+      "maxMs": 2351.55,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "statistics-burst-30x100",
+      "concurrency": 30,
+      "total": 100,
+      "durationMs": 25300,
+      "rps": 4,
+      "avgMs": 6556.62,
+      "p50Ms": 7432.47,
+      "p95Ms": 7989.81,
+      "p99Ms": 8027.09,
+      "maxMs": 8027.71,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "login-fail-5x50",
+      "concurrency": 5,
+      "total": 50,
+      "durationMs": 2657,
+      "rps": 18.8,
+      "avgMs": 243.91,
+      "p50Ms": 307.77,
+      "p95Ms": 566.39,
+      "p99Ms": 751.13,
+      "maxMs": 779.17,
+      "errors": {
+        "network": 0,
+        "http4xx": 50,
+        "http5xx": 0,
+        "other": 0
+      }
+    }
+  ],
+  "goNoGo": "PASS"
+}

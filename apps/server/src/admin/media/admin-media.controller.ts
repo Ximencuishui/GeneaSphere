@@ -46,7 +46,8 @@ export class AdminMediaController {
     @Query('keyword') keyword?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '30', 10);
@@ -167,7 +168,8 @@ export class AdminMediaController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const media = await this.prisma.mediaArchive.findUnique({
       where: { id: BigInt(id) },
@@ -234,7 +236,8 @@ export class AdminMediaController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
 
     const updateData: any = {};
 
@@ -302,7 +305,8 @@ export class AdminMediaController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const media = await this.prisma.mediaArchive.findUnique({
       where: { id: BigInt(id) },
@@ -350,7 +354,8 @@ export class AdminMediaController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
 
     const { ids, ...updates } = body;
 
@@ -395,7 +400,8 @@ export class AdminMediaController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+
 
     const { ids } = body;
 
@@ -437,7 +443,8 @@ export class AdminMediaController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     // 先取消该相册下其他图片的封面状态
     const media = await this.prisma.mediaArchive.findUnique({
@@ -467,150 +474,6 @@ export class AdminMediaController {
       targetType: 'MediaArchive',
       targetId: id,
       details: `设置影像为封面`,
-    });
-
-    return { success: true };
-  }
-
-  /**
-   * 获取相册列表
-   */
-  @Get('../albums/list')
-  @ApiOperation({ summary: '获取相册列表' })
-  async getAlbums(
-    @Request() req,
-    @Query('clanSlug') clanSlug: string,
-  ) {
-    const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
-
-    const albums = await this.prisma.clanAlbum.findMany({
-      where: { clan_id: clanId },
-      orderBy: { created_at: 'desc' },
-    });
-
-    return {
-      data: albums.map((a) => ({
-        id: a.id.toString(),
-        name: a.name,
-        description: a.description,
-        cover_url: a.cover_url,
-        default_privacy: a.default_privacy,
-        photo_count: a.photo_count,
-        created_at: a.created_at,
-      })),
-      total: albums.length,
-    };
-  }
-
-  /**
-   * 创建相册
-   */
-  @Post('../albums')
-  @ApiOperation({ summary: '创建相册' })
-  async createAlbum(
-    @Request() req,
-    @Body() body: any,
-  ) {
-    const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
-
-    const album = await this.prisma.clanAlbum.create({
-      data: {
-        clan_id: clanId,
-        name: body.name,
-        description: body.description,
-        cover_url: body.cover_url,
-        default_privacy: body.default_privacy || 'clan',
-        creator_id: userId,
-      },
-    });
-
-    await this.adminService.logAction({
-      clanId,
-      userId,
-      action: 'CREATE_ALBUM',
-      targetType: 'ClanAlbum',
-      targetId: album.id.toString(),
-      details: `创建相册: ${body.name}`,
-    });
-
-    return {
-      id: album.id.toString(),
-      name: album.name,
-      created_at: album.created_at,
-    };
-  }
-
-  /**
-   * 更新相册
-   */
-  @Put('../albums/:id')
-  @ApiOperation({ summary: '更新相册' })
-  async updateAlbum(
-    @Request() req,
-    @Param('id') id: string,
-    @Body() body: any,
-  ) {
-    const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
-
-    const updateData: any = {};
-    if (body.name !== undefined) updateData.name = body.name;
-    if (body.description !== undefined) updateData.description = body.description;
-    if (body.cover_url !== undefined) updateData.cover_url = body.cover_url;
-    if (body.default_privacy !== undefined) updateData.default_privacy = body.default_privacy;
-
-    const album = await this.prisma.clanAlbum.update({
-      where: { id: BigInt(id) },
-      data: updateData,
-    });
-
-    await this.adminService.logAction({
-      clanId,
-      userId,
-      action: 'UPDATE_ALBUM',
-      targetType: 'ClanAlbum',
-      targetId: id,
-      details: `更新相册: ${body.name}`,
-    });
-
-    return {
-      id: album.id.toString(),
-      updated_at: album.updated_at,
-    };
-  }
-
-  /**
-   * 删除相册
-   */
-  @Delete('../albums/:id')
-  @ApiOperation({ summary: '删除相册' })
-  async deleteAlbum(
-    @Request() req,
-    @Param('id') id: string,
-    @Query('clanSlug') clanSlug: string,
-  ) {
-    const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
-
-    // 将相册中的照片移到"未分类"
-    await this.prisma.mediaArchive.updateMany({
-      where: { album_id: BigInt(id) },
-      data: { album_id: null },
-    });
-
-    await this.prisma.clanAlbum.delete({
-      where: { id: BigInt(id) },
-    });
-
-    await this.adminService.logAction({
-      clanId,
-      userId,
-      action: 'DELETE_ALBUM',
-      targetType: 'ClanAlbum',
-      targetId: id,
-      details: `删除相册`,
     });
 
     return { success: true };

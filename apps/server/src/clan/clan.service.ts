@@ -118,6 +118,43 @@ export class ClanService {
   }
 
   /**
+   * Find a clan by slug
+   * @param slug - Clan slug (e.g., 'zhuxi-demo')
+   * @returns The clan or null
+   */
+  async findBySlug(slug: string) {
+    const clan = await this.prisma.clan.findUnique({
+      where: { slug },
+      include: {
+        admin_user: {
+          select: {
+            id: true,
+            phone: true,
+          },
+        },
+        persons: {
+          take: 10,
+          orderBy: {
+            created_at: 'desc',
+          },
+        },
+        _count: {
+          select: {
+            persons: true,
+            media: true,
+          },
+        },
+      },
+    });
+
+    if (!clan) {
+      throw new NotFoundException(`Clan with slug '${slug}' not found`);
+    }
+
+    return this.toJson(clan);
+  }
+
+  /**
    * Update a clan
    * @param id - Clan ID
    * @param updateClanDto - Data to update

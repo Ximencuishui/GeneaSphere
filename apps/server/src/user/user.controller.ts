@@ -53,9 +53,26 @@ export class UserController {
     if (!file) {
       throw new BadRequestException('请上传头像文件');
     }
+    // 1. MIME 白名单
     if (!/^image\/(jpe?g|png|webp)$/i.test(file.mimetype)) {
       throw new BadRequestException('头像仅支持 jpg/png/webp');
     }
+    // 2. 扩展名白名单（防 shell.php.jpg / shell.php\0.jpg 双扩展名绕过）
+    const ext = (file.originalname || '').split('.').pop()?.toLowerCase() || '';
+    if (!['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+      throw new BadRequestException('头像扩展名仅支持 jpg/png/webp');
+    }
+    // 3. 魔术字节校验（防 MIME 伪造）
+    const magic = file.buffer.slice(0, 12);
+    const ok =
+      (magic[0] === 0xff && magic[1] === 0xd8 && magic[2] === 0xff) || // JPEG
+      (magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4e && magic[3] === 0x47) || // PNG
+      (magic.toString('ascii', 0, 4) === 'RIFF' && magic.toString('ascii', 8, 12) === 'WEBP'); // WEBP
+    if (!ok) {
+      throw new BadRequestException('头像文件内容与图片格式不符');
+    }
+    // 4. 文件名清洗（防路径穿越）
+    const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     if (file.size > 5 * 1024 * 1024) {
       throw new BadRequestException('头像大小不能超过 5MB');
     }
@@ -64,7 +81,7 @@ export class UserController {
     const mime = file.mimetype;
     const dataUrl = `data:${mime};base64,${base64}`;
     const avatarUrl = await this.userService.uploadAvatar(req.user.userId, dataUrl);
-    return { avatar_url: avatarUrl };
+    return { avatar_url: avatarUrl, safe_filename: safeName };
   }
 
   @Post('avatar/data-url')

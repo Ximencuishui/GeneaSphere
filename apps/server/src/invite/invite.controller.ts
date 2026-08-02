@@ -28,6 +28,7 @@ import { ModificationReviewDto } from './dto/modification-review.dto';
 import { WxCallbackDto } from './dto/wx-callback.dto';
 import { VerificationStatus } from '@prisma/client';
 import { ClanResolverService } from '../common/clan-resolver.service';
+import { serializeBigInt } from '../common/bigint-serializer';
 
 @ApiTags('invite')
 @Controller('api/invite')
@@ -166,7 +167,17 @@ export class InviteController {
   @ApiOperation({ summary: '已认证族人生成互发验证二维码（30 分钟有效）' })
   async createPeerQrcode(@Request() req, @Body() dto: CreatePeerQrcodeDto) {
     const { id: clanId } = await this.clanResolver.resolveOrThrow(dto.clan_slug);
-    return this.invite.createPeerQrcode(req.user.userId, clanId);
+    return { data: serializeBigInt(await this.invite.createPeerQrcode(req.user.userId, clanId)) };
+  }
+
+  // ⚠️ /peer-qrcode/my-records 必须在 /peer-qrcode/:id 之前声明，
+  // 否则 NestJS 会把 my-records 解析为 :id，导致 BigInt 转换失败。
+  @Get('peer-qrcode/my-records')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '我的互发验证记录' })
+  async listMyPeerQrcodes(@Request() req) {
+    return { data: serializeBigInt(await this.invite.listMyPeerQrcodes(req.user.userId)) };
   }
 
   @Get('peer-qrcode/:id')
@@ -174,15 +185,7 @@ export class InviteController {
   @ApiBearerAuth()
   @ApiOperation({ summary: '互发二维码详情' })
   async getPeerQrcode(@Request() req, @Param('id') idStr: string) {
-    return this.invite.getPeerQrcode(BigInt(idStr), req.user.userId);
-  }
-
-  @Get('peer-qrcode/my-records')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: '我的互发验证记录' })
-  async listMyPeerQrcodes(@Request() req) {
-    return { data: await this.invite.listMyPeerQrcodes(req.user.userId) };
+    return { data: serializeBigInt(await this.invite.getPeerQrcode(BigInt(idStr), req.user.userId)) };
   }
 
   // ==================== H5 公开 API ====================

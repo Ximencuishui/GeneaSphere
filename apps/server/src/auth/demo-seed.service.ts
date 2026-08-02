@@ -188,11 +188,13 @@ export class DemoSeedService implements OnModuleInit {
         this.logger.log(`✅ PersonUserLink 已创建: user=${demoMemberUser.id} -> 朱小小(person=${zhuxiaoxiao.id})`);
       }
 
-      // 仅在首次创建家族时设置完整 description（避免每次启动都写库）
-      if (isFirstCreate) {
+      // P2-2 修复：确保 demoClan.description 始终有内容（与前端「家族简介」占位文案一致）
+      // 首次创建时 line 134 已带 description；后续重启动时也幂等补齐老数据库的空字段。
+      const targetDescription = this.buildClanDescription();
+      if (demoClan.description !== targetDescription) {
         await this.prisma.clan.update({
           where: { id: demoClan.id },
-          data: { description: this.buildClanDescription() },
+          data: { description: targetDescription },
         });
       }
 
@@ -203,12 +205,42 @@ export class DemoSeedService implements OnModuleInit {
     }
   }
   private async seedPlatformAdmin() {
+    // 4 个角色的演示账号，统一密码 admin123，便于平台多角色权限测试。
+    // 现有 seed 只创建 super 账号；此处扩展为完整 4 角色覆盖（幂等 upsert）。
+    // 手机号使用 1380000009X 段避开族员演示账号冲突段。
+    // 使用 Prisma upsert 原子化 findUnique+create/update，避免热重启并发竞态
+    // （参见 R4 报告：修复前首启观察到 id 跳跃 1→2→6→7，中间 id 被竞态失败占用）。
+    const demoAccounts: Array<{
+      username: string;
+      role: 'super' | 'operator' | 'finance' | 'auditor';
+      real_name: string;
+      phone: string;
+    }> = [
+      { username: 'platform_admin',    role: 'super',    real_name: '超级管理员',  phone: '13800000090' },
+      { username: 'platform_operator', role: 'operator', real_name: '运营管理员',  phone: '13800000091' },
+      { username: 'platform_finance',  role: 'finance',  real_name: '财务管理员',  phone: '13800000092' },
+      { username: 'platform_auditor',  role: 'auditor',  real_name: '审计管理员',  phone: '13800000093' },
+    ];
     const passwordHash = await bcrypt.hash('admin123', 10);
-    const existing = await this.prisma.platformAdmin.findUnique({ where: { username: 'platform_admin' } });
-    if (!existing) {
-      await this.prisma.platformAdmin.create({ data: { username: 'platform_admin', password_hash: passwordHash, role: 'super', real_name: '超级管理员', phone: '13800000001', status: 'active' } });
-    } else {
-      await this.prisma.platformAdmin.update({ where: { username: 'platform_admin' }, data: { password_hash: passwordHash } });
+    for (const acc of demoAccounts) {
+      await this.prisma.platformAdmin.upsert({
+        where: { username: acc.username },
+        create: {
+          username: acc.username,
+          password_hash: passwordHash,
+          role: acc.role,
+          real_name: acc.real_name,
+          phone: acc.phone,
+          status: 'active',
+        },
+        update: {
+          password_hash: passwordHash,
+          role: acc.role,
+          real_name: acc.real_name,
+          phone: acc.phone,
+        },
+      });
+      this.logger.log(`✅ 平台管理员演示账号 upsert: ${acc.username} / admin123 (${acc.role})`);
     }
   }
 

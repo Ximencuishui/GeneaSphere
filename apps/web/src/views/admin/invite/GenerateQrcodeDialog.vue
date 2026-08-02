@@ -1,8 +1,8 @@
 <template>
   <el-dialog v-model="visible" title="生成邀请二维码" width="420" :close-on-click-modal="false">
     <el-form :model="form" label-width="100">
-      <el-form-item label="家族 ID">
-        <el-input v-model="form.clan_id" disabled />
+      <el-form-item label="家族">
+        <el-input v-model="form.clan_slug" disabled />
       </el-form-item>
       <el-form-item label="有效期（天）">
         <el-input-number v-model="form.expire_days" :min="1" :max="30" />
@@ -23,7 +23,7 @@ import { ElMessage } from 'element-plus'
 
 const props = defineProps<{
   visible: boolean
-  clanId: string
+  clanSlug: string
 }>()
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
@@ -34,11 +34,12 @@ const visible = ref(props.visible)
 watch(() => props.visible, (v) => (visible.value = v))
 watch(visible, (v) => emit('update:visible', v))
 
+// P1-5 修复：clan_id → clan_slug，与后端 /api/invite/qrcodes POST body 对齐
 const form = ref({
-  clan_id: props.clanId,
+  clan_slug: props.clanSlug,
   expire_days: 7,
 })
-watch(() => props.clanId, (v) => (form.value.clan_id = v))
+watch(() => props.clanSlug, (v) => (form.value.clan_slug = v))
 
 const submitting = ref(false)
 
@@ -46,12 +47,12 @@ const onSubmit = async () => {
   try {
     submitting.value = true
     const res = await axios.post('/api/invite/qrcodes', {
-      clan_id: parseInt(form.value.clan_id),
+      clan_slug: form.value.clan_slug,
       expire_days: form.value.expire_days,
     })
     ElMessage.success('生成成功')
     visible.value = false
-    emit('created', res)
+    emit('created', res.data)
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '生成失败')
   } finally {

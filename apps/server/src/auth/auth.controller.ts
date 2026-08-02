@@ -1,4 +1,13 @@
-import { Controller, Post, Get, Body, Req, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Req,
+  UseGuards,
+  Query,
+  NotFoundException,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SmsService } from './sms.service';
 import { RegisterDto, LoginDto, SendSmsCodeDto } from './dto/auth.dto';
@@ -6,6 +15,7 @@ import { Public } from './public.decorator';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ClanResolverService } from '../common/clan-resolver.service';
 import { serializeBigInt } from '../common/bigint-serializer';
+import { RateLimitGuard } from '../common/rate-limit.middleware';
 
 @Controller('api/auth')
 export class AuthController {
@@ -16,6 +26,7 @@ export class AuthController {
   ) {}
 
   @Public()
+  @UseGuards(RateLimitGuard)
   @Post('send-sms-code')
   async sendSmsCode(@Body() dto: SendSmsCodeDto, @Req() req: any) {
     const ip = req.ip || req.connection?.remoteAddress;
@@ -23,27 +34,42 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(RateLimitGuard)
   @Post('register')
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 
   @Public()
+  @UseGuards(RateLimitGuard)
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }
 
   @Public()
+  @UseGuards(RateLimitGuard)
   @Post('demo-login')
   async demoLogin() {
+    this.ensureDemoLoginEnabled();
     return this.authService.demoLogin();
   }
 
   @Public()
+  @UseGuards(RateLimitGuard)
   @Post('demo-member-login')
   async demoMemberLogin() {
+    this.ensureDemoLoginEnabled();
     return this.authService.demoMemberLogin();
+  }
+
+  private ensureDemoLoginEnabled() {
+    const disabledByFlag =
+      process.env.DISABLE_DEMO_LOGIN?.trim().toLowerCase() === 'true';
+    if (process.env.NODE_ENV === 'production' || disabledByFlag) {
+      // 生产环境隐藏演示登录能力，不向外部暴露端点状态。
+      throw new NotFoundException('接口不存在');
+    }
   }
 
   /**

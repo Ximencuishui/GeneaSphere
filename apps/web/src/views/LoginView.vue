@@ -140,13 +140,18 @@ const handleMemberDemoLogin = async () => {
 
     ElMessage.success('欢迎体验族员个人页面！')
 
-    // demo 成员也优先用 slug 进入家族后台，体验路径与管理员一致
-    if (demoClanSlug) {
-      router.push(`/zupu/${demoClanSlug}/dashboard`)
-    } else if (demoClanId) {
-      router.push(`/tree/${demoClanId}`)
+    // 族员 demo 登录后跳转到用户中心（族员无 /zupu/:slug 后台权限，会被路由守卫拦截到空白页）
+    if (user.role === 'OWNER' || user.role === 'ADMIN') {
+      if (demoClanSlug) {
+        router.push(`/zupu/${demoClanSlug}/dashboard`)
+      } else if (demoClanId) {
+        router.push(`/tree/${demoClanId}`)
+      } else {
+        router.push('/clans')
+      }
     } else {
-      router.push('/dashboard')
+      // EDITOR / MEMBER → 用户中心
+      router.push('/user-center/profile')
     }
   } catch (error: any) {
     const msg = error.response?.data?.message || '演示服务暂不可用'

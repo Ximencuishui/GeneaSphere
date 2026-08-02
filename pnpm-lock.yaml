@@ -87,6 +87,9 @@ importers:
       cos-nodejs-sdk-v5:
         specifier: ^2.15.4
         version: 2.15.4
+      dotenv:
+        specifier: ^16.6.1
+        version: 16.6.1
       handlebars:
         specifier: ^4.7.9
         version: 4.7.9
@@ -108,6 +111,9 @@ importers:
       pdfkit:
         specifier: ^0.15.0
         version: 0.15.2
+      prom-client:
+        specifier: ^15.1.0
+        version: 15.1.3
       puppeteer-core:
         specifier: ^25.1.0
         version: 25.1.0
@@ -1637,6 +1643,10 @@ packages:
   '@one-ini/wasm@0.1.1':
     resolution: {integrity: sha512-XuySG1E38YScSJoMlqovLru4KTUNSjgVTIjyh7qMX6aNN5HY5Ct5LhRJdxO79JtTzKfzV/bnWpz+zquYrISsvw==}
 
+  '@opentelemetry/api@1.9.1':
+    resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
+    engines: {node: '>=8.0.0'}
+
   '@parcel/watcher-android-arm64@2.5.6':
     resolution: {integrity: sha512-YQxSS34tPF/6ZG7r/Ih9xy+kP/WwediEUsqmtf0cuCV5TPPKw/PQHRhueUo6JdeFJaqV3pyjm0GdYjZotbRt/A==}
     engines: {node: '>= 10.0.0'}
@@ -2708,6 +2718,9 @@ packages:
 
   bignumber.js@9.3.1:
     resolution: {integrity: sha512-Ko0uX15oIUS7wJ3Rb30Fs6SkVbLmPBAKdlm7q9+ak9bbIeFf0MwuBsQV6z7+X768/cHsfg+WlysDWJcmthjsjQ==}
+
+  bintrees@1.0.2:
+    resolution: {integrity: sha512-VOMgTMwjAaUG580SXn3LacVgjurrbMme7ZZNYGSSV7mmtY6QQRh0Eg3pwIcntQ77DErK1L0NxkbetjcoXzVwKw==}
 
   birpc@2.9.0:
     resolution: {integrity: sha512-KrayHS5pBi69Xi9JmvoqrIgYGDkD6mcSe/i6YKi3w5kekCLzrX4+nawcXqrj2tIp50Kw/mT/s3p+GVK0A0sKxw==}
@@ -4869,6 +4882,10 @@ packages:
   process-nextick-args@2.0.1:
     resolution: {integrity: sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==}
 
+  prom-client@15.1.3:
+    resolution: {integrity: sha512-6ZiOBfCywsD4k1BN9IX0uZhF+tJkV8q8llP64G5Hajs4JOeVLPCwpPVcpXy3BwYiUGgyJzsJJQeOIv7+hDSq8g==}
+    engines: {node: ^16 || ^18 || >=20}
+
   proto-list@1.2.4:
     resolution: {integrity: sha512-vtK/94akxsTMhe0/cbfpR+syPuszcuwhqVjJq26CuNDgFGj682oRBXOP5MJpv2r7JtE8MsiepGIqvvOTBwn2vA==}
 
@@ -5406,6 +5423,9 @@ packages:
   tapable@2.3.3:
     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
     engines: {node: '>=6'}
+
+  tdigest@0.1.2:
+    resolution: {integrity: sha512-+G0LLgjjo9BZX2MfdvPfH+MKLCrxlXSYec5DaPYP1fe6Iyhf0/fSmJ0bFiZ1F8BT6cGXl2LpltQptzjXKWEkKA==}
 
   tencentcloud-sdk-nodejs@4.1.253:
     resolution: {integrity: sha512-31stxNTFNJfAx03ir6oe1RitjbfrSlsW35UOVBhBBkI64Z5P+xukCOjMP2IWFK+WQhTrowppOrZE5zOpWxeQ3Q==}
@@ -7527,6 +7547,8 @@ snapshots:
 
   '@one-ini/wasm@0.1.1': {}
 
+  '@opentelemetry/api@1.9.1': {}
+
   '@parcel/watcher-android-arm64@2.5.6':
     optional: true
 
@@ -8624,6 +8646,8 @@ snapshots:
       require-from-string: 2.0.2
 
   bignumber.js@9.3.1: {}
+
+  bintrees@1.0.2: {}
 
   birpc@2.9.0: {}
 
@@ -11007,6 +11031,11 @@ snapshots:
 
   process-nextick-args@2.0.1: {}
 
+  prom-client@15.1.3:
+    dependencies:
+      '@opentelemetry/api': 1.9.1
+      tdigest: 0.1.2
+
   proto-list@1.2.4: {}
 
   proxy-addr@2.0.7:
@@ -11624,6 +11653,10 @@ snapshots:
       '@pkgr/core': 0.3.6
 
   tapable@2.3.3: {}
+
+  tdigest@0.1.2:
+    dependencies:
+      bintrees: 1.0.2
 
   tencentcloud-sdk-nodejs@4.1.253:
     dependencies:

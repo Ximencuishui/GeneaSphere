@@ -7,6 +7,8 @@
 export interface Clan {
   id: number;
   name: string;
+  /** 家族唯一语义标识（前端传参、URL、路由统一使用 slug 而非 id） */
+  slug?: string | null;
   description?: string;
   settings_json?: any;
   admin_user_id: string;

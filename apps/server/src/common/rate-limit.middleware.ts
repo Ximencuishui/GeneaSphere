@@ -1,4 +1,4 @@
-import { Injectable, NestMiddleware, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { Injectable, NestMiddleware, HttpException, HttpStatus, Logger, CanActivate, ExecutionContext } from '@nestjs/common';
 import type { Request, Response, NextFunction } from 'express';
 
 /**
@@ -104,5 +104,21 @@ export class RateLimitMiddleware implements NestMiddleware {
         this.buckets.delete(k);
       }
     }
+  }
+}
+
+/**
+ * 控制器级限流守卫：用于确保敏感端点在不同 Nest 路由挂载方式下仍然执行限流。
+ */
+@Injectable()
+export class RateLimitGuard implements CanActivate {
+  private readonly limiter = new RateLimitMiddleware();
+
+  canActivate(context: ExecutionContext): boolean {
+    const http = context.switchToHttp();
+    const req = http.getRequest<Request>();
+    const res = http.getResponse<Response>();
+    this.limiter.use(req, res, () => undefined);
+    return true;
   }
 }

@@ -232,6 +232,10 @@ model FamilyUnit {
   @@index([clan_id])
   @@index([husband_id])
   @@index([wife_id])
+  // [I-1 修复 2026-08-01] 根节点配偶查询按 clan_id + 单侧配偶 ID 过滤。
+  // 分开建立两个复合索引，确保 OR 的 husband_id 与 wife_id 两个分支都能命中 B-tree 前缀。
+  @@index([clan_id, husband_id])
+  @@index([clan_id, wife_id])
   @@map("family_units")
 }
 
@@ -269,8 +273,10 @@ model PersonAncestry {
   descendant    Person @relation("DescendantRelation", fields: [descendant_id], references: [id], onDelete: Cascade)
 
   @@id([ancestor_id, descendant_id])
-  @@index([ancestor_id, depth])
-  @@index([descendant_id])
+  // [I-1 修复 2026-08-01] 三个索引覆盖 getClanFullTree / getSubTree / findMainLineagePath 全部命中条件
+  @@index([ancestor_id, depth])     // getSubTree: WHERE ancestor_id=? AND depth<=N
+  @@index([descendant_id])           // getDirectParent: WHERE descendant_id=? AND depth=1
+  @@index([descendant_id, depth])    // buildLineagePath: WHERE descendant_id IN (...) AND depth=1
   @@map("person_ancestry")
 }
 
@@ -317,6 +323,9 @@ model MediaPersonLink {
   person    Person       @relation(fields: [person_id], references: [id], onDelete: Cascade)
 
   @@id([media_id, person_id])
+  // [I-1 修复 2026-08-01] 族谱树批量预取头像 (person_id IN ...) 走此索引，
+  // 避免 1000 人查询时对 person_id 索引做 1000 次随机 IO。
+  @@index([person_id])
   @@map("media_person_links")
 }
 

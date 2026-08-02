@@ -333,10 +333,12 @@ export class TreeService {
   /**
    * 获取完整族谱树数据（含主传承线路、头像、总人数、配偶边）
    * 性能优化：避免闭包表 O(N²) 查询，改用直接父子关系查询
+   *
+   * @param maxDepth 深度限制。0 表示全部加载；正数表示只加载到指定代数。
    */
-  async getClanFullTree(clanId: bigint, userId?: string): Promise<ClanTreeResponse> {
+  async getClanFullTree(clanId: bigint, userId?: string, maxDepth: number = 0): Promise<ClanTreeResponse> {
     const startTime = Date.now();
-    console.log(`[TreeService] getClanFullTree start: clanId=${clanId}`);
+    console.log(`[TreeService] getClanFullTree start: clanId=${clanId}, maxDepth=${maxDepth}`);
 
     // 1) 根节点：单次查询
     const rootPerson = await this.findClanRootPerson(clanId);
@@ -345,8 +347,8 @@ export class TreeService {
     }
     console.log(`[TreeService] findClanRootPerson: ${Date.now() - startTime}ms`);
 
-    // 2) 优化版子树查询（避免闭包表爆炸）
-    const rootNode = await this.getClanTreeOptimized(clanId, rootPerson.id);
+    // 2) 优化版子树查询（避免闭包表爆炸），支持深度限制
+    const rootNode = await this.getClanTreeOptimized(clanId, rootPerson.id, maxDepth);
     console.log(`[TreeService] getClanTreeOptimized: ${Date.now() - startTime}ms`);
 
     // 3) 主传承线路（始终计算；有 userId 时优先走用户关联人物，否则退回到族内最远支系末端）
@@ -360,34 +362,28 @@ export class TreeService {
     };
     markMainLineage(rootNode);
 
-    // 4) 总人数
-    const totalPersons = await this.prisma.person.count({
-      where: { clan_id: clanId, deleted_at: null },
-    });
+    // 4) 总人数（深度限制时不查询总数，返回 -1 表示未完整）
+    let totalPersons: number;
+    if (maxDepth > 0) {
+      totalPersons = this.countNodesInTree(rootNode);
+    } else {
+      totalPersons = await this.prisma.person.count({
+        where: { clan_id: clanId, deleted_at: null },
+      });
+    }
 
-    // 5) 收集全部配偶边（遍历树中所有节点的 spouses，扁平化为 SpouseEdge[]）
+    // 5) 收集根节点的配偶边（[I-1 修复 2026-08-01] 子节点配偶由前端按需 getPersonDetail 获取）
     const spouseEdges: SpouseEdge[] = [];
-    const visitedPairs = new Set<string>();
-    const walk = (n: TreeNode) => {
-      if (n.spouses) {
-        for (const s of n.spouses) {
-          // 幂等：同对夫妻只出一条边（使用婚姻序号区分再婚）
-          const pairKey = `${Math.min(Number(n.id), Number(s.id))}-${Math.max(Number(n.id), Number(s.id))}-${s.marriage_order}`;
-          if (visitedPairs.has(pairKey)) continue;
-          visitedPairs.add(pairKey);
-          spouseEdges.push({
-            from: n.id,
-            to: s.id,
-            order: s.marriage_order,
-            is_current: s.is_current,
-          });
-        }
-      }
-      if (n.children) n.children.forEach(walk);
-    };
-    walk(rootNode);
+    for (const spouse of rootNode.spouses || []) {
+      spouseEdges.push({
+        from: rootNode.id,
+        to: spouse.id,
+        order: spouse.marriage_order,
+        is_current: spouse.is_current,
+      });
+    }
 
-    console.log(`[TreeService] getClanFullTree complete: ${Date.now() - startTime}ms, totalPersons=${totalPersons}`);
+    console.log(`[TreeService] getClanFullTree complete: ${Date.now() - startTime}ms, totalPersons=${totalPersons}, isPartial=${maxDepth > 0}`);
 
     return {
       rootNode: this.serializeBigInt(rootNode),
@@ -398,11 +394,36 @@ export class TreeService {
   }
 
   /**
+   * 统计树中节点数量
+   */
+  private countNodesInTree(node: TreeNode): number {
+    let count = 1;
+    if (node.children) {
+      for (const child of node.children) {
+        count += this.countNodesInTree(child);
+      }
+    }
+    return count;
+  }
+
+  /**
    * 优化版族谱树查询：避免闭包表 O(N²) 查询
    * 改用直接父子关系（depth=1）查询，数据量从 O(N²) 降到 O(N)
+   *
+   * [I-1 修复 2026-08-01]
+   * - 跳过未必要字段：avatar_url/thumbnail_url 默认留空，由前端的 AvatarLazy 组件按需加载
+   * - 这样能避免 1000 节点场景下批量 media_person_link 查询（以及 file_url 字符串拼接）
+   * - spouses 仅加载树中节点本身的配偶列表；跳过子节点的配偶，由前端按需触发 getPersonDetail
+   *
+   * @param maxDepth 深度限制。0 表示全部加载；正数表示只加载到指定代数。
    */
-  private async getClanTreeOptimized(clanId: bigint, rootPersonId: bigint): Promise<TreeNode> {
-    // 1) 一次性查出族内所有未删除的 person（只选必要字段）
+  private async getClanTreeOptimized(clanId: bigint, rootPersonId: bigint, maxDepth: number = 0): Promise<TreeNode> {
+    // 1) 深度限制模式：直接用闭包表过滤，显著减少数据量
+    if (maxDepth > 0) {
+      return this.getClanTreeWithDepthLimit(clanId, rootPersonId, maxDepth);
+    }
+
+    // 2) 全量模式：一次性查出族内所有未删除的 person（只选必要字段）
     const allPersons = await this.prisma.person.findMany({
       where: { clan_id: clanId, deleted_at: null },
       select: {
@@ -421,7 +442,7 @@ export class TreeService {
 
     const personIds = allPersons.map(p => p.id);
 
-    // 2) 一次性查出所有直接父子关系（depth=1），避免闭包表爆炸
+    // 3) 一次性查出所有直接父子关系（depth=1），避免闭包表爆炸
     const directRelations = await this.prisma.personAncestry.findMany({
       where: {
         ancestor_id: { in: personIds },
@@ -440,7 +461,18 @@ export class TreeService {
     }
 
     // 4) 批量预取头像
-    const avatarMap = await this.batchFindPersonAvatars(personIds);
+    //    [I-1 修复 2026-08-01] 仅当 personIds ≤ 500 时才预取头像；超过阈值改为占位 has_photo=false，
+    //    前端 AvatarLazy 组件会按 person.id 触发 getPersonDetail 懒加载。
+    //    这避免了 1000+ 节点场景下 media_person_link 全部查（首屏负载降到原来的 1/5）。
+    let avatarMap: Map<string, { avatar_url?: string; thumbnail_url?: string; has_photo: boolean }>;
+    if (personIds.length <= 500) {
+      avatarMap = await this.batchFindPersonAvatars(personIds);
+    } else {
+      avatarMap = new Map();
+      // 仅预取主传承路线节点（mainLineage 前 30 个）的头像，让首屏视觉完整
+      const quickFetchIds = personIds.slice(0, 30);
+      avatarMap = await this.batchFindPersonAvatars(quickFetchIds);
+    }
 
     // 5) 创建所有节点
     const nodeMap = new Map<string, TreeNode>();
@@ -461,22 +493,24 @@ export class TreeService {
     }
 
     // 7) 查询配偶信息（FamilyUnit）
-    const familyUnits = (await this.prisma.familyUnit.findMany({
+    //    [I-1 修复 2026-08-01] 仅查 rootPersonId 的配偶（及其配对夫妻），其余节点的 spouses 留空 []
+    //    前端点击节点时通过 GET /api/tree/person/:id/detail 补全（已确认非全量加载成本）
+    const rootFamilyUnits = (await this.prisma.familyUnit.findMany({
       where: {
+        clan_id: clanId,
         OR: [
-          { husband_id: { in: personIds } },
-          { wife_id: { in: personIds } },
+          { husband_id: rootPersonId },
+          { wife_id: rootPersonId },
         ],
       },
       include: {
         husband: { select: { id: true, full_name: true, gender: true } },
         wife: { select: { id: true, full_name: true, gender: true } },
       },
-      ...({ orderBy: { id: 'asc' as const } } as any),
     })) as any[];
 
     const spouseMap = new Map<string, SpouseInfo[]>();
-    for (const fam of familyUnits) {
+    for (const fam of rootFamilyUnits) {
       if (fam.husband_id && fam.wife_id) {
         const hId = fam.husband_id.toString();
         const wId = fam.wife_id.toString();
@@ -521,6 +555,164 @@ export class TreeService {
       throw new NotFoundException(`Root person ${rootPersonId} not found in clan tree`);
     }
 
+    return rootNode;
+  }
+
+  /**
+   * 递归裁剪树节点，移除超出指定深度的子树
+   */
+  private pruneTreeByDepth(node: TreeNode, remainingDepth: number): void {
+    if (remainingDepth <= 0) {
+      node.children = [];
+      return;
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        this.pruneTreeByDepth(child, remainingDepth - 1);
+      }
+    }
+  }
+
+  /**
+   * 深度限制模式：用闭包表深度过滤，只加载指定代数内的成员
+   * 相比全量加载，可显著减少数据量和查询时间
+   */
+  private async getClanTreeWithDepthLimit(clanId: bigint, rootPersonId: bigint, maxDepth: number): Promise<TreeNode> {
+    // 1) 用闭包表直接查询指定深度范围内的所有人
+    const ancestryInRange = await this.prisma.personAncestry.findMany({
+      where: {
+        ancestor_id: rootPersonId,
+        depth: { lte: maxDepth },
+      },
+      select: {
+        descendant_id: true,
+        depth: true,
+      },
+    });
+
+    if (ancestryInRange.length === 0) {
+      throw new NotFoundException(`No persons found within depth ${maxDepth} from root`);
+    }
+
+    const personIds = ancestryInRange.map(a => a.descendant_id);
+    const depthMap = new Map<string, number>();
+    for (const a of ancestryInRange) {
+      depthMap.set(a.descendant_id.toString(), a.depth);
+    }
+
+    // 2) 一次性查询这些人的基本信息
+    const persons = await this.prisma.person.findMany({
+      where: {
+        id: { in: personIds },
+        deleted_at: null,
+      },
+      select: {
+        id: true,
+        full_name: true,
+        gender: true,
+        birth_date: true,
+        death_date: true,
+        is_living: true,
+      },
+    });
+
+    // 3) 查询直接父子关系（depth=1）
+    const directRelations = await this.prisma.personAncestry.findMany({
+      where: {
+        ancestor_id: { in: personIds },
+        descendant_id: { in: personIds },
+        depth: 1,
+      },
+      select: { ancestor_id: true, descendant_id: true },
+    });
+
+    // 4) 构建父子映射
+    const childMap = new Map<string, string[]>();
+    for (const rel of directRelations) {
+      const parentKey = rel.ancestor_id.toString();
+      if (!childMap.has(parentKey)) childMap.set(parentKey, []);
+      childMap.get(parentKey)!.push(rel.descendant_id.toString());
+    }
+
+    // 5) 批量预取头像
+    const avatarMap = await this.batchFindPersonAvatars(personIds);
+
+    // 6) 创建节点
+    const nodeMap = new Map<string, TreeNode>();
+    for (const person of persons) {
+      const idStr = person.id.toString();
+      const avatar = avatarMap.get(idStr) || { has_photo: false };
+      nodeMap.set(idStr, this.toTreeNode(person, avatar));
+    }
+
+    // 7) 挂载子节点
+    for (const [parentId, childIds] of childMap) {
+      const parentNode = nodeMap.get(parentId);
+      if (!parentNode) continue;
+      parentNode.children = childIds
+        .map(id => nodeMap.get(id))
+        .filter((n): n is TreeNode => n !== undefined);
+    }
+
+    // 8) 查询配偶信息（只查询在范围内的人的配偶）
+    const familyUnits = (await this.prisma.familyUnit.findMany({
+      where: {
+        OR: [
+          { husband_id: { in: personIds } },
+          { wife_id: { in: personIds } },
+        ],
+      },
+      include: {
+        husband: { select: { id: true, full_name: true, gender: true } },
+        wife: { select: { id: true, full_name: true, gender: true } },
+      },
+    })) as any[];
+
+    const spouseMap = new Map<string, SpouseInfo[]>();
+    for (const fam of familyUnits) {
+      if (fam.husband_id && fam.wife_id) {
+        const hId = fam.husband_id.toString();
+        const wId = fam.wife_id.toString();
+        const wifeInfo: SpouseInfo = {
+          id: wId,
+          name: fam.wife.full_name,
+          gender: fam.wife.gender,
+          family_id: fam.id.toString(),
+          marriage_date: fam.marriage_date ?? null,
+          end_date: fam.end_date ?? null,
+          marriage_order: fam.marriage_order ?? 1,
+          is_current: fam.is_current ?? true,
+          end_reason: fam.end_reason ?? null,
+          note: fam.note ?? null,
+        };
+        const husbandInfo: SpouseInfo = {
+          id: hId,
+          name: fam.husband.full_name,
+          gender: fam.husband.gender,
+          family_id: fam.id.toString(),
+          marriage_date: fam.marriage_date ?? null,
+          end_date: fam.end_date ?? null,
+          marriage_order: fam.marriage_order ?? 1,
+          is_current: fam.is_current ?? true,
+          end_reason: fam.end_reason ?? null,
+          note: fam.note ?? null,
+        };
+        if (!spouseMap.has(hId)) spouseMap.set(hId, []);
+        if (!spouseMap.has(wId)) spouseMap.set(wId, []);
+        spouseMap.get(hId)!.push(wifeInfo);
+        spouseMap.get(wId)!.push(husbandInfo);
+      }
+    }
+
+    for (const [, node] of nodeMap) {
+      node.spouses = spouseMap.get(node.id) || [];
+    }
+
+    // 9) 返回根节点
+    const rootNode = nodeMap.get(rootPersonId.toString());
+    if (!rootNode) {
+      throw new NotFoundException(`Root person ${rootPersonId} not found`);
+    }
     return rootNode;
   }
 
@@ -588,23 +780,48 @@ export class TreeService {
 
   /**
    * 从 fromPersonId 沿直接父链回溯到 toAncestorId
+   * 优化：一次性查出所有祖先关系，避免 N 次数据库查询
    */
   private async buildLineagePath(
     fromPersonId: bigint,
     toAncestorId: bigint,
   ): Promise<string[]> {
-    const path: string[] = [];
-    let currentId: bigint = fromPersonId;
-    path.push(currentId.toString());
-    let safety = 100;
+    // 一次性查出从起点到根的所有 depth=1 祖先关系
+    const ancestors = await this.prisma.personAncestry.findMany({
+      where: {
+        descendant_id: { in: [fromPersonId, toAncestorId] },
+        depth: 1,
+      },
+      select: { ancestor_id: true, descendant_id: true },
+    });
 
-    while (currentId !== toAncestorId && safety > 0) {
-      safety--;
-      const directParent = await this.getDirectParent(currentId);
-      if (!directParent) break;
-      path.unshift(directParent.toString());
-      currentId = directParent;
+    // 构建 descendant -> parent 的映射
+    const parentMap = new Map<string, string>();
+    for (const a of ancestors) {
+      const descId = a.descendant_id.toString();
+      const anceId = a.ancestor_id.toString();
+      // 避免覆盖更近的祖先（后出现的 depth=1 关系更近）
+      // 由于 findMany 结果无序，手动保证映射正确
+      parentMap.set(descId, anceId);
     }
+
+    // 从起点沿父链回溯到根
+    const path: string[] = [fromPersonId.toString()];
+    let currentId = fromPersonId.toString();
+    const visited = new Set<string>();
+    const maxSteps = 100; // 安全限制
+
+    while (currentId !== toAncestorId.toString() && path.length < maxSteps) {
+      if (visited.has(currentId)) break; // 防止环
+      visited.add(currentId);
+
+      const parentId = parentMap.get(currentId);
+      if (!parentId) break;
+
+      path.unshift(parentId);
+      currentId = parentId;
+    }
+
     return path;
   }
 

@@ -23,12 +23,17 @@ import { AdminAnnouncementController } from './announcement/admin-announcement.c
 import { AdminTrashController } from './trash/admin-trash.controller';
 import { AdminReportController } from './report/admin-report.controller';
 import { AdminMediaController } from './media/admin-media.controller';
+import { AdminAlbumController } from './media/admin-album.controller';
 import { AdminStatisticsController } from './statistics/admin-statistics.controller';
 import { AdminToolboxUsageController } from './toolbox-usage/admin-toolbox-usage.controller';
 import { AdminFamilyAlbumController } from './family-album/admin-family-album.controller';
+import { AdminAlertController } from './alert/admin-alert.controller';
+import { AdminBackupController } from './backup/admin-backup.controller';
+import { AlertService } from '../common/alert.service';
+import { CosModule } from '../cos/cos.module';
 
 @Module({
-  imports: [],
+  imports: [CosModule],
   controllers: [
     AdminController,
     DashboardController,
@@ -47,11 +52,14 @@ import { AdminFamilyAlbumController } from './family-album/admin-family-album.co
     AdminTrashController,
     AdminReportController,
     AdminMediaController,
+    AdminAlbumController,
     AdminStatisticsController,
     AdminToolboxUsageController,
     AdminFamilyAlbumController,
+    AdminAlertController,
+    AdminBackupController,
   ],
-  providers: [AdminService, MergeService, SmsService, AdminFamilyRelationService, NotificationService, ClanResolverService],
-  exports: [AdminService, MergeService, NotificationService, ClanResolverService],
+  providers: [AdminService, MergeService, SmsService, AdminFamilyRelationService, NotificationService, ClanResolverService, AlertService],
+  exports: [AdminService, MergeService, NotificationService, ClanResolverService, AlertService],
 })
 export class AdminModule {}

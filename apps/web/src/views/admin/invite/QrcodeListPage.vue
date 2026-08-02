@@ -41,7 +41,7 @@
 
     <GenerateQrcodeDialog
       v-model:visible="dialogVisible"
-      :clan-id="clanId"
+      :clan-slug="clanSlug"
       @created="onCreated"
     />
 
@@ -73,7 +73,8 @@ import QRCode from 'qrcode'
 import GenerateQrcodeDialog from './GenerateQrcodeDialog.vue'
 
 const route = useRoute()
-const clanId = ref(String(route.query.clanId || '1'))
+// P1-5 修复：使用路由上的 clanSlug 而非 URL 拼出的 clan_id，与后端 /api/invite/qrcodes?clan_slug 对齐
+const clanSlug = ref(String(route.params.slug || ''))
 const list = ref<any[]>([])
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -83,7 +84,7 @@ const newQrcode = ref<any>(null)
 const fetchList = async () => {
   loading.value = true
   try {
-    const res = await axios.get('/api/invite/qrcodes', { params: { clan_id: clanId.value } })
+    const res = await axios.get('/api/invite/qrcodes', { params: { clan_slug: clanSlug.value } })
     list.value = res.data.data
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '加载失败')

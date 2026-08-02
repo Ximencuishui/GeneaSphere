@@ -1,0 +1,102 @@
+{
+  "timestamp": "2026-08-01T18:50:23.171Z",
+  "base": "http://127.0.0.1:3120",
+  "phases": [
+    {
+      "name": "health-baseline-5x200",
+      "concurrency": 5,
+      "total": 200,
+      "durationMs": 198,
+      "rps": 1010.1,
+      "avgMs": 4.73,
+      "p50Ms": 4.22,
+      "p95Ms": 7.23,
+      "p99Ms": 17.05,
+      "maxMs": 18.02,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      },
+      "errorRate": 100
+    },
+    {
+      "name": "health-burst-50x100",
+      "concurrency": 50,
+      "total": 100,
+      "durationMs": 77,
+      "rps": 1298.7,
+      "avgMs": 31.04,
+      "p50Ms": 29.62,
+      "p95Ms": 49.35,
+      "p99Ms": 51.43,
+      "maxMs": 51.9,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      },
+      "errorRate": 100
+    },
+    {
+      "name": "statistics-5x100",
+      "concurrency": 5,
+      "total": 100,
+      "durationMs": 30467,
+      "rps": 3.3,
+      "avgMs": 1499.12,
+      "p50Ms": 1328.17,
+      "p95Ms": 2405.62,
+      "p99Ms": 2505.66,
+      "maxMs": 2968.28,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      },
+      "errorRate": 100
+    },
+    {
+      "name": "statistics-burst-30x100",
+      "concurrency": 30,
+      "total": 100,
+      "durationMs": 26268,
+      "rps": 3.8,
+      "avgMs": 6742.37,
+      "p50Ms": 7610,
+      "p95Ms": 8891.74,
+      "p99Ms": 9389.8,
+      "maxMs": 9512.27,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      },
+      "errorRate": 100
+    },
+    {
+      "name": "login-fail-5x50",
+      "concurrency": 5,
+      "total": 50,
+      "durationMs": 3173,
+      "rps": 15.8,
+      "avgMs": 302.32,
+      "p50Ms": 326.16,
+      "p95Ms": 760.09,
+      "p99Ms": 897.52,
+      "maxMs": 1053.73,
+      "errors": {
+        "network": 0,
+        "http4xx": 50,
+        "http5xx": 0,
+        "other": 0
+      },
+      "errorRate": 0
+    }
+  ],
+  "goNoGo": "FAIL"
+}

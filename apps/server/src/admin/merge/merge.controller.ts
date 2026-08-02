@@ -30,7 +30,8 @@ export class MergeController {
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -153,11 +154,11 @@ export class MergeController {
     const snapshotId = await this.createSnapshot(app.clan_id, userId);
 
     // 执行合并：事务中完成闭包表重算与成员角色分配
+    // ⚠️ 闭包表重算 createMany 在 Prisma 5 + PG 交互式事务中会失败，
+    // 故拆分为两步：先在事务中提交 clanMember 变更；其余 ancestry 重算
+    // 移到事务外（即使失败也不会影响核心合并状态，可后台重跑）。
     await this.prisma.$transaction(async (tx) => {
-      // 1. 重新计算 PersonAncestry 闭包表（基于 FamilyChild 父子关系）
-      await this.recomputeAncestry(tx, app.clan_id);
-
-      // 2. 将申请人加入本家族，默认为编辑者（合并后“其及支系自动成为本家族成员”）
+      // 1. 将申请人加入本家族，默认为编辑者（合并后"其及支系自动成为本家族成员"）
       await tx.clanMember.upsert({
         where: {
           clan_id_user_id: {
@@ -175,6 +176,11 @@ export class MergeController {
         },
       });
     });
+    
+    // 2. 事务外异步重算闭包表（不阻塞合并返回）
+    this.recomputeAncestry(this.prisma as any, app.clan_id).catch((err) =>
+      console.error('recomputeAncestry failed:', err),
+    );
 
     const updated = await this.prisma.mergeApplication.update({
       where: { id: appId },
@@ -270,19 +276,25 @@ export class MergeController {
     }
 
     if (snapshotData.ancestry) {
-      // 恢复闭包表
+      // 恢复闭包表：先清后插（事务外）+ 批量 createMany + skipDuplicates
       await this.prisma.personAncestry.deleteMany({
         where: { ancestor: { clan_id: snapshot.clan_id } },
       });
 
-      for (const entry of snapshotData.ancestry) {
-        await this.prisma.personAncestry.create({
-          data: {
+      // 500 条一批批量插入
+      const batchSize = 500;
+      for (let i = 0; i < snapshotData.ancestry.length; i += batchSize) {
+        const batch = snapshotData.ancestry
+          .slice(i, i + batchSize)
+          .map((entry: any) => ({
             ancestor_id: BigInt(entry.ancestor_id),
             descendant_id: BigInt(entry.descendant_id),
             depth: entry.depth,
-          },
-        }).catch(() => {}); // 忽略重复键错误
+          }));
+        await this.prisma.personAncestry.createMany({
+          data: batch,
+          skipDuplicates: true,
+        });
       }
     }
 
@@ -313,7 +325,8 @@ export class MergeController {
     @Query('status') status?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -439,7 +452,8 @@ export class MergeController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const snapshots = await this.prisma.dataSnapshot.findMany({
       where: {
@@ -752,7 +766,7 @@ export class MergeController {
 
     // 5. 批量插入闭包表记录
     if (ancestryRecords.length > 0) {
-      // 按 500 条一批批量插入以避免超出 SQL 参数限制
+      // 按 500 条一批批量插入。事务外调用所以 createMany + skipDuplicates 安全。
       const batchSize = 500;
       for (let i = 0; i < ancestryRecords.length; i += batchSize) {
         const batch = ancestryRecords.slice(i, i + batchSize);
