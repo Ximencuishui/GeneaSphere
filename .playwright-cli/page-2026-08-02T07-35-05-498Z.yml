@@ -1,0 +1,196 @@
+- generic [active] [ref=f13e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f13e3]:
+    - generic [ref=f13e4]:
+      - banner [ref=f13e5]:
+        - generic [ref=f13e6]:
+          - link "寻 寻根路 · xungenlu.cn" [ref=f13e7] [cursor=pointer]:
+            - /url: /
+            - generic [ref=f13e8]: 寻
+            - generic [ref=f13e9]: 寻根路 · xungenlu.cn
+          - navigation [ref=f13e10]:
+            - link "首页" [ref=f13e11] [cursor=pointer]:
+              - /url: /
+          - generic [ref=f13e12]:
+            - button "注册" [ref=f13e13] [cursor=pointer]
+            - button "登录" [ref=f13e15] [cursor=pointer]
+      - main [ref=f13e17]:
+        - generic [ref=f13e18]:
+          - generic [ref=f13e20]:
+            - button [ref=f13e21] [cursor=pointer]
+            - heading "服务条款" [level=1] [ref=f13e26]
+            - paragraph [ref=f13e27]: 最后更新日期：2026年6月21日
+          - generic [ref=f13e28]:
+            - generic [ref=f13e29]:
+              - heading "1. 服务概述" [level=2] [ref=f13e30]
+              - paragraph [ref=f13e31]: 寻根路（xungenlu.cn）是一个专注于家族文化传承的数字化平台，为global华人家庭提供一站式家谱数字化解决方案。本服务条款详细说明了我们提供的服务内容、使用规则和相关权利义务。
+            - generic [ref=f13e32]:
+              - heading "2. 服务可用性" [level=2] [ref=f13e33]
+              - heading "2.1 服务时间" [level=3] [ref=f13e34]
+              - paragraph [ref=f13e35]: 我们努力提供7×24小时不间断服务，但以下情况可能导致服务中断：
+              - list [ref=f13e36]:
+                - listitem [ref=f13e37]: 定期系统维护和升级（我们会提前公告）
+                - listitem [ref=f13e38]: 不可抗力因素（自然灾害、网络攻击等）
+                - listitem [ref=f13e39]: 第三方服务故障（电信运营商、云服务商等）
+                - listitem [ref=f13e40]: 政府行为或法律法规要求
+              - heading "2.2 服务改进" [level=3] [ref=f13e41]
+              - paragraph [ref=f13e42]: 我们持续优化产品功能和用户体验，可能随时增加、修改或删除功能。重大功能变更会尽可能提前通知用户。
+            - generic [ref=f13e43]:
+              - heading "3. 账户与权限" [level=2] [ref=f13e44]
+              - heading "3.1 账户类型" [level=3] [ref=f13e45]
+              - list [ref=f13e46]:
+                - listitem [ref=f13e47]:
+                  - strong [ref=f13e48]: 演示账户：
+                  - text: 无需注册即可体验，数据在30天后自动清除
+                - listitem [ref=f13e49]:
+                  - strong [ref=f13e50]: 普通用户：
+                  - text: 注册后可创建或加入家族
+                - listitem [ref=f13e51]:
+                  - strong [ref=f13e52]: 家族管理员（ADMIN）：
+                  - text: 管理家族设置、成员权限
+                - listitem [ref=f13e53]:
+                  - strong [ref=f13e54]: 家族所有者（OWNER）：
+                  - text: 拥有家族最高管理权限
+              - heading "3.2 权限管理" [level=3] [ref=f13e55]
+              - paragraph [ref=f13e56]: 家族管理员可根据需要为成员分配不同权限级别，包括：
+              - list [ref=f13e57]:
+                - listitem [ref=f13e58]: 查看族谱数据
+                - listitem [ref=f13e59]: 编辑族谱信息
+                - listitem [ref=f13e60]: 管理家族成员
+                - listitem [ref=f13e61]: 审核上传内容
+                - listitem [ref=f13e62]: 财务管理等
+            - generic [ref=f13e63]:
+              - heading "4. 数据管理" [level=2] [ref=f13e64]
+              - heading "4.1 数据存储" [level=3] [ref=f13e65]
+              - list [ref=f13e66]:
+                - listitem [ref=f13e67]: 您的数据存储在中国境内的安全服务器上
+                - listitem [ref=f13e68]: 我们采用多重备份机制保障数据安全
+                - listitem [ref=f13e69]: 敏感信息加密存储
+              - heading "4.2 数据导入导出" [level=3] [ref=f13e70]
+              - list [ref=f13e71]:
+                - listitem [ref=f13e72]: 支持Excel格式批量导入族谱数据
+                - listitem [ref=f13e73]: 支持导出族谱数据（格式包括Excel、GEDCOM等）
+                - listitem [ref=f13e74]: 导入数据需符合我们的格式规范
+              - heading "4.3 数据删除" [level=3] [ref=f13e75]
+              - paragraph [ref=f13e76]: 您可以随时删除自己上传的内容。账户注销后，我们将在30天内删除或匿名化您的个人数据，但以下情况除外：
+              - list [ref=f13e77]:
+                - listitem [ref=f13e78]: 法律法规要求保留的数据
+                - listitem [ref=f13e79]: 与其他用户共享且对方仍需使用的数据（将匿名化处理）
+                - listitem [ref=f13e80]: 涉及纠纷调查的数据
+            - generic [ref=f13e81]:
+              - heading "5. 内容规范" [level=2] [ref=f13e82]
+              - heading "5.1 允许的内容" [level=3] [ref=f13e83]
+              - list [ref=f13e84]:
+                - listitem [ref=f13e85]: 家族历史资料和族谱信息
+                - listitem [ref=f13e86]: 家族成员照片和影像资料
+                - listitem [ref=f13e87]: 生平传记和家族故事
+                - listitem [ref=f13e88]: 其他与家族文化传承相关的内容
+              - heading "5.2 禁止的内容" [level=3] [ref=f13e89]
+              - list [ref=f13e90]:
+                - listitem [ref=f13e91]: 违反法律法规的内容
+                - listitem [ref=f13e92]: 侵犯他人知识产权、隐私权的内容
+                - listitem [ref=f13e93]: 虚假、误导性信息
+                - listitem [ref=f13e94]: 淫秽、暴力、仇恨言论
+                - listitem [ref=f13e95]: 商业广告或垃圾信息
+                - listitem [ref=f13e96]: 恶意软件或有害代码
+              - heading "5.3 内容审核" [level=3] [ref=f13e97]
+              - paragraph [ref=f13e98]: 为维护平台健康环境，我们可能审核用户上传的内容。如发现违规内容，我们有权删除并要求用户改正。严重违规者可能被暂停或终止服务。
+            - generic [ref=f13e99]:
+              - heading "6. 家族协作" [level=2] [ref=f13e100]
+              - heading "6.1 家族小组" [level=3] [ref=f13e101]
+              - list [ref=f13e102]:
+                - listitem [ref=f13e103]: 每个家族可创建独立的家族小组
+                - listitem [ref=f13e104]: 家族成员可在小组内共享信息和讨论
+                - listitem [ref=f13e105]: 管理员可设置加入条件（如邀请制、审核制）
+              - heading "6.2 寻亲归宗" [level=3] [ref=f13e106]
+              - list [ref=f13e107]:
+                - listitem [ref=f13e108]: 平台提供智能匹配功能帮助失散支系找到根源
+                - listitem [ref=f13e109]: 用户可发布寻亲帖或响应他人的寻亲请求
+                - listitem [ref=f13e110]: 归宗合并需双方家族管理员确认
+              - heading "6.3 隐私保护" [level=3] [ref=f13e111]
+              - paragraph [ref=f13e112]: 在世人员的详细信息默认对其他用户隐藏，除非：
+              - list [ref=f13e113]:
+                - listitem [ref=f13e114]: 您主动设置为可见
+                - listitem [ref=f13e115]: 对方通过亲属验证
+                - listitem [ref=f13e116]: 同为家族小组成员且被授权查看
+            - generic [ref=f13e117]:
+              - heading "7. 增值服务" [level=2] [ref=f13e118]
+              - heading "7.1 免费功能" [level=3] [ref=f13e119]
+              - list [ref=f13e120]:
+                - listitem [ref=f13e121]: 创建和管理一个家族
+                - listitem [ref=f13e122]: 基础族谱编辑和浏览
+                - listitem [ref=f13e123]: 有限存储空间（具体以页面标注为准）
+                - listitem [ref=f13e124]: 基础寻亲功能
+              - heading "7.2 付费功能" [level=3] [ref=f13e125]
+              - list [ref=f13e126]:
+                - listitem [ref=f13e127]: 扩展存储空间
+                - listitem [ref=f13e128]: 高级数据分析报告
+                - listitem [ref=f13e129]: 族谱印刷服务
+                - listitem [ref=f13e130]: 优先客服支持
+                - listitem [ref=f13e131]: 其他增值功能
+              - paragraph [ref=f13e132]: 具体价格和套餐以官网公布为准，我们保留调整价格的权利。
+            - generic [ref=f13e133]:
+              - heading "8. 印刷服务" [level=2] [ref=f13e134]
+              - paragraph [ref=f13e135]: 我们提供族谱印刷服务，具体条款如下：
+              - list [ref=f13e136]:
+                - listitem [ref=f13e137]: 支持多种装订规格（经典宣纸、现代精装、简约风格）
+                - listitem [ref=f13e138]: 印刷前提供PDF在线预览确认
+                - listitem [ref=f13e139]: 下单后7-15个工作日内发货
+                - listitem [ref=f13e140]: 质量问题支持退换货
+                - listitem [ref=f13e141]: 具体价格、规格和配送范围以订单页面为准
+            - generic [ref=f13e142]:
+              - heading "9. 知识产权" [level=2] [ref=f13e143]
+              - paragraph [ref=f13e144]: 寻根路平台的所有知识产权（包括但不限于商标、软件代码、界面设计、文档）归我们所有。用户保留对其上传内容的知识产权，但授权我们为提供服务而使用。未经授权，不得将平台内容用于商业目的。
+            - generic [ref=f13e145]:
+              - heading "10. 责任限制" [level=2] [ref=f13e146]
+              - paragraph [ref=f13e147]: 在法律允许的最大范围内，我们对以下情况不承担责任：
+              - list [ref=f13e148]:
+                - listitem [ref=f13e149]: 因不可抗力导致的服务中断或数据丢失
+                - listitem [ref=f13e150]: 用户间因族谱信息产生的争议
+                - listitem [ref=f13e151]: 第三方服务故障造成的影响
+                - listitem [ref=f13e152]: 用户违反本协议造成的后果
+              - paragraph [ref=f13e153]: 我们的总赔偿责任不超过您在过去12个月内实际支付的服务费用。
+            - generic [ref=f13e154]:
+              - heading "11. 条款变更" [level=2] [ref=f13e155]
+              - paragraph [ref=f13e156]: 我们可能根据业务发展或法律法规变化修改本条款。重大变更会提前30天通过站内通知、短信或邮件告知。如您在变更后继续使用服务，即视为接受修改后的条款。
+            - generic [ref=f13e157]:
+              - heading "12. 联系我们" [level=2] [ref=f13e158]
+              - paragraph [ref=f13e159]: 如果您对本条款有任何疑问或需要帮助，请通过以下方式联系我们：
+              - list [ref=f13e160]:
+                - listitem [ref=f13e161]: 电子邮件：support@geneasphere.com
+                - listitem [ref=f13e162]: 客服电话：400-XXX-XXXX（工作日 9:00-18:00）
+                - listitem [ref=f13e163]: 在线客服：通过网站右下角客服入口
+                - listitem [ref=f13e164]: 联系地址：[公司地址]
+              - paragraph [ref=f13e165]: 我们将在收到您的请求后15个工作日内予以回复。
+      - contentinfo [ref=f13e166]:
+        - generic [ref=f13e167]:
+          - generic [ref=f13e168]:
+            - generic [ref=f13e169]: 寻
+            - generic [ref=f13e170]: 寻根路 · xungenlu.cn
+          - generic [ref=f13e171]:
+            - link "首页" [ref=f13e172] [cursor=pointer]:
+              - /url: /
+            - link "核心功能" [ref=f13e173] [cursor=pointer]:
+              - /url: /#features
+            - link "演示流程" [ref=f13e174] [cursor=pointer]:
+              - /url: /#demo
+          - generic [ref=f13e175]:
+            - link "隐私政策" [ref=f13e176] [cursor=pointer]:
+              - /url: /privacy
+            - generic [ref=f13e177]: "|"
+            - link "用户协议" [ref=f13e178] [cursor=pointer]:
+              - /url: /terms
+            - generic [ref=f13e179]: "|"
+            - link "服务条款" [ref=f13e180] [cursor=pointer]:
+              - /url: /service-terms
+            - generic [ref=f13e181]: "|"
+            - link "Cookie 政策" [ref=f13e182] [cursor=pointer]:
+              - /url: /cookie-policy
+          - generic [ref=f13e183]: © 2026 寻根路 · xungenlu.cn. All rights reserved.
+    - button "🔇 背景音乐" [ref=f13e186] [cursor=pointer]:
+      - generic [ref=f13e187]: 🔇
+      - generic [ref=f13e188]: 背景音乐

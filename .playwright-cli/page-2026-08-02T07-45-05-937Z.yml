@@ -1,0 +1,26 @@
+- generic [ref=f4e3]:
+  - generic [ref=f4e6]:
+    - generic [ref=f4e7]:
+      - generic [ref=f4e8]: 寻
+      - heading "寻根路 · 平台管理后台" [level=1] [ref=f4e9]
+      - paragraph [ref=f4e10]: xungenlu.cn Platform Administration Console
+    - generic [ref=f4e11]:
+      - generic [ref=f4e12]:
+        - generic [ref=f4e13]: 用户名
+        - textbox "用户名" [ref=f4e18]:
+          - /placeholder: 请输入平台管理员账号
+          - text: platform_admin
+      - generic [ref=f4e20]:
+        - generic [ref=f4e21]: 密码
+        - textbox "密码" [ref=f4e26]:
+          - /placeholder: 请输入密码
+          - text: admin123
+      - button "登 录" [ref=f4e32] [cursor=pointer]
+      - generic [ref=f4e34]:
+        - paragraph [ref=f4e35]:
+          - text: 默认超级管理员：
+          - strong [ref=f4e36]: platform_admin / admin123
+        - paragraph [ref=f4e37]: 本系统仅供平台运营方使用，与家族管理员后台账号隔离。
+  - button "🔇 背景音乐" [ref=f4e40] [cursor=pointer]:
+    - generic [ref=f4e41]: 🔇
+    - generic [ref=f4e42]: 背景音乐

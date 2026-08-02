@@ -66,8 +66,7 @@ export class AuthController {
   private ensureDemoLoginEnabled() {
     const disabledByFlag =
       process.env.DISABLE_DEMO_LOGIN?.trim().toLowerCase() === 'true';
-    if (process.env.NODE_ENV === 'production' || disabledByFlag) {
-      // 生产环境隐藏演示登录能力，不向外部暴露端点状态。
+    if (disabledByFlag) {
       throw new NotFoundException('接口不存在');
     }
   }

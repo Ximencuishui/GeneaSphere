@@ -1,0 +1,98 @@
+- generic [active] [ref=f5e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f5e3]:
+    - generic [ref=f5e4]:
+      - complementary [ref=f5e5]:
+        - heading "平台管理后台" [level=2] [ref=f5e7]
+        - menubar [ref=f5e8]:
+          - menuitem "概况" [ref=f5e9]
+          - menuitem "家族管理" [ref=f5e16]
+          - menuitem "用户管理" [ref=f5e23]
+          - menuitem "内容审核" [ref=f5e30]
+          - menuitem "订单管理" [ref=f5e37]
+          - menuitem "系统配置" [expanded] [ref=f5e44]:
+            - menu [ref=f5e51]:
+              - menuitem "定价管理" [ref=f5e52] [cursor=pointer]
+              - menuitem "家族默认配置" [ref=f5e53] [cursor=pointer]
+              - menuitem "全局开关" [ref=f5e54] [cursor=pointer]
+          - menuitem "数据统计" [ref=f5e55]
+          - menuitem "日志审计" [ref=f5e62]
+      - generic [ref=f5e69]:
+        - banner [ref=f5e70]:
+          - generic [ref=f5e71]:
+            - button [ref=f5e72] [cursor=pointer]
+            - heading "定价管理" [level=3] [ref=f5e74]
+          - generic [ref=f5e75]:
+            - generic: 超级管理员
+            - button "platform_admin" [ref=f5e77] [cursor=pointer]
+        - main [ref=f5e81]:
+          - generic [ref=f5e83]:
+            - generic [ref=f5e85]:
+              - heading "定价管理" [level=2] [ref=f5e86]
+              - button "保存修改" [ref=f5e87] [cursor=pointer]
+            - generic [ref=f5e90]:
+              - heading "短信单价" [level=3] [ref=f5e91]
+              - generic [ref=f5e92]:
+                - generic [ref=f5e93]: 国内短信 (元/条)
+                - generic [ref=f5e95]:
+                  - button "减少数值" [ref=f5e96] [cursor=pointer]
+                  - button "增加数值" [ref=f5e100] [cursor=pointer]
+                  - spinbutton "国内短信 (元/条)" [ref=f5e106]: "0.050"
+              - heading "AI 工具定价（每次消耗次数）" [level=3] [ref=f5e107]
+              - generic [ref=f5e108]:
+                - generic [ref=f5e109]: 老照片修复
+                - generic [ref=f5e111]:
+                  - button "减少数值" [ref=f5e112] [cursor=pointer]
+                  - button "增加数值" [ref=f5e116] [cursor=pointer]
+                  - spinbutton "老照片修复" [ref=f5e122]: "1"
+              - generic [ref=f5e123]:
+                - generic [ref=f5e124]: 人物动态化
+                - generic [ref=f5e126]:
+                  - button "减少数值" [ref=f5e127] [cursor=pointer]
+                  - button "增加数值" [ref=f5e131] [cursor=pointer]
+                  - spinbutton "人物动态化" [ref=f5e137]: "3"
+              - generic [ref=f5e138]:
+                - generic [ref=f5e139]: 黑白上色
+                - generic [ref=f5e141]:
+                  - button "减少数值" [ref=f5e142] [cursor=pointer]
+                  - button "增加数值" [ref=f5e146] [cursor=pointer]
+                  - spinbutton "黑白上色" [ref=f5e152]: "2"
+              - generic [ref=f5e153]:
+                - generic [ref=f5e154]: 图像降噪
+                - generic [ref=f5e156]:
+                  - button "减少数值" [ref=f5e157] [cursor=pointer]
+                  - button "增加数值" [ref=f5e161] [cursor=pointer]
+                  - spinbutton "图像降噪" [ref=f5e167]: "2"
+              - heading "免费额度" [level=3] [ref=f5e168]
+              - generic [ref=f5e169]:
+                - generic [ref=f5e170]: 新用户每月免费次数
+                - generic [ref=f5e172]:
+                  - button "减少数值" [ref=f5e173] [cursor=pointer]
+                  - button "增加数值" [ref=f5e177] [cursor=pointer]
+                  - spinbutton "新用户每月免费次数" [ref=f5e183]: "10"
+              - heading "印刷基价（元）" [level=3] [ref=f5e184]
+              - generic [ref=f5e185]:
+                - generic [ref=f5e186]: 基础版
+                - generic [ref=f5e188]:
+                  - button "减少数值" [ref=f5e189] [cursor=pointer]
+                  - button "增加数值" [ref=f5e193] [cursor=pointer]
+                  - spinbutton "基础版" [ref=f5e199]: "199"
+              - generic [ref=f5e200]:
+                - generic [ref=f5e201]: 高级版
+                - generic [ref=f5e203]:
+                  - button "减少数值" [ref=f5e204] [cursor=pointer]
+                  - button "增加数值" [ref=f5e208] [cursor=pointer]
+                  - spinbutton "高级版" [ref=f5e214]: "399"
+              - generic [ref=f5e215]:
+                - generic [ref=f5e216]: 豪华版
+                - generic [ref=f5e218]:
+                  - button "减少数值" [ref=f5e219] [cursor=pointer]
+                  - button "增加数值" [ref=f5e223] [cursor=pointer]
+                  - spinbutton "豪华版" [ref=f5e229]: "699"
+    - button "🔇 背景音乐" [ref=f5e236] [cursor=pointer]:
+      - generic [ref=f5e237]: 🔇
+      - generic [ref=f5e238]: 背景音乐

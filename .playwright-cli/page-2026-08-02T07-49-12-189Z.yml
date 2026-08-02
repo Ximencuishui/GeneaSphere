@@ -1,0 +1,80 @@
+- generic [active] [ref=f19e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f19e3]:
+    - generic [ref=f19e5]:
+      - complementary [ref=f19e6]:
+        - generic [ref=f19e12]:
+          - generic [ref=f19e13]: "13800000000"
+          - generic "尚未加入家族" [ref=f19e14]
+        - menubar [ref=f19e15]:
+          - menuitem "个人管理" [ref=f19e16]
+          - menuitem "验证管理" [ref=f19e25]
+          - menuitem "内容管理" [ref=f19e35]
+          - menuitem "工具中心" [expanded] [ref=f19e44]:
+            - menu [ref=f19e53]:
+              - menuitem "我的工具箱" [ref=f19e54] [cursor=pointer]
+              - menuitem "我的订单" [ref=f19e59] [cursor=pointer]
+              - menuitem "我的小组" [ref=f19e64] [cursor=pointer]
+              - menuitem "寻找小伙伴" [ref=f19e70] [cursor=pointer]
+              - menuitem "直系血缘视频" [ref=f19e75] [cursor=pointer]
+              - menuitem "个人空间" [ref=f19e80] [cursor=pointer]
+        - button "设置" [ref=f19e86] [cursor=pointer]
+      - generic [ref=f19e92]:
+        - banner [ref=f19e93]:
+          - navigation "面包屑" [ref=f19e95]:
+            - generic [ref=f19e96]:
+              - link [ref=f19e97]
+              - text: /
+            - generic [ref=f19e101]:
+              - link "用户中心" [ref=f19e102]
+              - text: /
+            - link "我的订单" [ref=f19e104]
+          - generic [ref=f19e105]:
+            - button [ref=f19e107] [cursor=pointer]
+            - button "13800000000" [ref=f19e110] [cursor=pointer]
+        - main [ref=f19e116]:
+          - generic [ref=f19e118]:
+            - generic [ref=f19e120]:
+              - generic [ref=f19e121]:
+                - heading "正在加载用户中心" [level=3] [ref=f19e122]
+                - generic [ref=f19e126]: 0%
+              - paragraph [ref=f19e127]: 加载用户资料 · 头像/昵称/家族/角色
+            - generic [ref=f19e128]:
+              - generic [ref=f19e133]:
+                - generic [ref=f19e134]: 加载用户资料
+                - generic [ref=f19e135]: 头像/昵称/家族/角色
+              - generic [ref=f19e136]:
+                - generic [ref=f19e137]: "2"
+                - generic [ref=f19e139]:
+                  - generic [ref=f19e140]: 加载设置与通知
+                  - generic [ref=f19e141]: 个人偏好 + 未读数
+              - generic [ref=f19e142]:
+                - generic [ref=f19e143]: "3"
+                - generic [ref=f19e145]:
+                  - generic [ref=f19e146]: 渲染子页面
+                  - generic [ref=f19e147]: 提交首帧 DOM
+              - generic [ref=f19e148]:
+                - generic [ref=f19e149]: "4"
+                - generic [ref=f19e151]:
+                  - generic [ref=f19e152]: 完成加载
+                  - generic [ref=f19e153]: 准备就绪
+            - generic [ref=f19e154]:
+              - generic [ref=f19e155]:
+                - generic [ref=f19e156]: 实时日志
+                - generic [ref=f19e157]: 2 条
+              - generic [ref=f19e158]:
+                - generic [ref=f19e159]:
+                  - generic [ref=f19e160]: 15:49:12
+                  - generic [ref=f19e161]: "[加载用户资料]"
+                  - generic [ref=f19e162]: 开始加载用户中心
+                - generic [ref=f19e163]:
+                  - generic [ref=f19e164]: 15:49:12
+                  - generic [ref=f19e165]: "[加载用户资料]"
+                  - generic [ref=f19e166]: 调用 /api/user/profile
+    - button "🔇 背景音乐" [ref=f19e169] [cursor=pointer]:
+      - generic [ref=f19e170]: 🔇
+      - generic [ref=f19e171]: 背景音乐

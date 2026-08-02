@@ -1,0 +1,18 @@
+- generic [ref=f5e3]:
+  - generic [ref=f5e5]:
+    - generic [ref=f5e6]:
+      - heading "注册寻根路" [level=2] [ref=f5e7]
+      - paragraph [ref=f5e8]: 开启您的家族数字化之旅
+    - generic [ref=f5e9]:
+      - textbox "手机号" [ref=f5e14]
+      - generic [ref=f5e17]:
+        - textbox "短信验证码" [ref=f5e20]
+        - button "获取验证码" [disabled] [ref=f5e21]
+      - textbox "设置密码（至少6位）" [ref=f5e27]
+      - textbox "确认密码" [ref=f5e32]
+      - button "注册" [ref=f5e35] [cursor=pointer]
+      - button "已有账号？立即登录" [ref=f5e39] [cursor=pointer]
+      - button "← 返回首页" [ref=f5e43] [cursor=pointer]
+  - button "🔇 背景音乐" [ref=f5e47] [cursor=pointer]:
+    - generic [ref=f5e48]: 🔇
+    - generic [ref=f5e49]: 背景音乐

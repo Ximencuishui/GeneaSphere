@@ -1,0 +1,185 @@
+- generic [active] [ref=f5e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f5e3]:
+    - generic [ref=f5e4]:
+      - banner [ref=f5e5]:
+        - generic [ref=f5e6]:
+          - generic [ref=f5e7]:
+            - generic [ref=f5e8]: 寻
+            - generic [ref=f5e9]: 寻根路 · xungenlu.cn
+          - generic [ref=f5e10]:
+            - button "注册" [ref=f5e11] [cursor=pointer]
+            - button "登录" [ref=f5e13] [cursor=pointer]
+            - button "立即体验" [ref=f5e15] [cursor=pointer]
+      - generic [ref=f5e17]:
+        - generic [ref=f5e19]:
+          - generic:
+            - text: ©
+            - link "高德地图":
+              - /url: https://www.amap.com/
+        - generic [ref=f5e22]:
+          - generic [ref=f5e23]:
+            - generic [ref=f5e24]: 基于时空记忆的族谱共创平台
+            - heading "寻根路 让每一支血脉都被铭记" [level=1] [ref=f5e25]: 寻根路让每一支血脉都被铭记
+            - paragraph [ref=f5e26]: 姓氏迁徙动画 · 可视化族谱树 · 智能寻亲归宗 · 地方记忆拼图
+            - generic [ref=f5e29]:
+              - generic [ref=f5e30]: 🔍
+              - textbox "搜索年份、地点、老照片..." [ref=f5e32]
+              - button "探索" [ref=f5e33] [cursor=pointer]
+            - generic [ref=f5e35]:
+              - button "▶ 一键体验演示账号" [ref=f5e36] [cursor=pointer]:
+                - generic [ref=f5e37]:
+                  - generic [ref=f5e38]: ▶
+                  - text: 一键体验演示账号
+              - generic [ref=f5e39]: 无需注册，即刻体验完整功能
+          - generic [ref=f5e40]:
+            - generic [ref=f5e41]:
+              - generic [ref=f5e42]: 百家姓迁徙
+              - text: 点击姓氏高亮迁徙路径
+            - generic [ref=f5e43]:
+              - generic [ref=f5e44] [cursor=pointer]: 李
+              - generic [ref=f5e47] [cursor=pointer]: 王
+              - generic [ref=f5e50] [cursor=pointer]: 张
+              - generic [ref=f5e53] [cursor=pointer]: 刘
+              - generic [ref=f5e56] [cursor=pointer]: 陈
+              - generic [ref=f5e59] [cursor=pointer]: 杨
+              - generic [ref=f5e62] [cursor=pointer]: 赵
+              - generic [ref=f5e65] [cursor=pointer]: 黄
+              - generic [ref=f5e68] [cursor=pointer]: 周
+              - generic [ref=f5e71] [cursor=pointer]: 吴
+      - generic [ref=f5e74]:
+        - generic [ref=f5e75]:
+          - heading "什么是「时空记忆」" [level=2] [ref=f5e76]
+          - paragraph [ref=f5e77]: 三大维度，重构家族记忆的数字连接
+        - generic [ref=f5e78]:
+          - generic [ref=f5e79]:
+            - heading "空间维度 · 迁徙之路" [level=3] [ref=f5e84]
+            - paragraph [ref=f5e85]: 以姓氏为线索，在中国地图上再现千年迁徙轨迹。从发源地到散居地，每一道光流都是一段家族史诗。
+          - generic [ref=f5e86]:
+            - heading "时间维度 · 时光长廊" [level=3] [ref=f5e90]
+            - paragraph [ref=f5e91]: 按年代组织家族影像与记忆，从清末到当代，跨越百年的家族故事在时间轴上徐徐展开。
+          - generic [ref=f5e92]:
+            - heading "共创维度 · 地方记忆" [level=3] [ref=f5e100]
+            - paragraph [ref=f5e101]: 共建地方记忆题库，用本地人的真实回答验证身份。每一份"我知道"都是对历史的证实与传承。
+      - generic [ref=f5e102]:
+        - generic [ref=f5e103]:
+          - heading "为什么选择寻根路" [level=2] [ref=f5e104]
+          - paragraph [ref=f5e105]: 专为家族文化传承打造的全链路数字化工具
+        - generic [ref=f5e106]:
+          - generic [ref=f5e107]:
+            - generic [ref=f5e108]: 🌳
+            - heading "可视化族谱树" [level=3] [ref=f5e109]
+            - paragraph [ref=f5e110]: 交互式族谱树状图，支持缩放、拖拽、点击查看详情。直观展示家族世代传承脉络。
+            - list [ref=f5e111]:
+              - listitem [ref=f5e112]: 多代同屏展示
+              - listitem [ref=f5e113]: 节点详情面板
+              - listitem [ref=f5e114]: 关系图谱浏览
+          - generic [ref=f5e115]:
+            - generic [ref=f5e116]: 🔎
+            - heading "智能寻亲归宗" [level=3] [ref=f5e117]
+            - paragraph [ref=f5e118]: 基于字辈、祖籍地、关键祖先等信息的智能匹配算法，帮助失散支系找到根源。
+            - list [ref=f5e119]:
+              - listitem [ref=f5e120]: 自动信息比对
+              - listitem [ref=f5e121]: 匹配度评分
+              - listitem [ref=f5e122]: 安全归宗合并
+          - generic [ref=f5e123]:
+            - generic [ref=f5e124]: 🔒
+            - heading "隐私安全守护" [level=3] [ref=f5e125]
+            - paragraph [ref=f5e126]: 精细化的权限控制体系，支持在世人员信息隐藏、亲属验证登录、游客访问限制。
+            - list [ref=f5e127]:
+              - listitem [ref=f5e128]: 四级角色权限
+              - listitem [ref=f5e129]: 亲属验证登录
+              - listitem [ref=f5e130]: 操作全程审计
+          - generic [ref=f5e131]:
+            - generic [ref=f5e132]: 📸
+            - heading "时光长廊" [level=3] [ref=f5e133]
+            - paragraph [ref=f5e134]: 按年份组织的家族影像档案馆，支持照片上传、地点标记、人物关联。
+            - list [ref=f5e135]:
+              - listitem [ref=f5e136]: 年份轴浏览
+              - listitem [ref=f5e137]: 智能标签分类
+              - listitem [ref=f5e138]: 同村照片发现
+          - generic [ref=f5e139]:
+            - generic [ref=f5e140]: 📥
+            - heading "Excel 一键导入" [level=3] [ref=f5e141]
+            - paragraph [ref=f5e142]: 支持从 Excel 表格批量导入族谱数据，智能列映射自动识别字段。
+            - list [ref=f5e143]:
+              - listitem [ref=f5e144]: 拖拽上传文件
+              - listitem [ref=f5e145]: 智能列映射
+              - listitem [ref=f5e146]: 错误自动校验
+          - generic [ref=f5e147]:
+            - generic [ref=f5e148]: 🖨
+            - heading "族谱印刷服务" [level=3] [ref=f5e149]
+            - paragraph [ref=f5e150]: 支持在线预览和下单族谱印刷，多种装订规格可选。
+            - list [ref=f5e151]:
+              - listitem [ref=f5e152]: PDF 在线预览
+              - listitem [ref=f5e153]: 多规格可选
+              - listitem [ref=f5e154]: 订单全程跟踪
+      - generic [ref=f5e155]:
+        - generic [ref=f5e156]:
+          - heading "3 步体验完整功能" [level=2] [ref=f5e157]
+          - paragraph [ref=f5e158]: 无需注册、无需下载，即刻开始您的家族数字化之旅
+        - generic [ref=f5e159]:
+          - generic [ref=f5e160]:
+            - generic [ref=f5e161]: "1"
+            - generic [ref=f5e162]: 👊
+            - heading "点击\"一键体验\"" [level=3] [ref=f5e163]
+            - paragraph [ref=f5e164]: 点击任意页面上的"一键体验演示账号"按钮，系统自动为您创建临时体验环境。
+          - generic [ref=f5e165]: →
+          - generic [ref=f5e166]:
+            - generic [ref=f5e167]: "2"
+            - generic [ref=f5e168]: 🌳
+            - heading "浏览演示族谱" [level=3] [ref=f5e169]
+            - paragraph [ref=f5e170]: 进入真实的李氏宗族演示数据，浏览6代12人的完整族谱树，查看人物传记和家族历史。
+          - generic [ref=f5e171]: →
+          - generic [ref=f5e172]:
+            - generic [ref=f5e173]: "3"
+            - generic [ref=f5e174]: ✨
+            - heading "探索全部功能" [level=3] [ref=f5e175]
+            - paragraph [ref=f5e176]: 自由探索时光长廊、寻亲广场、Excel导入、族谱打印等全部核心功能。
+        - button "▶ 开始体验" [ref=f5e178] [cursor=pointer]:
+          - generic [ref=f5e179]:
+            - generic [ref=f5e180]: ▶
+            - text: 开始体验
+      - generic [ref=f5e182]:
+        - heading "准备好开启寻根之旅了吗？" [level=2] [ref=f5e183]
+        - paragraph [ref=f5e184]: 让每一支血脉都被铭记
+        - generic [ref=f5e185]:
+          - button "▶ 一键体验演示" [ref=f5e186] [cursor=pointer]:
+            - generic [ref=f5e187]:
+              - generic [ref=f5e188]: ▶
+              - text: 一键体验演示
+          - button "创建我的家族" [ref=f5e189] [cursor=pointer]
+      - contentinfo [ref=f5e191]:
+        - generic [ref=f5e192]:
+          - generic [ref=f5e193]:
+            - generic [ref=f5e194]: 寻
+            - generic [ref=f5e195]: 寻根路 · xungenlu.cn
+          - generic [ref=f5e196]:
+            - link "核心功能" [ref=f5e197] [cursor=pointer]:
+              - /url: "#features"
+            - link "演示流程" [ref=f5e198] [cursor=pointer]:
+              - /url: "#demo"
+            - link "登录" [ref=f5e199] [cursor=pointer]:
+              - /url: "#"
+            - link "注册" [ref=f5e200] [cursor=pointer]:
+              - /url: "#"
+          - generic [ref=f5e201]:
+            - link "隐私政策" [ref=f5e202] [cursor=pointer]:
+              - /url: /privacy
+            - generic [ref=f5e203]: "|"
+            - link "用户协议" [ref=f5e204] [cursor=pointer]:
+              - /url: /terms
+            - generic [ref=f5e205]: "|"
+            - link "服务条款" [ref=f5e206] [cursor=pointer]:
+              - /url: /service-terms
+            - generic [ref=f5e207]: "|"
+            - link "Cookie 政策" [ref=f5e208] [cursor=pointer]:
+              - /url: /cookie-policy
+          - generic [ref=f5e209]: © 2026 寻根路 · xungenlu.cn. All rights reserved.
+    - button "🔇 背景音乐" [ref=f5e212] [cursor=pointer]:
+      - generic [ref=f5e213]: 🔇
+      - generic [ref=f5e214]: 背景音乐

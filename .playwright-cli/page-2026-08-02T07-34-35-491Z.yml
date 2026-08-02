@@ -1,0 +1,35 @@
+- generic [active] [ref=f7e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f7e3]:
+    - generic [ref=f7e5]:
+      - generic [ref=f7e6]:
+        - heading "登录寻根路" [level=2] [ref=f7e7]
+        - paragraph [ref=f7e8]: 管理您的家族数字化档案
+      - generic [ref=f7e9]:
+        - tablist [ref=f7e13]:
+          - tab "密码登录" [selected] [ref=f7e15]
+          - tab "短信登录" [ref=f7e16]
+        - tabpanel "密码登录" [ref=f7e18]:
+          - generic [ref=f7e19]:
+            - textbox "手机号" [ref=f7e24]
+            - textbox "密码" [ref=f7e29]
+            - button "登录" [ref=f7e32] [cursor=pointer]
+      - generic [ref=f7e34]: 或
+      - generic [ref=f7e36]:
+        - button "▶ 一键体验族谱管理演示" [ref=f7e39] [cursor=pointer]:
+          - generic [ref=f7e40]:
+            - generic [ref=f7e41]: ▶
+            - text: 一键体验族谱管理演示
+        - button "● 一键体验族员个人页面" [ref=f7e44] [cursor=pointer]:
+          - generic [ref=f7e45]:
+            - generic [ref=f7e46]: ●
+            - text: 一键体验族员个人页面
+      - button "还没有账号？立即注册" [ref=f7e49] [cursor=pointer]
+      - button "← 返回首页" [ref=f7e53] [cursor=pointer]
+    - button "🔇 背景音乐" [ref=f7e57] [cursor=pointer]:
+      - generic [ref=f7e58]: 🔇
+      - generic [ref=f7e59]: 背景音乐

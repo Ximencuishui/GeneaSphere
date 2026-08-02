@@ -1,0 +1,160 @@
+- generic [ref=f3e3]:
+  - generic [ref=f3e4]:
+    - banner [ref=f3e5]:
+      - generic [ref=f3e6]:
+        - link "寻 寻根路 · xungenlu.cn" [ref=f3e7] [cursor=pointer]:
+          - /url: /
+          - generic [ref=f3e8]: 寻
+          - generic [ref=f3e9]: 寻根路 · xungenlu.cn
+        - navigation [ref=f3e10]:
+          - link "首页" [ref=f3e11] [cursor=pointer]:
+            - /url: /
+        - generic [ref=f3e12]:
+          - button "注册" [ref=f3e13] [cursor=pointer]
+          - button "登录" [ref=f3e15] [cursor=pointer]
+    - main [ref=f3e17]:
+      - generic [ref=f3e18]:
+        - generic [ref=f3e20]:
+          - button [ref=f3e21] [cursor=pointer]
+          - heading "用户协议" [level=1] [ref=f3e26]
+          - paragraph [ref=f3e27]: 最后更新日期：2026年6月21日
+        - generic [ref=f3e28]:
+          - generic [ref=f3e29]:
+            - heading "1. 协议接受" [level=2] [ref=f3e30]
+            - paragraph [ref=f3e31]: 欢迎您使用寻根路（xungenlu.cn）服务。本协议是您与寻根路运营方之间关于使用本服务的法律协议。
+            - paragraph [ref=f3e32]:
+              - strong [ref=f3e33]: 请您仔细阅读本协议的全部内容。
+              - text: 如果您不同意本协议的任何内容，请立即停止使用本服务。您注册、登录或使用本服务即表示您同意接受本协议的所有条款。
+          - generic [ref=f3e34]:
+            - heading "2. 服务说明" [level=2] [ref=f3e35]
+            - paragraph [ref=f3e36]: 寻根路为用户提供以下服务：
+            - list [ref=f3e37]:
+              - listitem [ref=f3e38]: 家族族谱的创建、编辑和管理
+              - listitem [ref=f3e39]: 可视化族谱树展示和浏览
+              - listitem [ref=f3e40]: 家族成员信息共享和协作
+              - listitem [ref=f3e41]: 时光长廊：家族影像资料管理
+              - listitem [ref=f3e42]: 智能寻亲和归宗合并功能
+              - listitem [ref=f3e43]: Excel数据导入导出
+              - listitem [ref=f3e44]: 族谱印刷服务
+              - listitem [ref=f3e45]: 其他相关功能和服务
+            - paragraph [ref=f3e46]: 我们保留随时修改、暂停或终止部分或全部服务的权利，但会尽可能提前通知用户。
+          - generic [ref=f3e47]:
+            - heading "3. 账户注册与管理" [level=2] [ref=f3e48]
+            - heading "3.1 账户注册" [level=3] [ref=f3e49]
+            - list [ref=f3e50]:
+              - listitem [ref=f3e51]: 您需要提供真实、准确、完整的注册信息
+              - listitem [ref=f3e52]: 每个手机号码只能注册一个账户
+              - listitem [ref=f3e53]: 您应妥善保管账户凭证，不得将账户转让给他人使用
+            - heading "3.2 账户安全" [level=3] [ref=f3e54]
+            - list [ref=f3e55]:
+              - listitem [ref=f3e56]: 您对账户下的一切行为承担全部责任
+              - listitem [ref=f3e57]: 如发现账户被未经授权使用的情况，请立即联系我们
+              - listitem [ref=f3e58]: 我们建议定期修改密码并妥善保管
+            - heading "3.3 账户注销" [level=3] [ref=f3e59]
+            - paragraph [ref=f3e60]: 您可以随时申请注销账户。注销后，我们将在合理期限内删除或匿名化您的个人信息，但法律法规要求保留的信息除外。
+          - generic [ref=f3e61]:
+            - heading "4. 用户行为规范" [level=2] [ref=f3e62]
+            - heading "4.1 禁止行为" [level=3] [ref=f3e63]
+            - paragraph [ref=f3e64]: 使用本服务时，您不得：
+            - list [ref=f3e65]:
+              - listitem [ref=f3e66]: 上传、发布含有违法、淫秽、暴力、歧视性内容
+              - listitem [ref=f3e67]: 侵犯他人知识产权、隐私权或其他合法权益
+              - listitem [ref=f3e68]: 发布虚假信息或误导性内容
+              - listitem [ref=f3e69]: 利用服务从事诈骗、传销等非法活动
+              - listitem [ref=f3e70]: 干扰或破坏服务的正常运行
+              - listitem [ref=f3e71]: 使用自动化程序或脚本访问服务
+              - listitem [ref=f3e72]: 未经授权访问其他用户的数据
+              - listitem [ref=f3e73]: 其他违反法律法规或公序良俗的行为
+            - heading "4.2 违规处理" [level=3] [ref=f3e74]
+            - paragraph [ref=f3e75]: 如发现您违反本协议，我们有权采取以下措施：
+            - list [ref=f3e76]:
+              - listitem [ref=f3e77]: 删除违规内容
+              - listitem [ref=f3e78]: 暂停或限制账户功能
+              - listitem [ref=f3e79]: 暂停或终止服务
+              - listitem [ref=f3e80]: 保存证据并向有关部门报告
+          - generic [ref=f3e81]:
+            - heading "5. 知识产权" [level=2] [ref=f3e82]
+            - heading "5.1 平台知识产权" [level=3] [ref=f3e83]
+            - paragraph [ref=f3e84]: 寻根路的商标、标识、软件代码、界面设计、文档等知识产权归我们所有。未经书面许可，您不得复制、修改、传播或用于商业目的。
+            - heading "5.2 用户内容授权" [level=3] [ref=f3e85]
+            - paragraph [ref=f3e86]: 您上传的内容（族谱数据、照片、文字等）知识产权归您所有。但为了提供服务，您授予我们以下权利：
+            - list [ref=f3e87]:
+              - listitem [ref=f3e88]: 存储、展示和传播您上传的内容
+              - listitem [ref=f3e89]: 为优化服务而进行必要的技术处理
+              - listitem [ref=f3e90]: 在家族小组内共享您设置为共享的内容
+            - paragraph [ref=f3e91]: 您承诺对上传的内容拥有合法权利，不会侵犯第三方权益。
+          - generic [ref=f3e92]:
+            - heading "6. 隐私保护" [level=2] [ref=f3e93]
+            - paragraph [ref=f3e94]:
+              - text: 我们重视您的隐私保护。关于如何收集、使用和保护您的个人信息，请参阅我们的
+              - link "《隐私政策》" [ref=f3e95] [cursor=pointer]:
+                - /url: /privacy
+              - text: ，该政策构成本协议的重要组成部分。
+          - generic [ref=f3e96]:
+            - heading "7. 免责声明" [level=2] [ref=f3e97]
+            - heading "7.1 服务\"按现状\"提供" [level=3] [ref=f3e98]
+            - paragraph [ref=f3e99]: 本服务按"现状"和"可用性"提供，我们不保证服务不会中断、没有错误或完全安全。
+            - heading "7.2 用户内容责任" [level=3] [ref=f3e100]
+            - paragraph [ref=f3e101]: 您对自己上传的内容承担全部责任。我们不预先审查用户内容，但保留审查和删除的权利。对于用户间的纠纷，我们可协助但不保证解决。
+            - heading "7.3 第三方服务" [level=3] [ref=f3e102]
+            - paragraph [ref=f3e103]: 本服务可能包含第三方提供的功能或链接。我们不控制这些第三方服务，对其内容和行为不承担责任。
+            - heading "7.4 不可抗力" [level=3] [ref=f3e104]
+            - paragraph [ref=f3e105]: 对于因自然灾害、网络攻击、政府行为等不可抗力因素导致的服务中断或数据损失，我们不承担责任，但会尽力减少损失。
+          - generic [ref=f3e106]:
+            - heading "8. 付费服务" [level=2] [ref=f3e107]
+            - paragraph [ref=f3e108]: 部分高级功能可能需要付费使用：
+            - list [ref=f3e109]:
+              - listitem [ref=f3e110]: 我们会明确标注免费和付费功能的范围
+              - listitem [ref=f3e111]: 付费前会明确告知价格、期限和退款政策
+              - listitem [ref=f3e112]: 付费服务的具体条款以订单页面显示为准
+              - listitem [ref=f3e113]: 我们保留调整价格的权利，但会提前通知
+          - generic [ref=f3e114]:
+            - heading "9. 协议变更" [level=2] [ref=f3e115]
+            - paragraph [ref=f3e116]: 我们可能根据业务发展或法律法规变化修改本协议。重大变更时，我们会通过站内通知、短信或邮件等方式提前通知您。如您在变更后继续使用服务，即视为接受修改后的协议。
+          - generic [ref=f3e117]:
+            - heading "10. 服务终止" [level=2] [ref=f3e118]
+            - paragraph [ref=f3e119]: 在以下情况下，我们可能终止向您提供服务：
+            - list [ref=f3e120]:
+              - listitem [ref=f3e121]: 您主动注销账户
+              - listitem [ref=f3e122]: 您严重违反本协议
+              - listitem [ref=f3e123]: 我们停止运营本服务
+              - listitem [ref=f3e124]: 法律法规要求
+            - paragraph [ref=f3e125]: 服务终止后，我们将按照隐私政策的规定处理您的数据。
+          - generic [ref=f3e126]:
+            - heading "11. 法律适用与争议解决" [level=2] [ref=f3e127]
+            - paragraph [ref=f3e128]: 本协议的订立、执行和解释适用中华人民共和国法律。因本协议引起的任何争议，双方应友好协商解决；协商不成的，任何一方均可向我们所在地有管辖权的人民法院提起诉讼。
+          - generic [ref=f3e129]:
+            - heading "12. 联系方式" [level=2] [ref=f3e130]
+            - paragraph [ref=f3e131]: 如果您对本协议有任何疑问或意见，请通过以下方式联系我们：
+            - list [ref=f3e132]:
+              - listitem [ref=f3e133]: 电子邮件：legal@geneasphere.com
+              - listitem [ref=f3e134]: 客服电话：400-XXX-XXXX（工作日 9:00-18:00）
+              - listitem [ref=f3e135]: 联系地址：[公司地址]
+    - contentinfo [ref=f3e136]:
+      - generic [ref=f3e137]:
+        - generic [ref=f3e138]:
+          - generic [ref=f3e139]: 寻
+          - generic [ref=f3e140]: 寻根路 · xungenlu.cn
+        - generic [ref=f3e141]:
+          - link "首页" [ref=f3e142] [cursor=pointer]:
+            - /url: /
+          - link "核心功能" [ref=f3e143] [cursor=pointer]:
+            - /url: /#features
+          - link "演示流程" [ref=f3e144] [cursor=pointer]:
+            - /url: /#demo
+        - generic [ref=f3e145]:
+          - link "隐私政策" [ref=f3e146] [cursor=pointer]:
+            - /url: /privacy
+          - generic [ref=f3e147]: "|"
+          - link "用户协议" [ref=f3e148] [cursor=pointer]:
+            - /url: /terms
+          - generic [ref=f3e149]: "|"
+          - link "服务条款" [ref=f3e150] [cursor=pointer]:
+            - /url: /service-terms
+          - generic [ref=f3e151]: "|"
+          - link "Cookie 政策" [ref=f3e152] [cursor=pointer]:
+            - /url: /cookie-policy
+        - generic [ref=f3e153]: © 2026 寻根路 · xungenlu.cn. All rights reserved.
+  - button "🔇 背景音乐" [ref=f3e156] [cursor=pointer]:
+    - generic [ref=f3e157]: 🔇
+    - generic [ref=f3e158]: 背景音乐

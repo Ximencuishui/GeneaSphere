@@ -1,0 +1,13 @@
+- generic [active] [ref=f16e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f16e3]:
+    - generic [ref=f16e5]:
+      - heading "家族管理" [level=2] [ref=f16e6]
+      - button [ref=f16e7] [cursor=pointer]
+    - button "🔇 背景音乐" [ref=f16e22] [cursor=pointer]:
+      - generic [ref=f16e23]: 🔇
+      - generic [ref=f16e24]: 背景音乐

@@ -1,0 +1,17 @@
+- generic [active] [ref=f26e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f26e3]:
+    - generic [ref=f26e4]:
+      - generic [ref=f26e5]:
+        - heading "族谱树" [level=1] [ref=f26e6]
+        - button "Logout" [ref=f26e7] [cursor=pointer]
+      - generic [ref=f26e11]:
+        - heading "详情" [level=2] [ref=f26e12]
+        - paragraph [ref=f26e33]: 请点击节点查看详情
+    - button "🔇 背景音乐" [ref=f26e36] [cursor=pointer]:
+      - generic [ref=f26e37]: 🔇
+      - generic [ref=f26e38]: 背景音乐

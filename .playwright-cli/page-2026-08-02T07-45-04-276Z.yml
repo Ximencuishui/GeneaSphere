@@ -1,0 +1,3 @@
+- button "🔇 背景音乐" [ref=f3e4] [cursor=pointer]:
+  - generic [ref=f3e5]: 🔇
+  - generic [ref=f3e6]: 背景音乐

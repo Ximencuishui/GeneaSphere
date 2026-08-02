@@ -1,0 +1,106 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e8]:
+    - generic [ref=e43]:
+      - complementary [ref=e44]:
+        - heading "平台管理后台" [level=2] [ref=e46]
+        - menubar [ref=e47]:
+          - menuitem "概况" [expanded] [ref=e48]:
+            - menu [ref=e55]:
+              - menuitem "平台控制台" [ref=e56] [cursor=pointer]
+          - menuitem "家族管理" [ref=e57]
+          - menuitem "用户管理" [ref=e64]
+          - menuitem "内容审核" [ref=e71]
+          - menuitem "订单管理" [ref=e78]
+          - menuitem "系统配置" [ref=e85]
+          - menuitem "数据统计" [ref=e92]
+          - menuitem "日志审计" [ref=e99]
+      - generic [ref=e106]:
+        - banner [ref=e107]:
+          - generic [ref=e108]:
+            - button [ref=e109] [cursor=pointer]
+            - heading "平台控制台" [level=3] [ref=e111]
+          - generic [ref=e112]:
+            - generic [ref=e113]: 超级管理员
+            - button "超级管理员" [ref=e116] [cursor=pointer]
+        - main [ref=e120]:
+          - generic [ref=e121]:
+            - generic [ref=e124]:
+              - generic [ref=e125]:
+                - heading "欢迎回来，超级管理员" [level=2] [ref=e126]
+                - paragraph [ref=e127]: 今天是 2026/8/2，平台运行一切正常
+              - button "刷新数据" [ref=e128] [cursor=pointer]
+            - generic [ref=e130]:
+              - generic [ref=e134] [cursor=pointer]:
+                - generic [ref=e135]: 家
+                - generic [ref=e137]:
+                  - generic [ref=e138]: "1"
+                  - generic [ref=e139]: 总家族数
+              - generic [ref=e143] [cursor=pointer]:
+                - generic [ref=e144]: 人
+                - generic [ref=e146]:
+                  - generic [ref=e147]: "2"
+                  - generic [ref=e148]: 总用户数
+              - generic [ref=e152] [cursor=pointer]:
+                - generic [ref=e153]: 照
+                - generic [ref=e155]:
+                  - generic [ref=e156]: "0"
+                  - generic [ref=e157]: 总照片数
+              - generic [ref=e161] [cursor=pointer]:
+                - generic [ref=e162]: T
+                - generic [ref=e164]:
+                  - generic [ref=e165]: 0.00 GB
+                  - generic [ref=e166]: 总存储用量
+            - generic [ref=e171]:
+              - generic [ref=e175] [cursor=pointer]:
+                - generic [ref=e176]: 家
+                - generic [ref=e178]:
+                  - generic [ref=e179]: "0"
+                  - generic [ref=e180]: 待审核家族
+              - generic [ref=e184] [cursor=pointer]:
+                - generic [ref=e185]: 影
+                - generic [ref=e187]:
+                  - generic [ref=e188]: "0"
+                  - generic [ref=e189]: 待审影像
+              - generic [ref=e193] [cursor=pointer]:
+                - generic [ref=e194]: 帖
+                - generic [ref=e196]:
+                  - generic [ref=e197]: "0"
+                  - generic [ref=e198]: 待审寻亲帖
+              - generic [ref=e202] [cursor=pointer]:
+                - generic [ref=e203]: 退
+                - generic [ref=e205]:
+                  - generic [ref=e206]: "0"
+                  - generic [ref=e207]: 待退款
+            - generic [ref=e212]:
+              - generic [ref=e214]:
+                - generic [ref=e215]: 本月收入概览
+                - generic [ref=e217]:
+                  - generic [ref=e218]: ¥0.00
+                  - generic [ref=e219]: 环比 0%
+                  - generic [ref=e221]: 上月：¥0.00
+              - generic [ref=e223]:
+                - generic [ref=e224]: 今日新增
+                - generic [ref=e226]:
+                  - generic [ref=e227]:
+                    - strong [ref=e228]: "0"
+                    - text: 家族
+                  - generic [ref=e229]:
+                    - strong [ref=e230]: "0"
+                    - text: 用户
+                  - generic [ref=e231]:
+                    - strong [ref=e232]: "0"
+                    - text: 照片
+                  - generic [ref=e233]:
+                    - strong [ref=e234]: "0"
+                    - text: 订单
+              - generic [ref=e236]:
+                - generic [ref=e237]: 近 7 天趋势
+                - generic [ref=e239]:
+                  - generic [ref=e240]: 用户增长
+                  - 'generic "2026-07-28: 2人" [ref=e242]': 07-28
+                  - generic [ref=e245]: 日收入
+    - button "🔇 背景音乐" [ref=e4] [cursor=pointer]:
+      - generic [ref=e5]: 🔇
+      - generic [ref=e6]: 背景音乐
+  - alert [ref=e251]:
+    - paragraph [ref=e255]: 登录成功

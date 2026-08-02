@@ -1,0 +1,6 @@
+- generic [active] [ref=f30e1]:
+  - button "🔇 背景音乐" [ref=f30e57] [cursor=pointer]:
+    - generic [ref=f30e58]: 🔇
+    - generic [ref=f30e59]: 背景音乐
+  - alert [ref=f30e70]:
+    - paragraph [ref=f30e74]: 登录成功

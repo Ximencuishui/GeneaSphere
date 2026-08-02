@@ -170,12 +170,13 @@ export class AuthService {
 
     await this.loginLockService.clearFailures('USER', phone);
 
-    const payload = { sub: user.id, phone: user.phone };
+    const role = await this.getUserHighestRole(user.id);
+    const payload = { sub: user.id, phone: user.phone, role };
     const token = this.jwtService.sign(payload);
 
     return {
       access_token: token,
-      user: { id: user.id, phone: user.phone },
+      user: { id: user.id, phone: user.phone, role },
     };
   }
 
@@ -211,6 +212,38 @@ export class AuthService {
       role: m.role,
       is_owner: m.clan.admin_user_id === userId,
     }));
+  }
+
+  /**
+   * 获取用户在任意家族中的最高角色，用于 JWT payload。
+   * 优先级：OWNER > ADMIN > EDITOR > VIEWER
+   * 没有任何家族角色时返回空字符串（前端路由守卫据此判断无管理权限）。
+   */
+  private async getUserHighestRole(userId: string): Promise<string> {
+    const memberships = await this.prisma.clanMember.findMany({
+      where: { user_id: userId },
+      select: { role: true },
+    });
+
+    if (memberships.length === 0) return '';
+
+    const rolePriority: Record<string, number> = {
+      OWNER: 4,
+      ADMIN: 3,
+      EDITOR: 2,
+      VIEWER: 1,
+    };
+
+    let highestRole = '';
+    let highestPriority = 0;
+    for (const m of memberships) {
+      const priority = rolePriority[m.role] || 0;
+      if (priority > highestPriority) {
+        highestPriority = priority;
+        highestRole = m.role;
+      }
+    }
+    return highestRole;
   }
 
   /**
@@ -349,7 +382,8 @@ export class AuthService {
       });
     }
 
-    const payload = { sub: user.id, phone: user.phone };
+    const role = await this.getUserHighestRole(user.id);
+    const payload = { sub: user.id, phone: user.phone, role };
     const token = this.jwtService.sign(payload);
 
     return {
