@@ -20,6 +20,7 @@ import { Public } from '../auth/public.decorator';
 import { ClanResolverService } from '../common/clan-resolver.service';
 import { AdminService } from '../admin/admin.service';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { serializeBigInt } from '../common/bigint-serializer';
 
 /**
  * 族谱树 API
@@ -102,7 +103,7 @@ export class TreeController {
       result.id.toString(),
       JSON.stringify({ parent_id: dto.parent_id?.toString() ?? null }),
     );
-    return result;
+    return serializeBigInt(result);
   }
 
   @Public()
@@ -204,7 +205,7 @@ export class TreeController {
       'person',
       pid.toString(),
     );
-    return result;
+    return serializeBigInt(result);
   }
 
   /**
@@ -213,7 +214,9 @@ export class TreeController {
   @Public()
   @Get('person/:personId/detail')
   async getPersonDetail(@Param('personId') personId: string) {
-    return await this.treeService.getPersonDetail(BigInt(personId));
+    return serializeBigInt(
+      await this.treeService.getPersonDetail(BigInt(personId)),
+    );
   }
 
   /**
@@ -246,7 +249,7 @@ export class TreeController {
         wife_id: dto.wife_id?.toString() ?? null,
       }),
     );
-    return result;
+    return serializeBigInt(result);
   }
 
   /**

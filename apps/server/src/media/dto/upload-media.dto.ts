@@ -2,7 +2,7 @@ import { IsOptional, IsInt, IsString } from 'class-validator';
 
 export class UploadMediaDto {
   @IsInt()
-  clan_id: bigint;
+  clan_id: number;
 
   @IsString()
   uploader_id: string;

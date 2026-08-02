@@ -13,6 +13,16 @@ import {
   MetricsRegistry,
 } from './common/metrics';
 
+// 进程级兜底：防止 tesseract.js worker DataCloneError 等未捕获异常导致整个 Node 进程崩溃
+process.on('uncaughtException', (err) => {
+  // eslint-disable-next-line no-console
+  console.error('[uncaughtException]', err?.message || err, err?.stack?.split('\n').slice(0, 5).join('\n'));
+});
+process.on('unhandledRejection', (reason) => {
+  // eslint-disable-next-line no-console
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.message : reason);
+});
+
 const FORBIDDEN_JWT_SECRETS = new Set([
   'geneasphere-jwt-secret-key-2026',
   'geneasphere',
@@ -85,6 +95,7 @@ async function bootstrap() {
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: false,
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
   // 统一错误响应：所有路由抛出的异常都经过 GlobalHttpExceptionFilter

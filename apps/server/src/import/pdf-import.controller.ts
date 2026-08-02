@@ -22,7 +22,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ClanResolverService } from '../common/clan-resolver.service';
 
 @UseGuards(JwtAuthGuard)
-@Controller('import/pdf')
+@Controller('api/import/pdf')
 export class PdfImportController {
   constructor(
     private readonly pdfImportService: PdfImportService,

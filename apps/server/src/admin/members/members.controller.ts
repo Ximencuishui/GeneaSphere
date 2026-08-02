@@ -30,7 +30,8 @@ export class MembersController {
     @Query('keyword') keyword?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -158,7 +159,8 @@ export class MembersController {
     const userId = req.user.userId;
     const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
 
-    // 仅当前 Owner 可转让
+    // 仅当前 Owner 可转让
+
 
     // 检查目标用户是否已是该家族的成员
     const targetMember = await this.prisma.clanMember.findUnique({
@@ -234,6 +236,26 @@ export class MembersController {
     }
 
     await this.adminService.requireAdmin(member.clan_id, userId);
+
+    // 防护 1: 禁止自我移除（防止管理员误操作把自己从家族中删除）
+    if (member.user_id === userId) {
+      throw new BadRequestException('不能移除自己，请联系其他管理员处理');
+    }
+
+    // 防护 2: 防止移除最后一个管理员/所有者（家族无主化保护）
+    if (member.role === 'OWNER' || member.role === 'ADMIN') {
+      const adminCount = await this.prisma.clanMember.count({
+        where: {
+          clan_id: member.clan_id,
+          role: { in: ['OWNER', 'ADMIN'] },
+        },
+      });
+      if (adminCount <= 1) {
+        throw new BadRequestException(
+          'Cannot remove the last admin/owner. 请先提升其他成员为管理员后再移除当前成员',
+        );
+      }
+    }
 
     // 检查该成员是否关联到本家族中拥有子女的人员记录。
     // 由于 schema 中 person 未直接关联 user_id，采用通过 phone 后缀匹配姓名等

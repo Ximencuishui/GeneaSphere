@@ -26,7 +26,7 @@ export class FamilyEventService {
       throw new BadRequestException('event_date 与 event_year 必须至少填写一个');
     }
 
-    return this.prisma.familyEvent.create({
+    const created = await this.prisma.familyEvent.create({
       data: {
         clan_id: clanId,
         event_name: dto.event_name,
@@ -39,6 +39,7 @@ export class FamilyEventService {
         created_by: userId,
       },
     });
+    return this.toResponse(created);
   }
 
   /**
@@ -209,12 +210,13 @@ export class FamilyEventService {
   /**
    * 统一响应序列化：bigint → string
    */
-  private toResponse<T extends { id: bigint; media_ids: any; created_at: Date; updated_at?: Date }>(
+  private toResponse<T extends { id: bigint; clan_id: bigint; media_ids: any; created_at: Date; updated_at?: Date }>(
     e: T,
   ) {
     return {
       ...e,
       id: e.id.toString(),
+      clan_id: e.clan_id.toString(),
       media_ids: e.media_ids ?? [],
       created_at: e.created_at.toISOString(),
       ...(e.updated_at ? { updated_at: e.updated_at.toISOString() } : {}),
