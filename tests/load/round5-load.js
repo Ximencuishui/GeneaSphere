@@ -5,19 +5,25 @@
  *   # 1. 安装 k6（一次性）
  *   # macOS:   brew install k6
  *   # Windows: choco install k6
- *   # Docker:  docker run --rm -i grafana/k6 run - <round5-login.js
+ *   # Docker:  docker run --rm -i grafana/k6 run - < tests/load/round5-load.js
  *
  *   # 2. 启动后端
  *   pnpm --filter server dev
  *
  *   # 3. 运行（默认压测 demo-login）
- *   k6 run tests/load/round5-login.js
+ *   k6 run tests/load/round5-load.js
+ *
+ *   # 生产验收应优先使用真实登录：
+ *   # k6 run tests/load/round5-load.js -e AUTH_MODE=password -e LOAD_USERNAME=... -e LOAD_PASSWORD=...
  *
  *   # 4. 切换到族谱树压测：编辑下方 TARGET 改为 'tree'
  *
  * 期望：
  *   - demo-login: 0% error, QPS ≥ 200, p95 < 500ms
  *   - tree/full:  0% error, p95 < 3000ms
+ *
+ * 注意：生产验收使用 AUTH_MODE=password，并通过 LOAD_USERNAME/LOAD_PASSWORD 注入专用测试账号；
+ * 不要把正式密码写入脚本、报告或版本库。
  */
 
 import http from 'k6/http';
@@ -34,7 +40,25 @@ const treeTrend = new Trend('tree_duration');
 
 // ---------- 配置 ----------
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3101';
-const CLAN_SLUG = 'zhuxi-demo';
+const CLAN_SLUG = __ENV.CLAN_SLUG || 'zhuxi-demo';
+const AUTH_MODE = __ENV.AUTH_MODE || 'demo';
+const LOAD_USERNAME = __ENV.LOAD_USERNAME || '';
+const LOAD_PASSWORD = __ENV.LOAD_PASSWORD || '';
+const AUTH_PATH = __ENV.AUTH_PATH || '/api/auth/login';
+
+function loginPayload() {
+  if (AUTH_MODE === 'password') {
+    return JSON.stringify({ username: LOAD_USERNAME, password: LOAD_PASSWORD });
+  }
+  return JSON.stringify({});
+}
+
+function login() {
+  const path = AUTH_MODE === 'password' ? AUTH_PATH : '/api/auth/demo-login';
+  return http.post(`${BASE_URL}${path}`, loginPayload(), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
 export const options = {
   scenarios: {
@@ -74,17 +98,12 @@ export default function () {
 // ---------- demo-login 压测 ----------
 function runLogin() {
   const start = Date.now();
-  const res = http.post(
-    `${BASE_URL}/api/auth/demo-login`,
-    JSON.stringify({}),
-    { headers: { 'Content-Type': 'application/json' }, tags: { name: 'demo-login' } },
-  );
+  const res = login();
   loginTrend.add(Date.now() - start);
 
   const ok = check(res, {
-    'status is 201': (r) => r.status === 201,
+    'status is 2xx': (r) => r.status >= 200 && r.status < 300,
     'has access_token': (r) => r.json('access_token') !== undefined,
-    'has user.role': (r) => r.json('user.role') === 'OWNER',
   });
   errorRate.add(!ok);
   sleep(0.1);
@@ -93,12 +112,8 @@ function runLogin() {
 // ---------- 族谱树全量查询压测 ----------
 function runTree() {
   // 先登录拿 token
-  const loginRes = http.post(
-    `${BASE_URL}/api/auth/demo-login`,
-    JSON.stringify({}),
-    { headers: { 'Content-Type': 'application/json' } },
-  );
-  if (loginRes.status !== 201) {
+  const loginRes = login();
+  if (loginRes.status < 200 || loginRes.status >= 300) {
     errorRate.add(true);
     return;
   }
@@ -125,12 +140,8 @@ function runTree() {
 
 // ---------- API mix 压测（CRUD 列表/详情）----------
 function runApiMix() {
-  const loginRes = http.post(
-    `${BASE_URL}/api/auth/demo-login`,
-    JSON.stringify({}),
-    { headers: { 'Content-Type': 'application/json' } },
-  );
-  if (loginRes.status !== 201) {
+  const loginRes = login();
+  if (loginRes.status < 200 || loginRes.status >= 300) {
     errorRate.add(true);
     return;
   }
@@ -155,12 +166,8 @@ function runApiMix() {
 
 // ---------- 4MB 文件上传压测 ----------
 function runUpload() {
-  const loginRes = http.post(
-    `${BASE_URL}/api/auth/demo-login`,
-    JSON.stringify({}),
-    { headers: { 'Content-Type': 'application/json' } },
-  );
-  if (loginRes.status !== 201) {
+  const loginRes = login();
+  if (loginRes.status < 200 || loginRes.status >= 300) {
     errorRate.add(true);
     return;
   }

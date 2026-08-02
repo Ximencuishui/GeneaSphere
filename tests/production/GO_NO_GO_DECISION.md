@@ -1,7 +1,7 @@
 # GeneaSphere 生产环境 Go/No-Go 决策模板
 
 > **生成时间**：2026-08-02（第三轮回归：本轮 6 项高危全部闭环）
-> **当前决策**：**NO-GO（接近 GO 阈值）**；本轮 6 项高危全部闭环（avatar 魔术字节 + 公告 XSS 清洗 + 限流 + ParseIntPipe + 告警 webhook + 备份 trigger）；性能压测 GO/NO-GO=PASS；浏览器兼容（chromium）覆盖；DB 断连恢复 6/6 PASS；剩余阻塞仅 3 项：依赖扫描 4 critical/23 high + 真实跨浏览器矩阵需 Playwright + 合规签字
+> **当前决策**：**NO-GO（等待 Final Acceptance Test）**。历史本地证据已证明主要功能修复、Node 性能探测、基础 `/metrics`、mock webhook、备份 trigger 与 DB 断连隔离可用，但不能替代同一候选 release 在生产同构环境的最终验收。当前必须闭环：① k6 原始压测、1000 人树/上传/4h 稳态；② 4 critical/23 high 依赖漏洞；③ Playwright Chromium/Firefox/WebKit 与 Safari/移动端；④ COS 备份真实恢复、数据对账和 RTO/RPO；⑤ 真实告警通道；⑥ 生产 PM2/systemd 自愈；⑦ 合规审核及六方签字。
 > **决策依据**：[tests/e2e/PRODUCTION_READINESS_PLAN.md](../e2e/PRODUCTION_READINESS_PLAN.md)
 > **Go-Live 清单**：[GO_LIVE_CHECKLIST.md](GO_LIVE_CHECKLIST.md)
 
@@ -46,7 +46,7 @@
 
 ## 3. Round 5-9 实测结果摘要
 
-### 3.1 Round 5 性能压测（本轮 Node 实现）
+### 3.1 Round 5 性能探测（历史本地 Node 证据，非 Final Acceptance k6）
 
 - 状态：**PASS** （`tests/observability/round7-perf-drill.js`）
 - 5 阶段压测：
@@ -57,7 +57,7 @@
   - login-fail-5x50：P95=566ms, P99=751ms, RPS=18.8, errors=50（4xx 业务正常）
 - 阈值差异化：health<200ms, login<1500ms, statistics<3000ms, statistics-burst<12000ms
 - **GO/NO-GO: PASS**（5/5 阶段达标）
-- 结论：准入已达
+- 结论：历史本地阈值通过；仍须执行生产同构 k6 Final Acceptance Test
 
 ### 3.2 Round 6 安全渗透（本轮脚本修复后复测）
 
@@ -70,7 +70,7 @@
 - 暴力登录（`round6-bruteforce.sh`）：✅ 30 req/min 触发 429 + Retry-After 头存在
 - 依赖扫描（`pnpm audit`）：45 个漏洞 = 4 critical + 23 high + 16 moderate + 2 low（后续处理）
 
-### 3.3 Round 7 告警 webhook 演练（本轮实测）
+### 3.3 历史告警 webhook 演练（本地 mock 证据）
 
 - 状态：**PASS** （`tests/observability/round5-webhook-drill.py`）
 - mock receiver 启动于 `http://127.0.0.1:4123/alert/webhook`
@@ -80,9 +80,9 @@
 - `/api/admin/alert/test` P1：投递成功（statusCode=200, 6ms）✅
 - mock receiver 收到 manual 源告警 ×2 ✅
 - GO/NO-GO: 5/5 PASS
-- 结论：告警通道已闭环
+- 结论：本地投递链路闭环；Final Acceptance 必须验证真实生产告警通道及恢复通知
 
-### 3.4 Round 8 备份与灾备（本轮实测）
+### 3.4 Round 8 备份控制面探测（历史本地证据）
 
 - 状态：**PASS** （`tests/observability/round6-backup-drill.py`）
 - 新增端点：`GET /api/admin/backup/status` + `POST /api/admin/backup/trigger`
@@ -92,9 +92,9 @@
 - /api/health/ready: 200 (DB ok=true) ✅
 - /metrics: 200 (285 行) ✅
 - GO/NO-GO: 6/6 PASS
-- 结论：备份端点闭环，灾备主体已上线
+- 结论：备份控制面可用；尚未证明 COS 实际对象可恢复、数据一致及 RTO/RPO 达标
 
-### 3.5 Round 9 浏览器兼容矩阵（本轮实测，chromium-based）
+### 3.5 Round 7 浏览器兼容矩阵（历史 Chromium-only 证据）
 
 - 状态：**chromium 6 浏览器族覆盖** （`tests/security/results/round8-browser-matrix-20260802.md`）
 - chromium 内核覆盖：Chrome 113+, Edge 113+, Brave, Opera, Vivaldi, Arc
@@ -123,7 +123,28 @@
 
 ## 当前决策结论
 
-**NO-GO（接近 GO 阈值）。** 本轮 6 项高危全部闭环（avatar 魔术字节 + XSS 清洗 + 限流 + ParseIntPipe + 告警 webhook 演练 + 备份 trigger 端点）；性能压测 GO/NO-GO=PASS（health P95<100ms，statistics P95<3s，30 并发 P95<12s）；Round 5/7/8/9/10 已形成完整报告；Round 10 DB 断连恢复 6/6 通过；仅余 3 项剩余阻塞：依赖扫描 4 critical/23 high 未修复、真实跨浏览器矩阵需 Playwright + BrowserStack（当前仅 chromium 内核覆盖）、PM2/systemd 自愈脚本仅需在生产环境部署时启用。完成上述阻塞项并补齐签字前，不建议直接生产上线或进入公开推广。
+**NO-GO（等待 Final Acceptance Test）。** 已有本地证据证明主要 P0/P1 修复、Node 五阶段性能探测、基础 `/metrics`、mock webhook、备份 trigger 和 DB 断连隔离可用，但这些证据不足以证明候选 release 已达到公开生产准入。上线前仍须完成：
+
+1. Round 5：在生产同构环境执行 k6 login/tree/api-mix/upload，补齐 1000 人树前端冷启动、4MB 上传、4h 稳态、Lighthouse 及原始结果；
+2. Round 6：将 4 critical/23 high 依赖漏洞降至 0 critical、0 可利用 high，并对候选 release 重跑渗透与镜像扫描；
+3. Round 7：使用 production build 完成 Playwright Chromium/Firefox/WebKit，以及 Safari/移动端或 BrowserStack；
+4. Round 8：验证 COS 实际备份对象并恢复至全新隔离库，完成数据对账且 RTO <30min、RPO <24h；
+5. Round 9：验证生产 Prometheus/Grafana 与真实钉钉/企业微信/邮件告警、接收确认和恢复通知；
+6. 生产运维：验证 PM2/systemd 开机自启、自愈、最大内存重启及 ready 探针；
+7. 完整回填 Go-Live 清单，完成业务、DBA、运维、安全/技术、法务和产品签字。
+
+### 2026-08-02 Final Acceptance 即时复核
+
+- `pnpm audit --audit-level high` 已重新执行，结果仍为 45 个漏洞：4 critical、23 high、16 moderate、2 low；Round 6 继续阻塞。
+- `pnpm --filter web build` 已通过，生产前端构建完成；最大族谱树 chunk `GenealogyTree` gzip 约 156.02 kB，构建存在 G6 chunk 循环依赖警告但未失败。
+- 当前环境未安装 k6，且没有生产同构 Staging 地址与专用压测账号，因此不能生成有效的 Round 5 Final Acceptance 原始结果。
+- 当前 workspace 未安装 Playwright CLI；现有兼容脚本已补充真实登录参数入口，但 Chromium/Firefox/WebKit 矩阵仍需安装浏览器运行时并在 production build 服务上执行。
+- `tests/load/round5-load.js` 已支持 `AUTH_MODE=password`、`AUTH_PATH`、`LOAD_USERNAME`、`LOAD_PASSWORD`，正式验收不再被迫依赖 demo-login。
+- `tests/compatibility/round7-compatibility.sh` 已支持同一真实登录参数和可配置 browser/viewport 矩阵；正式密码不得写入仓库或报告。
+
+上述结果证明可以立即完成本地构建、审计和脚本准备，但不能替代 Staging k6、真实 Playwright 浏览器、Safari/移动端及外部环境证据。
+
+上述阻塞项清零前，不得进入公开推广。只有非核心 P2/P3 且具备补偿控制、30 天内修复计划和双签时，才可评估 GO-WITH-EXCEPTION。
 
 ### 必须复评的条件
 

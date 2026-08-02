@@ -1,460 +1,221 @@
-# GeneaSphere 多轮端到端测试报告
+# Round 7 E2E 测试报告
 
-## 测试环境
-- **前端服务**: http://localhost:5173 (Vite 开发服务器)
-- **后端服务**: http://localhost:3101 (NestJS)
-- **数据库**: PostgreSQL (localhost:15432)
-- **测试时间**: 2026年8月1日
-- **测试工具**: Browser MCP (Playwright)
+**时间**: 2026-08-02
+**测试人**: AI (Qoder Browser MCP)
+**版本**: GeneaSphere dev (本地)
+**目标**: 管理员演示登录 → 公告 CRUD → 媒体/二维码 → 族员演示登录 → 边界测试
 
 ---
 
-## 第 1 轮：基础登录流程测试 ✅
+## 一、服务健康度
 
-### 1.1 营销首页访问
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 首页加载 | ✅ PASS | 显示品牌 Logo、核心功能介绍、一键体验按钮 |
-| 页面元素渲染 | ✅ PASS | 地图迁徙动画、功能卡片、页脚链接全部正常 |
-| 响应式布局 | ✅ PASS | 页面结构完整 |
-
-### 1.2 演示账号一键登录弹窗
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 弹窗打开 | ✅ PASS | 点击"一键体验演示账号"后正确弹出 |
-| 角色卡片展示 | ✅ PASS | 显示管理员(族谱管理平台)和族员(朱小小)两个角色 |
-| PC端 Modal | ✅ PASS | 居中显示，720px 宽度 |
-| 说明文字 | ✅ PASS | "演示账号已预置完整的朱熹族谱（1000 人 · 28 代）" |
-
-### 1.3 管理员一键登录
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 登录请求 | ✅ PASS | POST /api/auth/demo-login 返回 200 |
-| Token 保存 | ✅ PASS | localStorage.setItem('geneasphere_token', ...) |
-| 自动跳转 | ✅ PASS | 路由从 / → /zupu/zhuxi-demo |
-| 欢迎消息 | ✅ PASS | 显示"欢迎体验族谱管理后台！" |
-| 用户信息 | ✅ PASS | 13800000000 (OWNER 角色) |
-
-### 1.4 族员一键登录
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 登录请求 | ✅ PASS | POST /api/auth/demo-member-login 返回 200 |
-| 自动跳转 | ✅ PASS | 路由跳转到 /user-center/profile |
-| 用户信息 | ✅ PASS | 13800000001 (EDITOR 角色，昵称"演示族员·朱小小") |
-| 家庭关系 | ✅ PASS | 所属家族"朱熹族谱（演示）" |
-
-### 1.5 退出登录
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 退出按钮 | ✅ PASS | 点击后清除 Token |
-| 路由跳转 | ✅ PASS | 跳转至 /login |
-| Token 清理 | ✅ PASS | localStorage 中 Token 已清除 |
+| 端口 | 服务 | 状态 |
+|------|------|------|
+| 5173 | Vite 前端 | ✅ LISTENING |
+| 3101 | NestJS 后端 | ✅ LISTENING |
+| 15432 | PostgreSQL (SSH) | ✅ LISTENING |
 
 ---
 
-## 第 2 轮：管理员后台功能测试 ✅
+## 二、Phase 1 - P1 缺陷复测
 
-### 2.1 控制面板 (Dashboard)
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo |
-| 数据统计 | ✅ PASS | 成员 1002, 照片 0, 待办 0 |
-| 进度条 | ✅ PASS | 分阶段加载进度 (49% → 100%) |
-| 快速入口 | ✅ PASS | 隐私配置、字辈管理、生平审核等 |
-| 存储信息 | ✅ PASS | 已用 0.00 GB / 5 GB 总容量 |
+### P1-Bug: 匿名用户访问 /zupu/:slug/dashboard 白屏
 
-### 2.2 成员管理
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/members |
-| 菜单展开 | ✅ PASS | "人员管理"菜单自动展开显示子菜单 |
-| 成员列表 | ✅ PASS | 显示 2 个成员 (OWNER + EDITOR) |
-| 角色筛选 | ✅ PASS | 下拉筛选功能正常 |
-| 分页控件 | ✅ PASS | 20条/页，共 1 页 |
+**状态**: ❌ **仍然存在（未修复）**
 
-### 2.3 影像审核
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/reviews/media |
-| Tab 切换 | ✅ PASS | 待审核/已通过/已驳回 |
-| 批量操作 | ✅ PASS | 批量通过、批量驳回按钮禁用状态正确 |
-| 空状态 | ✅ PASS | "暂无数据"提示 |
+**步骤**:
+1. 清除 localStorage，确保未登录
+2. 访问 http://localhost:5173/zupu/zhuxi-demo/dashboard
 
-### 2.4 生平审核
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/reviews/bio |
-| Tab 切换 | ✅ PASS | 三个 Tab 正常工作 |
-| 表格结构 | ✅ PASS | 标题、关联人物、作者、提交时间列正常 |
+**实际结果**:
+- URL 停留在 `/zupu/zhuxi-demo/dashboard`
+- 页面 body 几乎为空（bodyLen=7）
+- 仅显示一个按钮 "🔇 背景音乐"
+- 点击背景音乐按钮可打开音乐播放器面板，说明部分 JS 仍在执行
 
-### 2.5 认亲申请管理
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/merge/applications |
-| Tab 切换 | ✅ PASS | 待处理/待合并/已合并/已拒绝/需人工核查 |
-| 可回滚快照 | ✅ PASS | "查看可回滚快照"按钮存在 |
+**根本原因**: `/zupu/:slug/*` 下的 admin 路由守卫 `requiresAdmin: true` 对未登录用户未做正确重定向，导致渲染出空白页面。
 
-### 2.6 迁徙管理
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/migration |
-| 家族选择器 | ✅ PASS | 下拉选择功能存在 |
-
-### 2.7 隐私配置
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/settings/privacy |
-| Switch 控件 | ✅ PASS | 允许查看已故人员、隐藏在世人员照片等 |
-| 数值调节 | ✅ PASS | 代数调节 (减少/增加数值) |
-| 导出功能 | ✅ PASS | "一键导出家族数据"按钮 |
-
-### 2.8 字辈管理
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/settings/xipai |
-| 添加按钮 | ✅ PASS | "添加字辈"按钮存在 |
-| 空状态 | ✅ PASS | "暂无字辈数据" |
-
-### 2.9 订单管理
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/orders |
-| Tab 切换 | ✅ PASS | 全部/待支付/印刷中/已发货/已完成 |
-| 空状态 | ✅ PASS | "暂无订单数据" |
-
-### 2.10 操作日志
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/logs |
-| 日志记录 | ✅ PASS | 显示 25 条操作记录 |
-| 筛选功能 | ✅ PASS | 操作类型/日期范围筛选 |
-| 导出功能 | ✅ PASS | "导出CSV"按钮 |
-
-### 2.11 公告管理
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/announcements |
-| 发布功能 | ✅ PASS | "发布公告"按钮存在 |
-| 列表显示 | ✅ PASS | 显示 1 条公告 (E2E-1785563764214) |
-
-### 2.12 回收站
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /zupu/zhuxi-demo/trash |
-| Tab 切换 | ✅ PASS | 已删除成员/已删除影像 |
-| 空状态 | ✅ PASS | "暂无数据" |
-
-### 2.13 族谱树 (核心功能)
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /tree/4 |
-| 数据加载 | ✅ PASS | 1002 人，28 代完整族谱 |
-| 首次加载 | ⚠️ 慢 | 约 10 秒 (9834ms) |
-| 后续加载 | ✅ 正常 | 约 6-9 秒 |
-| 视图切换 | ✅ PASS | 详细视图 → 紧凑视图 (FPS 3→60) |
-| 搜索功能 | ✅ PASS | 筛选"朱熹"返回 80 个匹配节点 |
-| 工具栏 | ✅ PASS | 聚焦传承、三代亲属、收起工具栏等 |
-
-> **注意**: 族谱树首次加载耗时较长，后端日志显示:
-> - `getClanFullTree complete: 9834ms, totalPersons=1002`
-> - 这是正常的大数据集查询性能
+**截图**: `round7/01-anon-redirect.png` (Round 7 复测), `round7/18-anon-dashboard-p1.png`
 
 ---
 
-## 第 3 轮：族员视角功能测试 ✅
+## 三、Phase 2 - 管理员演示登录 + 公告 CRUD
 
-### 3.1 个人资料
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/profile |
-| 头像上传 | ✅ PASS | "更换头像"按钮 |
-| 信息展示 | ✅ PASS | 昵称、手机号、邮箱、性别、生日 |
-| 家庭关系 | ✅ PASS | "前往维护"按钮 |
-| 保存功能 | ✅ PASS | "保存修改"按钮 |
+### 3.1 管理员演示登录
 
-### 3.2 我的时光 (时光轴)
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/timeline |
-| 年份筛选 | ✅ PASS | 下拉筛选功能 |
-| 空状态 | ✅ PASS | "暂无上传的照片" |
+| 步骤 | 操作 | 结果 |
+|------|------|------|
+| 1 | 点击 "▶ 一键体验族谱管理演示" | ✅ 按钮立即 disabled |
+| 2 | 等待自动跳转 | ✅ 约 2s 后进入 /zupu/zhuxi-demo |
+| 3 | 验证 JWT token 存储 | ✅ `geneasphere_token` 写入 localStorage |
+| 4 | 验证角色 | ✅ role=OWNER, phone=13800000000 |
 
-### 3.3 我的工具箱
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/toolbox |
-| AI 图像工具 | ✅ PASS | 老照片修复/AI上色/AI扩图/AI去物/AI拼图/AI增强/AI动态化 |
-| 视频生成工具 | ✅ PASS | 历史音像墙/直系血缘视频/家庭图册 |
-| 额度显示 | ✅ PASS | 本月免费额度/付费余额/家族共享 |
-| 使用记录 | ✅ PASS | 最近使用记录列表 |
+**截图**: `round7/02-admin-dashboard.png`
 
-### 3.4 我的订单
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/orders |
-| Tab 切换 | ✅ PASS | 全部/待支付/印刷中/已发货/已完成/已取消 |
-| 下单入口 | ✅ PASS | "去下单"按钮 |
+### 3.2 公告 CRUD 完整生命周期
 
-### 3.5 我的小组
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/groups |
-| 创建功能 | ✅ PASS | "创建小组"按钮 |
-| 空状态 | ✅ PASS | "暂未加入任何小组" |
+| 步骤 | 操作 | API 验证 | 结果 |
+|------|------|----------|------|
+| 创建 | 点击 "发布公告" → 填写标题 → 确认 | POST /api/admin/announcements | ✅ count 3→4 |
+| 编辑置顶 | 点击 编辑 → 切换 置顶 → 保存 | GET /api/admin/announcements → is_pinned=true | ✅ |
+| 取消置顶 | 点击 "取消置顶" 按钮 | API is_pinned=false | ✅ |
+| 下架 | 点击 "下架" 按钮 | API is_active=false, 状态显示"草稿" | ✅ |
+| 删除 | 点击 "删除" → 确认 | DELETE /api/admin/announcements | ✅ count 4→3 |
 
-### 3.6 寻找儿时伙伴
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/buddies |
-| 地点筛选 | ✅ PASS | 童年地点输入框 |
-| 时间段筛选 | ✅ PASS | 开始/结束年份调节 |
-| 寻找功能 | ✅ PASS | "开始寻找"按钮 |
-
-### 3.7 我的音像墙
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/videos |
-| 刷新功能 | ✅ PASS | "刷新"按钮 |
-| 生成功能 | ✅ PASS | "生成新视频"按钮 |
-
-### 3.8 家庭图册
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /user-center/family-book |
-| 新建/我的图册 | ✅ PASS | Radio 切换 |
-| 参数配置 | ✅ PASS | 起始人物搜索、向后代数(1-10)、包含配偶 |
-| 分类方式 | ✅ PASS | 按家庭/按房支/按世代 |
-| 展示字段 | ✅ PASS | 姓名/照片/生年/卒年/简介/职业/住址/出生地 |
-| 封面风格 | ✅ PASS | 家/喜庆红/典雅金/清新绿/水墨风/现代简约 |
-
-### 3.9 设置页面
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 隐私设置 | ✅ PASS | 跨家族寻找/童年地点/同村推荐/标注匹配 |
-| 通知偏好 | ✅ PASS | 站内信/短信通知开关 |
-| 账号安全 | ✅ PASS | 修改密码/绑定手机/注销账号 |
-
-### 3.10 权限隔离验证
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 族员→管理员后台 | ✅ PASS | 正确拦截并重定向到 /clans |
-| 路由守卫 | ✅ PASS | requiresAdmin 元数据校验生效 |
+**截图**: `round7/03-announcements-list.png`, `round7/04-announcement-created.png`, `round7/05-announcement-unpinned-unpublished.png`
 
 ---
 
-## 第 4 轮：平台管理员后台测试 ✅
+## 四、Phase 3 - 影像审核 / 媒体库 / 邀请二维码
 
-> 平台管理员（platform_admin / admin123）是独立于家族账号的超级管理员体系，
-> 与家族管理员后台账号完全隔离。
+### 4.1 影像审核页面
 
-### 4.1 平台管理员登录
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 登录页面 | ✅ PASS | URL: /platform-admin/login |
-| 默认凭证显示 | ✅ PASS | platform_admin / admin123 |
-| 登录请求 | ✅ PASS | 返回 200，自动跳转 /platform-admin/dashboard |
-| 角色显示 | ✅ PASS | 显示"超级管理员" |
-| Token 保存 | ✅ PASS | localStorage.setItem('geneasphere_platform_token', ...) |
+| URL | 预期 | 实际 | 结果 |
+|-----|------|------|------|
+| `/zupu/zhuxi-demo/media` | 影像管理入口 | ❌ 白屏（无此路由） | - |
+| `/zupu/zhuxi-demo/media/library` | 影像库 | ❌ 白屏 | - |
+| `/zupu/zhuxi-demo/reviews/media` | 影像审核 | ❌ 白屏 | - |
 
-### 4.2 平台控制台 (Dashboard)
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /platform-admin/dashboard |
-| 平台统计 | ✅ PASS | 总家族数 1, 总用户数 2, 总照片数 0 |
-| 存储统计 | ✅ PASS | 总存储 0.00 GB |
-| 收入概览 | ✅ PASS | 本月 ¥0.00, 环比 0% |
-| 待办统计 | ✅ PASS | 待审核家族 0, 影像 0, 寻亲帖 0, 退款 0 |
-| 刷新功能 | ✅ PASS | "刷新数据"按钮 |
+**分析**: `/zupu/zhuxi-demo/media/*` 路由不存在于路由配置中（仅 `media/library` 和 `media/albums` 在 `/zupu/:slug/` 下存在），且后端 `/api/admin/media/*` 相关端点也可能未注册。
 
-### 4.3 家族管理 (平台级)
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /platform-admin/families |
-| 家族列表 | ✅ PASS | 显示 1 个家族：朱熹族谱（演示） |
-| 家族详情 | ✅ PASS | 成员2/人物1002/照片0/状态正常 |
-| 操作按钮 | ✅ PASS | 详情/冻结/导出/删除 |
-| 搜索功能 | ✅ PASS | 按名称/状态/日期筛选 |
+### 4.2 邀请二维码
 
-### 4.4 用户管理 (平台级)
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /platform-admin/users |
-| 用户列表 | ✅ PASS | 显示 2 个用户 |
-| 用户详情 | ✅ PASS | 138****0001 (EDITOR), 138****0000 (OWNER) |
-| 操作按钮 | ✅ PASS | 详情/封禁/重置密码/注销 |
-| 封禁筛选 | ✅ PASS | 封禁状态下拉筛选 |
+| 功能 | 操作 | 结果 |
+|------|------|------|
+| 列表展示 | 访问 /zupu/zhuxi-demo/invite/qrcodes | ✅ 表格渲染正常（初始 0 条） |
+| 生成新二维码 | 点击 "生成新二维码" → "生成" | ✅ API POST /api/invite/qrcodes 成功，生成 inv_4_6cd447b8a505babe_c692448f |
+| 二维码展示 | 生成后自动弹出 dialog | ✅ 显示 QR code + 链接 + 过期时间（7 天后） |
+| 复制链接 | 点击 "复制链接" | ✅ ElMessage.success 提示"已复制链接" |
+| 撤销二维码 | 点击 "撤销" → 确认 | ✅ API DELETE 成功，状态变"已撤销"，按钮 disabled |
 
-### 4.5 影像审核 (平台级)
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /platform-admin/reviews/media |
-| Tab 切换 | ✅ PASS | 待审核/已通过/已驳回 |
-| 筛选控件 | ✅ PASS | 家族ID/日期范围筛选 |
-| 表格结构 | ✅ PASS | 缩略图/家族/上传者/年代/地点/描述 |
+**截图**: `round7/10-invite-qrcodes.png`, `round7/11-qrcode-created.png`, `round7/12-qrcode-revoked.png`
 
-### 4.6 定价管理
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 页面加载 | ✅ PASS | URL: /platform-admin/settings/pricing |
-| 短信单价 | ✅ PASS | ¥0.050/条 |
-| AI工具定价 | ✅ PASS | 老照片修复1次, 人物动态化3次, 黑白上色2次, 图像降噪2次 |
-| 免费额度 | ✅ PASS | 新用户每月 10 次 |
-| 印刷基价 | ✅ PASS | 基础版 ¥199, 高级版 ¥399, 豪华版 ¥699 |
-| 保存功能 | ✅ PASS | "保存修改"按钮 |
-
-### 4.7 权限隔离验证
-| 测试项 | 结果 | 备注 |
-|--------|------|------|
-| 族员→平台后台 | ✅ PASS | 族员 Token 无法访问，自动跳转 /platform-admin/login |
-| 路由守卫 | ✅ PASS | requiresPlatformAdmin 元数据校验生效 |
-| Token 隔离 | ✅ PASS | 家族 Token 与平台 Token 独立存储 |
+**注意**: 后端 `/api/admin/invite/qrcodes` 不存在，但前端直接调用 `/api/invite/qrcodes`（无需 admin 前缀），该端点正常工作。
 
 ---
 
-## 测试结论
+## 五、Phase 4 - 族员演示登录 + 个人资料
 
-### 综合评价：✅ 测试通过
+### 5.1 族员演示登录
 
-| 角色 | 模块数 | 通过数 | 通过率 |
-|------|--------|--------|--------|
-| 演示登录 | 5 | 5 | 100% |
-| 家族管理员 | 13 | 13 | 100% |
-| 族员 | 10 | 10 | 100% |
-| 平台管理员 | 6 | 6 | 100% |
-| **总计** | **34** | **34** | **100%** |
+| 步骤 | 操作 | 结果 |
+|------|------|------|
+| 1 | 管理员登出（右上角 → 退出登录） | ✅ 跳转 /login |
+| 2 | 点击 "● 一键体验族员个人页面" | ✅ 按钮立即 disabled |
+| 3 | 等待自动跳转 | ✅ 约 3s 后进入 /user-center/profile |
+| 4 | 验证 token | ✅ geneasphere_token, role=EDITOR, phone=13800000001 |
 
-### 发现的问题
+**URL 跳转**: /login → /user-center/profile（而非 /user-center）
 
-1. **族谱树首次加载慢** (非阻塞性问题)
-   - 原因: 1002 人的全量数据查询需要约 10 秒
-   - 建议: 考虑添加骨架屏加载动画或默认只加载前 N 代
+### 5.2 个人资料页面
 
-2. **演示登录偶发失败** (偶发性)
-   - 原因: LoginLockService 的快速连续调用可能触发临时限制
-   - 建议: 在测试脚本中添加重试机制或延迟
+| 字段 | 值 | 可编辑 |
+|------|-----|--------|
+| 头像 | 显示默认头像 | ✅ 更换头像按钮 |
+| 昵称 | 演示族员·朱小小 | ✅ 可编辑 |
+| 手机号 | 138****0001 | ❌ disabled |
+| 邮箱 | member@geneasphere.com | ✅ 可编辑 |
+| 性别 | 男 (checked) | ✅ 单选 |
+| 出生日期 | 未设置 | ✅ 日期选择器 |
+| 所属家族 | 朱熹族谱（演示） | ❌ disabled |
+| 家庭关系 | — | ✅ "前往维护"按钮 |
 
-### 截图文件
-- `round1-01-demo-modal.png` - 演示账号选择弹窗
-- `round1-02-admin-dashboard.png` - 管理员控制面板
-- `round1-03-login-page.png` - 登录页面
-- `round1-04-member-profile.png` - 族员个人资料
-- `round2-01-members.png` - 成员管理页面
-- `round2-02-merge-applications.png` - 认亲申请页面
-- `round2-03-tree-1002.png` - 族谱树页面 (1002人)
-- `round3-01-member-profile.png` - 族员个人资料
-- `round4-01-platform-admin-dashboard.png` - 平台管理员控制台
-- `round4-02-platform-families.png` - 平台管理员家族管理
-- `round4-03-platform-pricing.png` - 平台管理员定价管理
+**修改保存测试**:
+1. 修改昵称 → "演示族员·朱小小-R7" → 点击"保存修改"
+2. API 验证: `GET /api/user/profile` 返回 `nickname: "演示族员·朱小小-R7"`, `updated_at: 2026-08-02T03:56:17.193Z` ✅
 
----
+### 5.3 族员其他页面
 
-## 测试脚本使用说明
+| 页面 | URL | 状态 |
+|------|-----|------|
+| 家庭关系 | /user-center/family-relation | ✅ 正常加载 |
+| 我的时光 | /user-center/timeline | ✅ 正常加载（0张照片） |
+| 家庭图册 | /user-center/family-book | ✅ 正常加载（参数设置表单） |
 
-### 运行完整测试
-```bash
-# 1. 确保服务启动
-pnpm dev
-
-# 2. 使用 Browser MCP 执行以下操作序列
-```
-
-### 关键测试点
-1. **演示账号登录**: POST /api/auth/demo-login 和 /api/auth/demo-member-login
-2. **权限校验**: 族员无法访问 /zupu/:slug/* 下的管理页面
-3. **数据完整性**: 族谱树显示 1002 人，28 代
-4. **UI 响应**: 视图切换后 FPS 从 3 提升到 60
-5. **平台管理员**: 独立于家族账号体系，platform_admin / admin123
-6. **三权分立**: 平台管理员 / 家族管理员 / 族员 三层权限隔离
+**截图**: `round7/13-member-profile.png`, `round7/14-member-profile-saved.png`, `round7/15-member-family-relation.png`, `round7/16-member-timeline.png`, `round7/17-member-family-book.png`
 
 ---
 
-## 多轮测试执行指南
+## 六、Phase 5 - 跨角色重定向 / Token 异常 / 登出
 
-### 测试账号汇总
-| 账号 | 角色 | 用途 | 登录方式 |
-|------|------|------|----------|
-| 13800000000 | OWNER | 家族管理员演示账号 | POST /api/auth/demo-login |
-| 13800000001 | EDITOR | 族员演示账号 | POST /api/auth/demo-member-login |
-| platform_admin | SUPER | 平台超级管理员 | POST /api/platform-auth/login |
+| 场景 | 操作 | 预期结果 | 实际结果 | 结果 |
+|------|------|----------|----------|------|
+| Token 失效→受保护页 | 清除 localStorage → 访问 /user-center/profile | 重定向到 /login | URL → /login | ✅ |
+| 匿名→admin 路由 | 未登录访问 /zupu/zhuxi-demo/dashboard | 重定向到 /login | 白屏（P1 bug） | ❌ P1 |
+| Admin token 访问族员页 | admin 登录后访问 /user-center/profile | 显示 admin 自己资料 | 显示"演示用户·管理员" | ✅ 正常 |
 
-### 测试执行顺序
-
-```
-第 1 轮: 基础登录流程
-  1.1 访问首页 / → 验证页面加载
-  1.2 点击「一键体验演示账号」→ 验证弹窗
-  1.3 选择「族谱管理平台」→ 验证管理员登录
-  1.4 退出登录
-  1.5 选择「族员个人页面」→ 验证族员登录
-  1.6 退出登录
-
-第 2 轮: 家族管理员后台 (OWNER Token)
-  2.1  管理员一键登录 → /zupu/zhuxi-demo
-  2.2  控制面板 /zupu/zhuxi-demo
-  2.3  成员管理 /zupu/zhuxi-demo/members
-  2.4  影像审核 /zupu/zhuxi-demo/reviews/media
-  2.5  生平审核 /zupu/zhuxi-demo/reviews/bio
-  2.6  认亲申请 /zupu/zhuxi-demo/merge/applications
-  2.7  迁徙管理 /zupu/zhuxi-demo/migration
-  2.8  隐私配置 /zupu/zhuxi-demo/settings/privacy
-  2.9  字辈管理 /zupu/zhuxi-demo/settings/xipai
-  2.10 订单管理 /zupu/zhuxi-demo/orders
-  2.11 操作日志 /zupu/zhuxi-demo/logs
-  2.12 公告管理 /zupu/zhuxi-demo/announcements
-  2.13 回收站 /zupu/zhuxi-demo/trash
-  2.14 族谱树 /tree/4 → 交互: 视图切换/搜索
-
-第 3 轮: 族员个人中心 (EDITOR Token)
-  3.1  族员一键登录 → /user-center/profile
-  3.2  个人资料 /user-center/profile
-  3.3  我的时光 /user-center/timeline
-  3.4  我的工具箱 /user-center/toolbox
-  3.5  我的订单 /user-center/orders
-  3.6  我的小组 /user-center/groups
-  3.7  寻找伙伴 /user-center/buddies
-  3.8  我的音像墙 /user-center/videos
-  3.9  家庭图册 /user-center/family-book
-  3.10 设置 /user-center/settings
-  3.11 权限隔离: 族员访问 /zupu/zhuxi-demo/members → 应跳转 /clans
-
-第 4 轮: 平台管理员后台 (SUPER Token)
-  4.1  平台管理员登录 /platform-admin/login (platform_admin/admin123)
-  4.2  平台控制台 /platform-admin/dashboard
-  4.3  家族管理 /platform-admin/families
-  4.4  用户管理 /platform-admin/users
-  4.5  影像审核 /platform-admin/reviews/media
-  4.6  定价管理 /platform-admin/settings/pricing
-  4.7  权限隔离: 族员访问 /platform-admin/* → 应跳转 /platform-admin/login
-```
-
-### Browser MCP 工具使用
-
-```javascript
-// 1. 导航
-navigate_page({ type: "url", url: "http://localhost:5173/" })
-
-// 2. 等待元素
-wait_for({ text: "寻根路", timeout: 30000 })
-
-// 3. 点击
-click({ uid: "1_14" })  // uid 从 take_snapshot 获取
-
-// 4. 填写
-fill({ uid: "29_9", value: "朱熹" })
-
-// 5. 截图
-take_screenshot({ filePath: "e:/GeneaSphere/tests/test-results/screenshot.png" })
-
-// 6. 快照
-take_snapshot({})
-
-// 7. 清 Token (退出登录)
-evaluate_script({ function: "() => { localStorage.removeItem('geneasphere_token'); return 'ok'; }" })
-
-// 8. 设置 Token (强制登录)
-evaluate_script({ function: "() => { localStorage.setItem('geneasphere_token', 'TOKEN'); return 'ok'; }" })
-```
+**注意**: admin 用 demo 账号登录后，/user-center/profile 显示的是该用户的个人资料（phone=138****0000），而非族员资料。说明 admin 和 member 共享同一套用户中心。
 
 ---
 
-*测试报告生成时间: 2026-08-01 16:00*
+## 七、遗留问题汇总
+
+### P1（高优先级）
+
+| # | 问题 | 影响 | 证据 |
+|---|------|------|------|
+| P1-1 | 匿名用户访问 /zupu/:slug/dashboard 白屏 | 未登录用户访问任何 /zupu/:slug/* admin 路由均白屏 | `bodyLen=7`, `round7/01-anon-redirect.png`, `round7/18-anon-dashboard-p1.png` |
+| P1-2 | 8 个 admin 端点返回 404 | 数据统计、回收站、AI工具记录、二维码管理、导入、短信、地方记忆、家庭关系审核不可用 | Round 6 已确认 |
+
+### P2（中优先级）
+
+| # | 问题 | 影响 | 证据 |
+|---|------|------|------|
+| P2-1 | /zupu/zhuxi-demo/media/* 路由不存在 | 影像管理子菜单（影像库/相册管理）白屏 | snapshot 仅显示"🔇 背景音乐" |
+| P2-2 | 公告删除确认框"确定"按钮需点击两次 | 影响删除体验 | Round 6 已记录 |
+
+### 其他观察
+
+- 邀请二维码后端端点 `/api/invite/qrcodes` 工作正常（无需 admin 前缀）
+- 背景音乐播放器可在未登录空白页面上打开，说明部分全局 JS 仍在执行
+- admin/member demo login 按钮点击后立即 disabled，避免重复提交
+- 族员登录后跳转到 /user-center/profile 而非 /user-center，行为一致
+
+---
+
+## 八、截图清单
+
+| 文件 | 内容 |
+|------|------|
+| `round7/01-anon-redirect.png` | P1 白屏复测（Round 7） |
+| `round7/02-admin-dashboard.png` | Admin dashboard 加载成功 |
+| `round7/03-announcements-list.png` | 公告列表（测试前 3 条） |
+| `round7/04-announcement-created.png` | 新建公告 "Round7-E2E-1785642422746" |
+| `round7/05-announcement-unpinned-unpublished.png` | 下架后状态=草稿 |
+| `round7/06-members-page.png` | 成员管理页面 |
+| `round7/07-media-page.png` | /zupu/zhuxi-demo/media 白屏 |
+| `round7/08-media-library.png` | /zupu/zhuxi-demo/media/library 白屏 |
+| `round7/09-media-reviews.png` | /zupu/zhuxi-demo/reviews/media 白屏 |
+| `round7/10-invite-qrcodes.png` | 邀请二维码列表（初始空） |
+| `round7/11-qrcode-created.png` | 生成二维码 dialog + QR code 显示 |
+| `round7/12-qrcode-revoked.png` | 撤销后状态=已撤销 |
+| `round7/13-member-profile.png` | 族员个人资料（朱小小） |
+| `round7/14-member-profile-saved.png` | 昵称修改为"演示族员·朱小小-R7"保存 |
+| `round7/15-member-family-relation.png` | 家庭关系维护页面 |
+| `round7/16-member-timeline.png` | 我的时光（0张照片） |
+| `round7/17-member-family-book.png` | 家庭图册参数设置 |
+| `round7/18-anon-dashboard-p1.png` | P1 白屏（Round 7 复测 #2） |
+| `round7/19-member-still-loggedin.png` | 族员登录状态保持 |
+| `round7/20-admin-accessing-member-page.png` | Admin token 访问族员页面（显示 admin 自己资料） |
+| `round7/21-migration-page.png` | 迁徙管理页面（需手动选择家族） |
+
+---
+
+## 九、管理后台路由扫描（新增）
+
+快速扫描 12 个子路由渲染状态：
+
+| 路由 | 页面内容 | 表格 | 表单 | 结果 |
+|------|----------|------|------|------|
+| `/zupu/zhuxi-demo/merge/applications` | 认亲申请列表 | ✅ | - | ✅ |
+| `/zupu/zhuxi-demo/reviews/bio` | 生平审核列表 | ✅ | - | ✅ |
+| `/zupu/zhuxi-demo/migration` | 迁徙管理（需选家族） | - | - | ✅ 功能正常 |
+| `/zupu/zhuxi-demo/logs` | 操作日志 | ✅ | - | ✅ |
+| `/zupu/zhuxi-demo/settings/clan-info` | 家族信息表单 | - | ✅ | ✅ |
+| `/zupu/zhuxi-demo/orders` | 订单管理列表 | ✅ | - | ✅ |
+| `/zupu/zhuxi-demo/video/migration` | 迁徙历史视频 | - | - | ⚠️ 需内容 |
+| `/zupu/zhuxi-demo/media` | 白屏 | - | - | ❌ 路由不存在 |
+| `/zupu/zhuxi-demo/media/library` | 白屏 | - | - | ❌ 路由不存在 |
+| `/zupu/zhuxi-demo/reviews/media` | 白屏 | - | - | ❌ 路由不存在 |
+
+**说明**: `/zupu/zhuxi-demo/media/*` 系列路由在路由配置中不存在（仅 `media/library` 和 `media/albums` 在 `/admin/*` 下），导致这三个路径均白屏。影像管理功能需要通过 `/admin/media/library` 等路径访问。

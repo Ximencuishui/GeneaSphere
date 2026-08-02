@@ -24,9 +24,12 @@
 
 set -e
 
-BASE_URL="${BASE_URL:-http://localhost:5173}"
-API_URL="${API_URL:-http://localhost:3101}"
-CLAN_SLUG="zhuxi-demo"
+# 生产验收必须使用真实登录；demo-login 仅允许在隔离 Staging 临时启用。
+AUTH_MODE="${AUTH_MODE:-demo}"
+LOAD_USERNAME="${LOAD_USERNAME:-}"
+LOAD_PASSWORD="${LOAD_PASSWORD:-}"
+AUTH_PATH="${AUTH_PATH:-/api/auth/login}"
+
 REPORT_DIR="${REPORT_DIR:-tests/compatibility/results}"
 mkdir -p "$REPORT_DIR"
 
@@ -50,12 +53,8 @@ fi
 echo "  [OK] npx 可用"
 
 # 浏览器矩阵
-BROWSERS=("chromium" "firefox" "webkit")
-VIEWPORTS=(
-  "desktop:1920x1080"
-  "tablet:768x1024"
-  "mobile:375x667"
-)
+BROWSERS="${BROWSERS:-chromium,firefox,webkit}"
+VIEWPORTS="${VIEWPORTS:-desktop:1920x1080|tablet:768x1024|mobile:375x667}"
 
 # 验证路径（路径名 → 描述 → URL 或步骤）
 declare -a PATHS=(
@@ -73,7 +72,12 @@ cat > "$SCRIPT" <<'JS_EOF'
 import { chromium, firefox, webkit } from 'playwright';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:5173';
-const CLAN_SLUG = 'zhuxi-demo';
+const API_URL = process.env.API_URL || 'http://localhost:3101';
+const CLAN_SLUG = process.env.CLAN_SLUG || 'zhuxi-demo';
+const AUTH_MODE = process.env.AUTH_MODE || 'demo';
+const LOAD_USERNAME = process.env.LOAD_USERNAME || '';
+const LOAD_PASSWORD = process.env.LOAD_PASSWORD || '';
+const AUTH_PATH = process.env.AUTH_PATH || '/api/auth/login';
 
 const browsers = process.env.BROWSERS?.split(',') || ['chromium'];
 const viewports = process.env.VIEWPORTS?.split('|') || [
@@ -105,11 +109,20 @@ for (const browserName of browsers) {
       const demoBtn = await page.$('button:has-text("一键体验")');
       cases.push({ name: '01-login', pass: !!demoBtn });
 
-      // 2. demo-login → 树
-      const apiRes = await page.request.post(`${process.env.API_URL || 'http://localhost:3101'}/api/auth/demo-login`, {
-        data: {},
-      });
-      const { access_token } = await apiRes.json();
+      // 2. 登录并打开族谱树
+      let access_token;
+      if (AUTH_MODE === 'password') {
+        const authRes = await page.request.post(`${API_URL}${AUTH_PATH}`, {
+          data: { username: LOAD_USERNAME, password: LOAD_PASSWORD },
+        });
+        const authBody = await authRes.json();
+        access_token = authBody.access_token;
+      } else {
+        const apiRes = await page.request.post(`${API_URL}/api/auth/demo-login`, { data: {} });
+        const authBody = await apiRes.json();
+        access_token = authBody.access_token;
+      }
+      if (!access_token) throw new Error('登录未返回 access_token');
       await page.goto(`${BASE_URL}/zupu/${CLAN_SLUG}/dashboard`, { waitUntil: 'networkidle', timeout: 30000 });
       await page.waitForTimeout(2000); // G6 渲染
       cases.push({ name: '02-tree', pass: !!(await page.$('canvas, svg.g6')) });
@@ -152,10 +165,15 @@ BASE_URL="$BASE_URL" \
 API_URL="$API_URL" \
 npx --yes playwright@1.49.1 install 2>/dev/null || true
 
-BROWSERS="chromium,firefox,webkit" \
-VIEWPORTS="desktop:1920x1080|tablet:768x1024|mobile:375x667" \
+BROWSERS="$BROWSERS" \
+VIEWPORTS="$VIEWPORTS" \
 BASE_URL="$BASE_URL" \
 API_URL="$API_URL" \
+CLAN_SLUG="$CLAN_SLUG" \
+AUTH_MODE="$AUTH_MODE" \
+LOAD_USERNAME="$LOAD_USERNAME" \
+LOAD_PASSWORD="$LOAD_PASSWORD" \
+AUTH_PATH="$AUTH_PATH" \
 node "$SCRIPT" 2>&1 | tee "$REPORT_DIR/round7-$(date +%Y%m%d).log"
 
 if [ ${PIPESTATUS[0]} -eq 0 ]; then

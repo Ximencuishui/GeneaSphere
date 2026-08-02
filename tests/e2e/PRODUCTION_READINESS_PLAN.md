@@ -510,4 +510,98 @@ curl -f http://localhost:3001/api/health/ready
 
 ---
 
-*本计划 v2026.08 适用于 GeneaSphere 0.x 上线 xungenlu.cn 公网前的准入测试。建议在 Round 5 实测完成后，根据真实性能数据回写准入阈值 P-2（族谱树加载时间），并最终产出 [`tests/production/GO_NO_GO_DECISION.md`](../production/GO_NO_GO_DECISION.md) 作为发版审批的最终依据。*
+## 十、Final Acceptance Test（最终生产准入验收）执行章程
+
+> 本章为候选发布版本的正式验收流程。历史 Round 0-10、本地脚本或单点验证只能作为参考证据，不能替代在生产同构 Staging/Pre-Production 上对同一 release 的完整验收。
+
+### 10.1 当前证据判定
+
+| 轮次 | 已有证据 | Final Acceptance Test 尚缺证据 | 当前准入判定 |
+|------|----------|--------------------------------|--------------|
+| Round 5 | Node 五阶段压测已有 PASS 摘要 | k6 原始结果、1000 人树前端冷启动、20 并发 4MB 上传、4h 稳态、Lighthouse | 未完成 |
+| Round 6 | JWT/SQLi/XSS/上传/限流已有修复复测 | `pnpm audit` 尚有 4 critical/23 high；需对候选 release 重跑全部脚本和镜像扫描 | 阻塞 |
+| Round 7 | Chromium 内核基础页面已有证据 | Playwright Chromium/Firefox/WebKit × desktop/tablet/mobile；Safari/移动端或 BrowserStack | 阻塞 |
+| Round 8 | 备份 status/trigger、DB 断连已有 PASS | COS 对象校验、隔离库真实 restore、数据对账、RTO/RPO | 未完成 |
+| Round 9 | `/metrics`、mock webhook 已有 PASS | 生产 Prometheus 抓取、Grafana、真实钉钉/企微/邮件投递和恢复通知 | 未完成 |
+
+### 10.2 入口条件与环境冻结
+
+1. 冻结唯一 release/tag，记录前后端构建包校验和或镜像 digest。
+2. 在生产同构 Staging/Pre-Production 部署生产 build，禁止使用 Vite dev server 作为兼容性证据。
+3. 使用生产快照的脱敏副本，并准备至少 1000 人族谱、上传样本及独立压测/安全账号。
+4. 记录 CPU、内存、磁盘、Node/PostgreSQL/Nginx/PM2 版本、实例数、连接池及关键配置。
+5. 创建测试前数据库快照，确认所有破坏性测试仅作用于隔离环境。
+6. CI、单元/集成测试、构建以及 Round 0-4 核心冒烟全绿；出现 P0/P1 时停止后续验收。
+7. 指定发布、QA、前后端、DBA、运维、安全、业务和法务责任人，建立证据目录及缺陷台账。
+
+### 10.3 执行编排
+
+| 阶段 | 内容 | 建议窗口 | 责任方 | 退出条件 |
+|------|------|----------|--------|----------|
+| FAT-0 | 环境冻结、备份、Round 0-4 基线冒烟 | T-2 上午 | 发布/QA/运维 | 基线无 P0/P1 |
+| FAT-1 | Round 5 k6 性能、上传与 4h 稳态 | T-2 下午至晚间 | QA/后端/DBA | 所有阻塞阈值达标 |
+| FAT-2 | Round 6 渗透、依赖和镜像扫描 | T-1 上午 | 安全/后端 | 0 critical、0 可利用 high |
+| FAT-3 | Round 7 Playwright 跨浏览器矩阵 | T-1 并行 | QA/前端 | 核心链路 100%，总体 ≥95% |
+| FAT-4 | Round 8 备份恢复及数据一致性演练 | T-1 下午 | DBA/运维 | RTO <30min、RPO <24h |
+| FAT-5 | Round 9 真实监控告警及恢复通知 | T-1 晚间 | 运维/SRE | 指标、告警、恢复闭环 |
+| FAT-6 | 缺陷修复、受影响轮次重测、最终冒烟 | T 上午 | 全体 | 阻塞项为 0 |
+| FAT-7 | 清单回填、风险评审、六方签字 | T 下午 | 发布/业务/法务 | 形成正式决议 |
+
+### 10.4 各轮次最终门槛
+
+#### Round 5：k6 性能与负载
+
+- 使用 `tests/load/round5-load.js` 对同一候选 release 执行 login、tree、api-mix、upload，保存 k6 JSON/控制台输出和 Prometheus/Grafana 曲线。
+- 覆盖预热、常规、目标、峰值、突发和恢复阶段；至少验证 100 并发登录、50 并发树查询和 20 并发 4MB 上传。
+- 1000 人树首屏 <5s；常规 API P95 <500ms；树查询 P95 <3s；非预期错误率 <1%；上传成功率 ≥99%。
+- PM2 4h 稳态无 OOM/非预期退出，RSS 增长目标 <50MB、上限 <100MB；压力解除后 5 分钟内恢复基线。
+- 生产必须禁用 demo-login；该场景只能在 Staging 临时开启，测试后立即关闭并用真实登录路径复核。
+
+#### Round 6：安全渗透
+
+- 复测 JWT 缺失/过期/篡改/alg=none/撤销、横向及纵向越权、10+ 端点 SQLi、反射/存储/DOM XSS、CORS、上传绕过、SSRF、限流和响应头。
+- 执行 `pnpm audit`、发布镜像 Trivy/Snyk 扫描、敏感信息与 source map 检查。
+- 门槛为 0 critical、0 可利用 high；JWT/SQLi/越权/上传/SSRF 不可利用；CORS 只允许生产白名单；生产 demo-login 为 403/404。
+- Critical 原则上不得豁免；High 仅在证明生产不可达、有补偿控制、限定期限并由安全与技术双签时才可进入 GO-WITH-EXCEPTION。
+
+#### Round 7：Playwright 兼容性
+
+- 使用生产 build 执行 Chromium、Firefox、WebKit × 1920×1080、768×1024、375×667，并补 Edge、Safari 真机/BrowserStack、Android Chrome、iOS Safari；若微信/钉钉为正式渠道，补对应 WebView。
+- 每个浏览器验证首页、登录、管理员后台、用户中心、1000 人树、视图切换、成员 CRUD、公告、上传、退出及 Token 异常重定向。
+- 保存 Playwright HTML report、trace、console/network failure 和核心截图。
+- 核心链路必须 100% 通过，总体 ≥95%；Chrome/Edge/Firefox/Safari 任一核心流程失败为 P1，3 个及以上目标浏览器失败直接 NO-GO。
+
+#### Round 8：备份与灾备
+
+- 手动触发备份并验证 COS 对象存在、大小、gzip 完整性、checksum、下载权限及加密配置。
+- 将同一备份恢复至全新隔离 PostgreSQL；执行 Prisma migration，启动隔离应用并完成登录、树加载、关系、媒体引用、软删除和 audit log 冒烟。
+- 恢复前后对账 Person/Clan/User 及核心关系表数量与关键记录哈希；不得仅以 trigger 返回成功作为灾备通过证据。
+- RTO <30min、RPO <24h；同时验证数据库断连、备份失败和存储异常能触发 ready degraded 与告警。
+
+#### Round 9：监控告警
+
+- 验证 Prometheus 实际抓取 `/metrics`，Grafana 展示 HTTP 总量/状态/延迟、5xx、Node RSS/heap、PM2、Prisma、连接池、慢查询、家族/成员/树加载及备份指标。
+- 演练 API 5xx、DB 不可用、进程退出、磁盘、备份失败和慢查询告警。
+- 必须使用真实钉钉/企业微信/邮件通道，验证 P3 测试告警、P1 告警、接收确认、恢复通知和告警抑制；本地 mock 只能作为开发证据。
+- 保存 Prometheus target、Grafana 面板、告警消息和响应记录；关键告警目标 MTTD <1min、MTTA <5min。
+
+### 10.5 缺陷、证据与决策规则
+
+- 每项证据记录 release、环境、执行人、时间、用例、原始结果、截图/日志路径、缺陷号和复测结论。
+- P0/P1 必须修复，随后重跑受影响轮次及 Round 0-4 核心回归；P2/P3 才可申请限期不超过 30 天的书面豁免。
+- GO：Round 5/6/8/9 全过、Round 7 达标、阻塞项为 0、清单及签字完整。
+- GO-WITH-EXCEPTION：仅存在已双签、有补偿控制和明确期限的 P2/P3。
+- NO-GO：存在 P0/P1、critical/可利用 high、核心浏览器失败、备份无法恢复、RTO/RPO 超标、真实告警失败、弱密钥或生产 demo-login 未关闭。
+
+### 10.6 最终交付物
+
+- `tests/e2e/reports/round5-perf-actual.md` 与 `tests/load/results/` 原始结果。
+- `tests/e2e/reports/round6-security-actual.md` 与 `tests/security/results/` 扫描结果。
+- `tests/e2e/reports/round7-compat-actual.md`、Playwright report/trace/截图。
+- `tests/e2e/reports/round8-dr-actual.md`、备份 checksum、restore 与数据对账日志。
+- `tests/e2e/reports/round9-observability-actual.md`、Prometheus/Grafana 和真实告警证据。
+- 完整回填的 `tests/production/GO_LIVE_CHECKLIST.md`、豁免单及 `GO_NO_GO_DECISION.md` 六方签字。
+
+---
+
+*本计划 v2026.08 适用于 GeneaSphere 0.x 上线 xungenlu.cn 公网前的准入测试。Final Acceptance Test 必须在同一候选 release 的生产同构环境执行，并以 [`tests/production/GO_NO_GO_DECISION.md`](../production/GO_NO_GO_DECISION.md) 作为发版审批的最终依据。*
