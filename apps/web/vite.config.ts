@@ -123,7 +123,11 @@ export default defineConfig({
           // 重型第三方库（按需懒加载页面才会命中）
           'vendor-xlsx': ['xlsx'],
           'vendor-html2canvas': ['html2canvas'],
-          'vendor-antv': ['@antv/g6'],
+          // @antv/g6 不放在 manualChunks 中：G6 5.x 内部存在深层循环依赖，
+          // 强制合并在一个 chunk 会导致 class extends 初始化顺序错乱
+          // （如 "Cannot access 'zn' before initialization"）。
+          // 让 Rollup 自然分块处理，配合 optimizeDeps.exclude 避免该问题。
+          // 'vendor-antv': ['@antv/g6'],
           'vendor-pdfjs': ['pdfjs-dist'],
 
           // axios + 业务工具
