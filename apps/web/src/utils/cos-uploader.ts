@@ -72,7 +72,10 @@ export async function cosUpload(
         if (err) {
           reject(new Error(`COS 上传失败: ${err.message || err}`));
         } else {
-          const cdnDomain = `https://${import.meta.env.VITE_CDN_DOMAIN || 'cdn.xungenlu.cn'}`;
+          const cdnHost = import.meta.env.VITE_CDN_DOMAIN;
+          const cdnDomain = cdnHost
+            ? `https://${cdnHost}`
+            : `https://${currentCredentials!.bucket}.cos.${currentCredentials!.region}.myqcloud.com`;
           resolve({
             url: `${cdnDomain}/${key}`,
             key,

@@ -219,6 +219,13 @@ export class TencentCosDriver implements CosDriver {
   }
 
   getCdnUrl(key: string): string {
+    if (!this.cdnDomain) {
+      // CDN 未配置，直接使用 COS 源站 URL
+      const bucket = this.hotBucket;
+      const appId = this.configService.get<string>('TENCENT_CLOUD_APPID') || '';
+      const bucketFull = appId ? `${bucket}-${appId}` : bucket;
+      return `https://${bucketFull}.cos.${this.region}.myqcloud.com/${key}`;
+    }
     return `https://${this.cdnDomain}/${key}`;
   }
 

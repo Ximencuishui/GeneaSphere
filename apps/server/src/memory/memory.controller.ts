@@ -13,7 +13,7 @@ import { MemoryService } from './memory.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GetQuizDto, SubmitQuizAnswersDto, CreateQuizDto, CreateAnswerDto, MemoryWallQueryDto } from './dto/memory.dto';
 
-@Controller('memory')
+@Controller('api/memory')
 export class MemoryController {
   constructor(private readonly memoryService: MemoryService) {}
 

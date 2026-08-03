@@ -35,6 +35,18 @@ export class AdminAlbumController {
   ) {}
 
   /**
+   * 获取相册列表（list 别名）
+   */
+  @Get()
+  @ApiOperation({ summary: '获取相册列表（直接访问）' })
+  async getAlbumsRoot(
+    @Request() req,
+    @Query('clanSlug') clanSlug: string,
+  ) {
+    return this.getAlbums(req, clanSlug);
+  }
+
+  /**
    * 获取相册列表
    */
   @Get('list')
