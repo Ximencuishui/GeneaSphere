@@ -19,7 +19,11 @@ import { Person } from '@prisma/client';
 import { Public } from '../auth/public.decorator';
 import { ClanResolverService } from '../common/clan-resolver.service';
 import { AdminService } from '../admin/admin.service';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { serializeBigInt } from '../common/bigint-serializer';
 
 /**
@@ -109,6 +113,9 @@ export class TreeController {
   @Public()
   @Get('subtree/:rootPersonId')
   async getSubTree(@Param('rootPersonId') rootPersonId: string): Promise<TreeNode> {
+    if (!/^\d+$/.test(rootPersonId)) {
+      throw new BadRequestException('rootPersonId must be a positive integer');
+    }
     return await this.treeService.getSubTree(BigInt(rootPersonId));
   }
 

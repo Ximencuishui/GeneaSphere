@@ -480,6 +480,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/user-center/MemoryContributionsPage.vue'),
         meta: { title: '我的记忆贡献', requiresAuth: true },
       },
+      {
+        path: ':pathMatch(.*)*',
+        name: 'user-center-not-found',
+        component: () => import('@/views/NotFoundPage.vue'),
+        meta: { title: '页面不存在', requiresAuth: true },
+      },
     ],
   },
   // 地方记忆拼图路由
