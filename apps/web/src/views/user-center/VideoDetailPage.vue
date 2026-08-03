@@ -12,6 +12,7 @@ const loading = ref(false)
 const project = ref<VideoProject | null>(null)
 const materials = ref<VideoMaterial[]>([])
 const refreshing = ref(false)
+const loadError = ref<string | null>(null)
 
 // 视频播放
 const videoRef = ref<HTMLVideoElement | null>(null)
@@ -58,16 +59,23 @@ async function loadProject() {
   if (!id) return
 
   refreshing.value = true
+  loadError.value = null
   try {
     const res = await videoApi.getProject(id) as any
     project.value = res
     materials.value = res.materials || []
   } catch (err: any) {
-    ElMessage.error(err.message || '加载失败')
-    router.back()
+    // 保留上下文，不再 router.back() 以免丢失 URL（深链场景）
+    loadError.value = err?.message || '加载失败，请稍后重试'
+    project.value = null
   } finally {
     refreshing.value = false
   }
+}
+
+// 返回列表
+function goBack() {
+  router.push('/user-center/videos')
 }
 
 // 刷新状态
@@ -126,10 +134,54 @@ function handleDownload() {
   a.click()
 }
 
-// 分享
-function handleShare() {
-  if (!project.value?.video_url) return
-  ElMessage.info('分享功能开发中')
+// 分享：优先 Web Share API，失败时复制当前页面 URL
+async function handleShare() {
+  if (!project.value?.video_url) {
+    ElMessage.warning('视频未生成完成，暂无法分享');
+    return;
+  }
+  // 仅允许对真实完成、当前用户可访问的视频分享
+  if (project.value.status !== 'completed') {
+    ElMessage.warning('仅已完成且可访问的视频可以分享');
+    return;
+  }
+  const shareUrl = `${window.location.origin}/user-center/videos/${route.params.id}`;
+  const shareTitle = `${project.value.target_person?.full_name || '家姇'}的历史音像墙`;
+  const shareData: ShareData = {
+    title: shareTitle,
+    text: `${shareTitle} - GeneaSphere 族诸平台`,
+    url: shareUrl,
+  };
+  // 检测 Web Share API 可用性
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      await navigator.share(shareData);
+      return;
+    } catch (err: any) {
+      // 用户取消不报错；其余错误降级为复制 URL
+      if (err?.name === 'AbortError') return;
+      console.warn('Web Share API 调用失败，降级为复制 URL', err);
+    }
+  }
+  // 降级：复制 URL
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+    } else {
+      // 极老浏览器降级：使用临时 textarea
+      const ta = document.createElement('textarea');
+      ta.value = shareUrl;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    ElMessage.success('链接已复制到剪贴板');
+  } catch (err: any) {
+    ElMessage.error(`分享失败：${err?.message || '请手动复制 ' + shareUrl}`);
+  }
 }
 
 // 播放视频
@@ -171,7 +223,17 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <div v-if="project" class="detail-content">
+      <!-- 加载失败 / 资源不存在 -->
+      <div v-if="loadError" class="error-state">
+        <ElEmpty :description="loadError" :image-size="120">
+          <ElButton type="primary" @click="goBack">
+            返回列表
+          </ElButton>
+          <ElButton @click="refresh">重试</ElButton>
+        </ElEmpty>
+      </div>
+
+      <div v-else-if="project" class="detail-content">
         <!-- 项目信息 -->
         <div class="project-info">
           <div class="person-header">

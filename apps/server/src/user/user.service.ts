@@ -39,6 +39,7 @@ export class UserService {
               select: {
                 id: true,
                 name: true,
+                slug: true,
                 description: true,
                 status: true,
                 updated_at: true,
@@ -84,6 +85,7 @@ export class UserService {
         ? {
             id: primaryMembership.clan.id.toString(),
             name: primaryMembership.clan.name,
+            slug: primaryMembership.clan.slug,
             description: primaryMembership.clan.description,
             role: primaryMembership.role,
           }
@@ -91,6 +93,7 @@ export class UserService {
       families: user.clans.map((m) => ({
         id: m.clan.id.toString(),
         name: m.clan.name,
+        slug: m.clan.slug,
         description: m.clan.description,
         role: m.role,
         joined_at: m.joined_at,
@@ -512,37 +515,134 @@ export class UserService {
     };
   }
 
-  // ==================== AI 工具箱 / 小组 / 音像墙 (mock) ====================
+  // ==================== AI 工具箱 / 小组 / 音像墙（真实查询）====================
 
   /**
-   * AI 工具箱历史（mock）
+   * AI 工具箱历史：从 ToolUsageLog 读取当前用户实际产生的记录。
    */
-  async listToolHistory(_userId: string) {
-    // 模块尚未实现，返回空数据 + 占位说明
+  async listToolHistory(userId: string, page: number, pageSize: number) {
+    const skip = (page - 1) * pageSize;
+    const [rows, total] = await Promise.all([
+      this.prisma.toolUsageLog.findMany({
+        where: { user_id: userId },
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.toolUsageLog.count({ where: { user_id: userId } }),
+    ]);
+
     return {
-      data: [],
-      pagination: { page: 1, page_size: 20, total: 0, total_pages: 0 },
-      notice: 'AI 工具箱模块开发完成后将在此展示历史记录',
+      data: rows.map((row) => ({
+        id: row.id.toString(),
+        tool_type: row.tool_type,
+        status: row.status,
+        credits_used: row.credits_used,
+        input_url: row.input_url,
+        output_url: row.output_url,
+        created_at: row.created_at.toISOString(),
+        completed_at: row.completed_at?.toISOString() || null,
+      })),
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        total_pages: Math.ceil(total / pageSize),
+      },
     };
   }
 
   /**
-   * 我的小组（mock）
+   * 我加入的小组：仅返回当前用户作为成员、且未删除的小组。
    */
-  async listUserGroups(_userId: string) {
+  async listUserGroups(userId: string) {
+    const memberships = await this.prisma.groupMember.findMany({
+      where: { user_id: userId, group: { deleted_at: null } },
+      include: {
+        group: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            cover_url: true,
+            is_public: true,
+            created_at: true,
+            topics: {
+              where: { deleted_at: null },
+              select: { id: true, updated_at: true },
+              orderBy: { updated_at: 'desc' },
+            },
+          },
+        },
+      },
+      orderBy: { joined_at: 'desc' },
+    });
+
     return {
-      data: [],
-      notice: '家族小组讨论模块开发完成后将在此展示已加入的小组',
+      data: memberships.map((m) => ({
+        id: m.group.id.toString(),
+        name: m.group.name,
+        description: m.group.description,
+        cover_url: m.group.cover_url,
+        is_public: m.group.is_public,
+        role: m.role,
+        joined_at: m.joined_at.toISOString(),
+        last_active_at: m.group.topics[0]?.updated_at?.toISOString() || m.joined_at.toISOString(),
+        topic_count: m.group.topics.length,
+      })),
     };
   }
 
   /**
-   * 我的音像墙（mock）
+   * 我的音像墙：按 requester_id 读取 VideoProject 的真实状态。
    */
-  async listUserVideos(_userId: string) {
+  async listUserVideos(userId: string, page: number, pageSize: number) {
+    const skip = (page - 1) * pageSize;
+    const [rows, total] = await Promise.all([
+      this.prisma.videoProject.findMany({
+        where: { requester_id: userId },
+        include: {
+          target_person: {
+            select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true },
+          },
+          materials: { select: { media_id: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.videoProject.count({ where: { requester_id: userId } }),
+    ]);
+
     return {
-      data: [],
-      notice: '历史音像墙模块开发完成后将在此展示已生成的视频',
+      data: rows.map((row) => ({
+        id: row.id.toString(),
+        target_person_name: row.target_person?.full_name,
+        target_person: row.target_person
+          ? {
+              id: row.target_person.id.toString(),
+              full_name: row.target_person.full_name,
+              gender: row.target_person.gender,
+              birth_date: row.target_person.birth_date?.toISOString(),
+              death_date: row.target_person.death_date?.toISOString(),
+            }
+          : null,
+        status: row.status,
+        queue_position: row.queue_position,
+        priority: row.priority,
+        video_url: row.video_url,
+        generated_at: row.completed_at?.toISOString() || row.created_at.toISOString(),
+        duration_seconds: row.duration_seconds,
+        material_count: row.materials.length,
+        style: row.style,
+        error_message: row.error_message,
+      })),
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        total_pages: Math.ceil(total / pageSize),
+      },
     };
   }
 

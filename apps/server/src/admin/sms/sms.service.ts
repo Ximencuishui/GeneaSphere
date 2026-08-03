@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { NotificationService } from '../../common/notification.service';
+import { CapabilityService } from '../../common/capability.service';
 
 @Injectable()
 export class SmsService {
@@ -18,6 +19,7 @@ export class SmsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly capabilities: CapabilityService,
   ) {}
 
   // ==================== 余额管理 ====================
@@ -118,6 +120,7 @@ export class SmsService {
     paymentMethod: 'wechat' | 'alipay',
   ) {
     await this.requireAdmin(clanId, userId);
+    this.capabilities.assertAvailable('sms_recharge');
 
     // 查找赠送金额
     const tier = this.RECHARGE_TIERS.find(t => t.amount === amount) || { bonus: 0 };
@@ -208,6 +211,7 @@ export class SmsService {
     scheduledAt?: Date,
   ) {
     await this.requireAdmin(clanId, userId);
+    this.capabilities.assertAvailable('sms');
 
     // 获取余额
     const balance = await this.getBalance(clanId, userId);
@@ -260,6 +264,8 @@ export class SmsService {
    * 执行发送（内部方法）
    */
   private async executeSend(recordId: bigint, clanId: bigint) {
+    this.capabilities.assertAvailable('sms');
+
     const record = await (this.prisma as any).smsSendRecord?.findUnique?.({
       where: { id: recordId },
     });

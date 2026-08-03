@@ -17,6 +17,7 @@ import { CreateChildhoodPlaceDto } from './dto/create-childhood-place.dto';
 import { FindBuddiesDto } from './dto/find-buddies.dto';
 import { RespondMatchDto } from './dto/respond-match.dto';
 import { ClaimPhotoDto } from './dto/claim-photo.dto';
+import { FindByPhotoDto } from './dto/find-by-photo.dto';
 
 @ApiTags('buddy')
 @Controller('api/buddy')
@@ -77,6 +78,28 @@ export class BuddyController {
     @Query('status') status?: string,
   ) {
     return this.buddyService.getMyMatches(req.user.userId, status);
+  }
+
+  /**
+   * 「谁在找我」专有查询：明确只返回 matched_user_id = currentUser 的记录
+   * - 真实性整改：避免前端用 getMyMatches 自行过滤，由后端做唯一过滤点
+   */
+  @Get('inbound-matches')
+  @ApiOperation({ summary: '谁在找我：作为被匹配方的匹配记录' })
+  async getInboundMatches(
+    @Request() req,
+    @Query('status') status?: string,
+  ) {
+    return this.buddyService.getInboundMatches(req.user.userId, status);
+  }
+
+  /**
+   * 「按照片找」真实端点：尊重 allow_photo_find_me / allow_cross_clan_friend_finding 隐私设置
+   */
+  @Post('find-by-photo')
+  @ApiOperation({ summary: '按照片找小伙伴' })
+  async findByPhoto(@Request() req, @Body() dto: FindByPhotoDto) {
+    return this.buddyService.findByPhoto(req.user.userId, dto);
   }
 
   @Get('matches/:id')

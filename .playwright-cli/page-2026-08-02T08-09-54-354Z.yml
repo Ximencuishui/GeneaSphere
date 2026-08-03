@@ -1,0 +1,26 @@
+- generic [active] [ref=f31e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f31e3]:
+    - generic [ref=f31e4]:
+      - generic [ref=f31e5]:
+        - heading "地方记忆拼图" [level=1] [ref=f31e6]
+        - paragraph [ref=f31e7]: 共建地方记忆题库，用本地人的真实回答见证历史
+      - generic [ref=f31e9]:
+        - textbox "输入地点名称..." [ref=f31e12]
+        - generic [ref=f31e15] [cursor=pointer]:
+          - generic:
+            - combobox [ref=f31e17]
+            - generic [ref=f31e18]: 年代（可选）
+        - button "查询" [ref=f31e23] [cursor=pointer]
+        - button "答题验证身份" [ref=f31e25] [cursor=pointer]
+      - generic [ref=f31e28]:
+        - paragraph [ref=f31e29]: 暂无该地区的记忆题目
+        - paragraph [ref=f31e30]: 成为第一个出题的人吧
+      - button "+" [ref=f31e32] [cursor=pointer]
+    - button "🔇 背景音乐" [ref=f31e37] [cursor=pointer]:
+      - generic [ref=f31e38]: 🔇
+      - generic [ref=f31e39]: 背景音乐

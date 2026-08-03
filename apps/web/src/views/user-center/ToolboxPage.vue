@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { InfoFilled, Tools, Wallet, Histogram } from '@element-plus/icons-vue';
 import toolboxApi, { TOOLS } from '@/api/toolbox';
 import type { CreditInfo, UsageLog, PackageConfig } from '@/api/toolbox';
+import { useCapabilityStore } from '@/stores/capability';
+
+const capabilityStore = useCapabilityStore();
 
 const loading = ref(false);
 const submitting = ref(false);
@@ -10,6 +14,11 @@ const credits = ref<CreditInfo | null>(null);
 const history = ref<UsageLog[]>([]);
 const historyTotal = ref(0);
 const packages = ref<PackageConfig[]>([]);
+
+// 能力状态（从后端实时拉取）
+const aiAvailable = computed(() => capabilityStore.isAvailable('ai_tools'));
+const aiReason = computed(() => capabilityStore.reasonOf('ai_tools'));
+const rechargeAvailable = computed(() => capabilityStore.isAvailable('sms_recharge'));
 
 // 弹窗状态
 const purchaseDialogVisible = ref(false);
@@ -28,6 +37,8 @@ const purchaseForm = ref({
 });
 
 onMounted(async () => {
+  // 拉取能力状态，决定是否禁用处理/购买入口
+  await capabilityStore.refresh();
   await Promise.all([
     fetchCredits(),
     fetchHistory(),
@@ -77,6 +88,11 @@ function hasEnoughCredits(tool: typeof TOOLS[0]): boolean {
 }
 
 function handleToolClick(tool: typeof TOOLS[0]) {
+  // 能力不可用时一律禁用工具入口，避免支付后无法消费
+  if (!aiAvailable.value) {
+    ElMessage.warning(`AI 能力暂不可用：${aiReason.value}`);
+    return;
+  }
   if (!hasEnoughCredits(tool)) {
     ElMessage.warning('余额不足，请先购买次数包');
     purchaseDialogVisible.value = true;
@@ -87,6 +103,18 @@ function handleToolClick(tool: typeof TOOLS[0]) {
 }
 
 function handlePurchasePackage(pkg: PackageConfig) {
+  if (!rechargeAvailable.value) {
+    ElMessage.warning(
+      '支付与充值能力暂未配置，请联系平台管理员开通后再购买次数包',
+    );
+    return;
+  }
+  if (!aiAvailable.value) {
+    ElMessage.warning(
+      `AI 能力未配置，即使购买次数包也无法消费：${aiReason.value}`,
+    );
+    return;
+  }
   purchaseForm.value.package_type = pkg.type;
   purchaseForm.value.amount = pkg.price;
   purchaseDialogVisible.value = false;
@@ -204,13 +232,43 @@ function getToolIcon(iconName: string) {
 
 <template>
   <div class="toolbox-page">
+    <!-- 能力不可用提示 -->
+    <ElAlert
+      v-if="!aiAvailable"
+      :title="`AI 工具暂不可用：${aiReason}`"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="capability-alert"
+    >
+      <template #default>
+        <div>{{ aiReason }}</div>
+        <div class="alert-actions">
+          <span class="muted">在此期间，已完成的真实处理记录仍可在历史中查看。</span>
+        </div>
+      </template>
+    </ElAlert>
+
     <!-- 额度显示 -->
     <ElCard class="credit-card" v-loading="loading">
       <template #header>
         <div class="header">
           <h2 class="page-title">我的工具箱</h2>
-          <ElButton type="primary" plain size="small" @click="purchaseDialogVisible = true">
+          <ElButton
+            type="primary"
+            plain
+            size="small"
+            :disabled="!rechargeAvailable || !aiAvailable"
+            @click="purchaseDialogVisible = true"
+          >
             购买次数包
+            <ElTooltip
+              v-if="!rechargeAvailable || !aiAvailable"
+              :content="!rechargeAvailable ? '支付渠道未配置' : 'AI 能力未配置'"
+              placement="top"
+            >
+              <ElIcon style="margin-left: 4px"><InfoFilled /></ElIcon>
+            </ElTooltip>
           </ElButton>
         </div>
       </template>
@@ -241,7 +299,12 @@ function getToolIcon(iconName: string) {
         show-icon
         class="credit-warning"
       >
-        您的额度已用完，请购买次数包继续使用
+        <template v-if="!rechargeAvailable || !aiAvailable">
+          当前能力未配置，购买与处理入口已禁用；请联系平台管理员开通 AI 工具能力与支付渠道。
+        </template>
+        <template v-else>
+          您的额度已用完，请购买次数包继续使用
+        </template>
       </ElAlert>
     </ElCard>
 
@@ -530,6 +593,19 @@ function getToolIcon(iconName: string) {
 
 .credit-warning {
   margin-top: 16px;
+}
+
+.capability-alert {
+  margin-bottom: 16px;
+}
+
+.capability-alert .alert-actions {
+  margin-top: 6px;
+}
+
+.capability-alert .muted {
+  color: #909399;
+  font-size: 12px;
 }
 
 .tools-grid {

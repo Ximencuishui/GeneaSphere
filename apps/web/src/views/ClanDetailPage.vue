@@ -32,10 +32,16 @@
             <el-icon><MapLocation /></el-icon>
             查看迁徙地图
           </el-button>
-          <el-button @click="editClan">
+          <el-button v-if="isAdmin" @click="editClan">
             <el-icon><Edit /></el-icon>
             编辑
           </el-button>
+          <el-tooltip v-else content="仅家族管理员可编辑家族信息" placement="top">
+            <el-button disabled>
+              <el-icon><Edit /></el-icon>
+              编辑
+            </el-button>
+          </el-tooltip>
         </div>
       </div>
 
@@ -94,21 +100,55 @@
         </el-button>
       </el-empty>
     </div>
+
+    <!-- 编辑家族信息 -->
+    <el-dialog
+      v-model="editDialogVisible"
+      title="编辑家族信息"
+      width="540"
+      destroy-on-close
+      :close-on-click-modal="false"
+    >
+      <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="100px">
+        <el-form-item label="家族名称" prop="name">
+          <el-input v-model="editForm.name" maxlength="50" show-word-limit />
+        </el-form-item>
+        <el-form-item label="家族描述" prop="description">
+          <el-input
+            v-model="editForm.description"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="简要介绍本家族的来源、字辈、特色等"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="saveEdit">
+          <el-icon><Check /></el-icon>
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, reactive, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { ArrowLeft, Edit, Share, ArrowRight, MapLocation } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { ArrowLeft, Edit, Share, ArrowRight, MapLocation, Check, Close } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
+import { useAuthStore } from '@/stores/auth';
 import { clanApi } from '@/api/clan';
 import type { Person } from '@/types';
 
 const route = useRoute();
 const router = useRouter();
 const clanStore = useClanStore();
+const authStore = useAuthStore();
 
 const statistics = ref({
   person_count: 0,
@@ -116,6 +156,68 @@ const statistics = ref({
   family_count: 0,
 });
 const recentMembers = ref<Person[]>([]);
+
+// 编辑对话框
+const editDialogVisible = ref(false);
+const editSaving = ref(false);
+const editFormRef = ref<any>(null);
+const editForm = reactive({
+  name: '',
+  description: '',
+});
+
+// 权限：仅当当前用户是该家族的管理员时可编辑
+const isAdmin = computed(() => {
+  const c: any = clanStore.currentClan;
+  if (!c) return false;
+  if (c.admin_id && authStore.user?.sub) {
+    return String(c.admin_id) === String(authStore.user.sub);
+  }
+  return false;
+});
+
+const editRules = {
+  name: [
+    { required: true, message: '请输入家族名称', trigger: 'blur' },
+    { min: 2, max: 50, message: '长度在 2 到 50 个字符', trigger: 'blur' },
+  ],
+  description: [
+    { max: 500, message: '描述不超过 500 字符', trigger: 'blur' },
+  ],
+};
+
+function openEditDialog() {
+  if (!isAdmin.value) {
+    ElMessage.warning('仅家族管理员可编辑家族信息');
+    return;
+  }
+  if (!clanStore.currentClan) return;
+  editForm.name = clanStore.currentClan.name || '';
+  editForm.description = (clanStore.currentClan as any).description || '';
+  editDialogVisible.value = true;
+}
+
+async function saveEdit() {
+  if (!clanStore.currentClan) return;
+  const valid = await editFormRef.value?.validate().catch(() => false);
+  if (!valid) return;
+  editSaving.value = true;
+  try {
+    await clanStore.updateClan(String(clanStore.currentClan.id), {
+      name: editForm.name.trim(),
+      description: editForm.description.trim(),
+    } as any);
+    ElMessage.success('家族信息已更新');
+    editDialogVisible.value = false;
+    // 重新拉取统计，保持一致
+    const stats = await clanApi.getStatistics(String(clanStore.currentClan.id));
+    statistics.value = stats;
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || err?.message || '更新失败');
+  } finally {
+    editSaving.value = false;
+  }
+}
 
 // Fetch clan details on mount
 onMounted(async () => {
@@ -149,8 +251,7 @@ function goToMigration() {
 }
 
 function editClan() {
-  // Open edit dialog (simplified - in production, you'd reuse the create/edit dialog)
-  ElMessage.info('编辑功能开发中');
+  openEditDialog();
 }
 
 function goToPersonDetail(personId: number) {

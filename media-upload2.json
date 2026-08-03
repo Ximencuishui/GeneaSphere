@@ -1,0 +1,1 @@
+{"status":400,"code":"BAD_REQUEST","message":"clan_id must be an integer number","path":"/media/upload","timestamp":"2026-08-02T09:10:03.419Z","details":["clan_id must be an integer number"]}

@@ -274,7 +274,20 @@ const routes: RouteRecordRaw[] = [
       { path: 'invite/records', name: 'admin-invite-records', component: () => import('@/views/admin/invite/VerificationRecordsPage.vue'), meta: { title: '验证记录', requiresAuth: true, requiresAdmin: true } },
       { path: 'invite/records/:id', name: 'admin-invite-record-detail', component: () => import('@/views/admin/invite/VerificationRecordDetailPage.vue'), meta: { title: '验证详情', requiresAuth: true, requiresAdmin: true } },
       { path: 'invite/reviews', name: 'admin-invite-reviews', component: () => import('@/views/admin/invite/ModificationReviewPage.vue'), meta: { title: '信息修改审核', requiresAuth: true, requiresAdmin: true } },
+      // 兼容旧路径：/zupu/:slug/dashboard 与 /zupu/:slug/dashboard/* 全部归并到 /zupu/:slug
+      { path: 'dashboard/:rest(.*)*', redirect: (to) => `/zupu/${to.params.slug}` },
     ],
+  },
+  // 全局 catch-all：未匹配的 /zupu/:slug/* 子路径 → 跳到 /zupu/:slug（默认子路由）
+  {
+    path: '/zupu/:slug/:restPath(.*)*',
+    redirect: (to) => {
+      const familyToken = localStorage.getItem(TOKEN_KEY)
+      if (!familyToken) {
+        return { path: '/login', query: { redirect: to.fullPath } }
+      }
+      return { path: `/zupu/${to.params.slug}` }
+    },
   },
   // 用户中心路由
   {

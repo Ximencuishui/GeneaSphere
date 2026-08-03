@@ -5,10 +5,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserCenterStore } from '@/stores/userCenter'
 import videoApi, { type LineageInfo, type MaterialPreview } from '@/api/video'
 import treeApi from '@/api/tree'
+import { useCapabilityStore } from '@/stores/capability'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserCenterStore()
+const capabilityStore = useCapabilityStore()
+
+// 能力状态
+const videoAvailable = computed(() => capabilityStore.isAvailable('video_generation'))
+const videoReason = computed(() => capabilityStore.reasonOf('video_generation'))
 
 // 状态
 const loading = ref(false)
@@ -53,7 +59,7 @@ const vipPackages = [
 
 // 计算属性
 const canCreate = computed(() => {
-  return selectedPerson.value && materialPreview.value && materialPreview.value.media_count > 0
+  return videoAvailable.value && selectedPerson.value && materialPreview.value && materialPreview.value.media_count > 0
 })
 
 const estimatedDuration = computed(() => {
@@ -125,6 +131,10 @@ async function loadPreview() {
 
 // 创建项目
 async function handleCreate() {
+  if (!videoAvailable.value) {
+    ElMessage.warning(`视频生成能力未配置：${videoReason.value}`)
+    return
+  }
   if (!canCreate.value) return
 
   try {
@@ -186,7 +196,12 @@ async function handlePurchaseVip(type: string, price: number) {
 
 // 跳转到选择人物页面
 function goToSelectPerson() {
-  router.push({ name: 'tree', query: { mode: 'select-person', callback: 'video-create' } })
+  const clanId = userStore.profile?.primary_clan?.id
+  if (!clanId) {
+    ElMessage.error('请先选择家族后再选择人物')
+    return
+  }
+  router.push({ name: 'tree', params: { clanId: String(clanId) }, query: { mode: 'select-person', callback: 'video-create' } })
 }
 
 // 监听搜索输入
@@ -196,6 +211,7 @@ function onSearchInput() {
 
 // 初始化
 onMounted(async () => {
+  await capabilityStore.refresh()
   // 获取VIP状态
   try {
     vipStatus.value = await videoApi.getVipStatus()
@@ -225,6 +241,19 @@ onMounted(async () => {
 
 <template>
   <div class="video-create-page">
+    <ElAlert
+      v-if="!videoAvailable"
+      :title="`视频生成能力暂未配置：${videoReason}`"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #default>
+        <div>{{ videoReason }}</div>
+        <div class="muted">提交按钮已禁用。请联系平台管理员配置视频服务；已创建的任务仍可在「我的视频」中查看真实状态与失败原因。</div>
+      </template>
+    </ElAlert>
     <ElCard v-loading="loading">
       <template #header>
         <div class="header">
@@ -420,6 +449,11 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.muted {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 4px;
+}
 .video-create-page {
   max-width: 800px;
   margin: 0 auto;

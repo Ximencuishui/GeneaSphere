@@ -1,0 +1,90 @@
+- generic [active] [ref=f7e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f7e3]:
+    - generic [ref=f7e4]:
+      - complementary [ref=f7e5]:
+        - heading "寻根路 · xungenlu.cn" [level=2] [ref=f7e7]
+        - menubar [ref=f7e8]:
+          - menuitem "概况" [ref=f7e9]
+          - menuitem "人员管理" [ref=f7e18]
+          - menuitem "内容审核" [ref=f7e27]
+          - menuitem "地方记忆" [ref=f7e36]
+          - menuitem "寻亲管理" [ref=f7e46]
+          - menuitem "家族公告" [ref=f7e56]
+          - menuitem "数据管理" [ref=f7e66]
+          - menuitem "影像管理" [ref=f7e75]
+          - menuitem "工具记录" [ref=f7e84]
+          - menuitem "印刷服务" [ref=f7e93]
+          - menuitem "族谱生成" [ref=f7e102]
+          - menuitem "视频中心" [ref=f7e111]
+          - menuitem "事件管理" [ref=f7e120]
+          - menuitem "短信通知" [ref=f7e129]
+          - menuitem "日志审计" [ref=f7e139]
+          - menuitem "系统设置" [expanded] [ref=f7e148]:
+            - menu [ref=f7e157]:
+              - menuitem "隐私配置" [ref=f7e158] [cursor=pointer]
+              - menuitem "字辈管理" [ref=f7e159] [cursor=pointer]
+              - menuitem "家族信息" [ref=f7e160] [cursor=pointer]
+              - menuitem "云存储" [ref=f7e161] [cursor=pointer]
+      - generic [ref=f7e162]:
+        - banner [ref=f7e163]:
+          - generic [ref=f7e164]:
+            - button [ref=f7e165] [cursor=pointer]
+            - navigation "面包屑" [ref=f7e169]:
+              - generic [ref=f7e170]:
+                - link [ref=f7e171]
+                - text: /
+              - generic [ref=f7e175]:
+                - link "系统设置" [ref=f7e176]
+                - text: /
+              - link "隐私配置" [ref=f7e178]
+          - generic [ref=f7e179]:
+            - button [ref=f7e181] [cursor=pointer]
+            - button "13800000000" [ref=f7e188] [cursor=pointer]
+        - main [ref=f7e194]:
+          - generic [ref=f7e196]:
+            - heading "隐私配置" [level=2] [ref=f7e198]
+            - generic [ref=f7e199]:
+              - generic [ref=f7e200]:
+                - separator [ref=f7e201]:
+                  - generic [ref=f7e202]: 游客可见范围
+                - generic [ref=f7e203]:
+                  - generic [ref=f7e204]: 允许查看已故人员
+                  - generic [ref=f7e206]:
+                    - switch "允许查看已故人员"
+                - generic [ref=f7e209]:
+                  - generic [ref=f7e210]: 仅展示前 N 代
+                  - generic [ref=f7e211]:
+                    - generic [ref=f7e212]:
+                      - button "减少数值" [ref=f7e213] [cursor=pointer]
+                      - button "增加数值" [ref=f7e217] [cursor=pointer]
+                      - spinbutton "仅展示前 N 代" [ref=f7e223]: "5"
+                    - generic [ref=f7e224]: 代（默认5）
+                - generic [ref=f7e225]:
+                  - generic [ref=f7e226]: 隐藏在世人员照片
+                  - generic [ref=f7e228]:
+                    - switch "隐藏在世人员照片" [checked]
+                - generic [ref=f7e231]:
+                  - generic [ref=f7e232]: 隐藏在世人员配偶信息
+                  - generic [ref=f7e234]:
+                    - switch "隐藏在世人员配偶信息" [checked]
+                - separator [ref=f7e237]:
+                  - generic [ref=f7e238]: 亲属验证登录
+                - generic [ref=f7e239]:
+                  - generic [ref=f7e240]: 启用亲属验证
+                  - generic [ref=f7e242]:
+                    - switch "启用亲属验证"
+                - separator [ref=f7e245]:
+                  - generic [ref=f7e246]: 数据备份
+                - group "数据导出" [ref=f7e247]:
+                  - generic [ref=f7e249]:
+                    - button "一键导出家族数据" [ref=f7e250] [cursor=pointer]
+                    - generic [ref=f7e252]: 包含全部人员信息和照片，用于备份
+              - button "保存配置" [ref=f7e254] [cursor=pointer]
+    - button "🔇 背景音乐" [ref=f7e262] [cursor=pointer]:
+      - generic [ref=f7e263]: 🔇
+      - generic [ref=f7e264]: 背景音乐

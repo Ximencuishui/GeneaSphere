@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, PrismaClient, Gender, Person } from '@prisma/client';
-import * as XLSX from 'xlsx';
 import { TreeService } from '../tree/tree.service';
+import { parseXlsxSafely } from './xlsx-sanitizer';
 
 const prisma = new PrismaClient();
 
@@ -36,9 +36,9 @@ export class ImportService {
       errors: [],
     };
 
-    const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData = XLSX.utils.sheet_to_json<ExcelPersonData>(worksheet);
+    // 通过 xlsx 输入隔离层解析：魔数校验 + 大小限制 + 行数限制 + 原型链清洗
+    // （缓解 xlsx@0.18.5 的 CVE-2023-30533 / CVE-2024-22363）
+    const jsonData = parseXlsxSafely<ExcelPersonData>(fileBuffer);
 
     if (jsonData.length === 0) {
       return result;

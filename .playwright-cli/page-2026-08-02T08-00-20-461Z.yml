@@ -1,0 +1,90 @@
+- generic [active] [ref=f5e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f5e3]:
+    - generic [ref=f5e4]:
+      - complementary [ref=f5e5]:
+        - heading "寻根路 · xungenlu.cn" [level=2] [ref=f5e7]
+        - menubar [ref=f5e8]:
+          - menuitem "概况" [ref=f5e9]
+          - menuitem "人员管理" [ref=f5e18]
+          - menuitem "内容审核" [ref=f5e27]
+          - menuitem "地方记忆" [ref=f5e36]
+          - menuitem "寻亲管理" [ref=f5e46]
+          - menuitem "家族公告" [ref=f5e56]
+          - menuitem "数据管理" [ref=f5e66]
+          - menuitem "影像管理" [ref=f5e75]
+          - menuitem "工具记录" [ref=f5e84]
+          - menuitem "印刷服务" [expanded] [ref=f5e93]:
+            - menu [ref=f5e102]:
+              - menuitem "订单管理" [ref=f5e103] [cursor=pointer]
+          - menuitem "族谱生成" [ref=f5e104]
+          - menuitem "视频中心" [ref=f5e113]
+          - menuitem "事件管理" [ref=f5e122]
+          - menuitem "短信通知" [ref=f5e131]
+          - menuitem "日志审计" [ref=f5e141]
+          - menuitem "系统设置" [ref=f5e150]
+      - generic [ref=f5e159]:
+        - banner [ref=f5e160]:
+          - generic [ref=f5e161]:
+            - button [ref=f5e162] [cursor=pointer]
+            - navigation "面包屑" [ref=f5e166]:
+              - generic [ref=f5e167]:
+                - link [ref=f5e168]
+                - text: /
+              - generic [ref=f5e172]:
+                - link "印刷服务" [ref=f5e173]
+                - text: /
+              - link "订单管理" [ref=f5e175]
+          - generic [ref=f5e176]:
+            - button [ref=f5e178] [cursor=pointer]
+            - button "13800000000" [ref=f5e185] [cursor=pointer]
+        - main [ref=f5e191]:
+          - generic [ref=f5e193]:
+            - heading "印刷订单管理" [level=2] [ref=f5e195]
+            - generic [ref=f5e196]:
+              - generic [ref=f5e197]:
+                - tablist [ref=f5e201]:
+                  - tab "全部" [selected] [ref=f5e203]
+                  - tab "待支付" [ref=f5e204]
+                  - tab "印刷中" [ref=f5e205]
+                  - tab "已发货" [ref=f5e206]
+                  - tab "已完成" [ref=f5e207]
+                - generic:
+                  - tabpanel "全部"
+              - generic [ref=f5e209]:
+                - table [ref=f5e211]:
+                  - rowgroup [ref=f5e221]:
+                    - row [ref=f5e222]:
+                      - columnheader "订单编号" [ref=f5e223]
+                      - columnheader "印刷规格" [ref=f5e225]
+                      - columnheader "数量" [ref=f5e227]
+                      - columnheader "金额" [ref=f5e229]
+                      - columnheader "状态" [ref=f5e231]
+                      - columnheader "物流单号" [ref=f5e233]
+                      - columnheader "下单时间" [ref=f5e235]
+                      - columnheader "操作" [ref=f5e237]
+                - generic [ref=f5e242]:
+                  - table:
+                    - rowgroup
+                  - generic [ref=f5e243]: 暂无数据
+              - generic [ref=f5e249]:
+                - generic [ref=f5e250]: 共 0 条
+                - generic [ref=f5e253] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=f5e255]
+                    - generic [ref=f5e256]: 20条/页
+                - button "上一页" [disabled] [ref=f5e261]
+                - list [ref=f5e262]:
+                  - listitem "第 1 页" [ref=f5e263]: "1"
+                - button "下一页" [disabled] [ref=f5e264]
+                - generic [ref=f5e265]:
+                  - generic [ref=f5e266]: 前往
+                  - spinbutton "页" [ref=f5e269]: "1"
+                  - generic [ref=f5e270]: 页
+    - button "🔇 背景音乐" [ref=f5e273] [cursor=pointer]:
+      - generic [ref=f5e274]: 🔇
+      - generic [ref=f5e275]: 背景音乐

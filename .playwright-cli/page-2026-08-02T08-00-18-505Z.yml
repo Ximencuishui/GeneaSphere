@@ -1,0 +1,9 @@
+- generic [active] [ref=f3e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - button "🔇 背景音乐" [ref=f3e4] [cursor=pointer]:
+    - generic [ref=f3e5]: 🔇
+    - generic [ref=f3e6]: 背景音乐

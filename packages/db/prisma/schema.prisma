@@ -45,7 +45,7 @@ model User {
   print_orders            PrintOrder[]
   tool_usage_logs         ToolUsageLog[]
   ocr_usage_logs          OcrUsageLog[]
-    pdf_import_logs         PdfImportLog[]
+  pdf_import_logs         PdfImportLog[]
   credit                  UserCredit?
   setting                 UserSetting?
   vip_orders              VideoVipOrder[]
@@ -64,6 +64,10 @@ model User {
   given_endorsements      Endorsement[]
   modification_requests   PersonModificationRequest[] @relation("ModificationRequester")
 
+  // ==================== 存储扩容申请 ====================
+  storage_upgrade_applications StorageUpgradeRequest[] @relation("StorageUpgradeApplicant")
+  storage_upgrade_reviews      StorageUpgradeRequest[] @relation("StorageUpgradeReviewer")
+
   // ==================== 柔性家庭关系更新 ====================
   person_links            PersonUserLink[]
   relation_changes        FamilyRelationChange[]     @relation("ChangeOperator")
@@ -80,16 +84,16 @@ model User {
   clan_review_attachments ClanReviewAttachment[]
 
   // ==================== 管理员后台 v2.0 ====================
-  announcements_created   ClanAnnouncement[]
-  reports_filed          ContentReport[]  @relation("ReportReporter")
-  reports_handled         ContentReport[]  @relation("ReportHandler")
-  clan_tool_usage_logs    ClanToolUsageLog[] @relation("ClanToolUsageLogUser")
+  announcements_created ClanAnnouncement[]
+  reports_filed         ContentReport[]    @relation("ReportReporter")
+  reports_handled       ContentReport[]    @relation("ReportHandler")
+  clan_tool_usage_logs  ClanToolUsageLog[] @relation("ClanToolUsageLogUser")
 
   // ==================== 族谱生成与全族视频 ====================
-  family_events          FamilyEvent[]
-  genealogy_documents     GenealogyDocument[]
-  clan_migration_videos  ClanMigrationVideo[]
-  clan_event_videos       ClanEventVideo[]
+  family_events         FamilyEvent[]
+  genealogy_documents   GenealogyDocument[]
+  clan_migration_videos ClanMigrationVideo[]
+  clan_event_videos     ClanEventVideo[]
 
   @@index([ban_status])
   @@index([wx_openid])
@@ -120,7 +124,7 @@ model Clan {
   shared_credits           FamilySharedCredit[]
   families                 FamilyUnit[]
   media                    MediaArchive[]
-    pdf_import_logs         PdfImportLog[]
+  pdf_import_logs          PdfImportLog[]
   merge_applications       MergeApplication[]
   persons                  Person[]
   print_orders             PrintOrder[]
@@ -128,6 +132,7 @@ model Clan {
   recharge_orders          RechargeOrder[]
   recharge_records         RechargeRecord[]
   sms_send_records         SmsSendRecord[]
+  storage_upgrade_requests StorageUpgradeRequest[]
   xipai                    Xipai[]
   video_projects           VideoProject[]
   migration_events         MigrationEvent[]
@@ -135,22 +140,22 @@ model Clan {
   family_book_projects     FamilyBookProject[]
 
   // ==================== 柔性家庭关系更新 ====================
-  relation_changes FamilyRelationChange[]
-  marriages        MarriageHistory[]
-  custody_records  ChildCustodyRecord[]
+  relation_changes   FamilyRelationChange[]
+  marriages          MarriageHistory[]
+  custody_records    ChildCustodyRecord[]
   review_attachments ClanReviewAttachment[]
 
   // ==================== 管理员后台 v2.0 ====================
-  announcements   ClanAnnouncement[]
-  reports         ContentReport[]
-  albums          ClanAlbum[]
+  announcements        ClanAnnouncement[]
+  reports              ContentReport[]
+  albums               ClanAlbum[]
   clan_tool_usage_logs ClanToolUsageLog[] @relation("ClanToolUsageLogClan")
 
   // ==================== 族谱生成与全族视频 ====================
-  family_events          FamilyEvent[]
-  genealogy_documents     GenealogyDocument[]
-  clan_migration_videos  ClanMigrationVideo[]
-  clan_event_videos       ClanEventVideo[]
+  family_events         FamilyEvent[]
+  genealogy_documents   GenealogyDocument[]
+  clan_migration_videos ClanMigrationVideo[]
+  clan_event_videos     ClanEventVideo[]
 
   @@index([status])
   @@index([register_ip])
@@ -211,22 +216,22 @@ model Person {
 }
 
 model FamilyUnit {
-  id             BigInt        @id @default(autoincrement()) @map("id")
-  clan_id        BigInt        @map("clan_id")
-  husband_id     BigInt?       @map("husband_id")
-  wife_id        BigInt?       @map("wife_id")
-  union_type     String?       @default("normal") @map("union_type")
+  id             BigInt             @id @default(autoincrement()) @map("id")
+  clan_id        BigInt             @map("clan_id")
+  husband_id     BigInt?            @map("husband_id")
+  wife_id        BigInt?            @map("wife_id")
+  union_type     String?            @default("normal") @map("union_type")
   // 婚姻元数据（支持再婚与时间区间）
-  marriage_date  DateTime?     @map("marriage_date")
-  marriage_order Int           @default(1) @map("marriage_order")
-  divorce_date   DateTime?     @map("divorce_date")
+  marriage_date  DateTime?          @map("marriage_date")
+  marriage_order Int                @default(1) @map("marriage_order")
+  divorce_date   DateTime?          @map("divorce_date")
   end_reason     MarriageEndReason? @map("end_reason")
-  is_current     Boolean       @default(true) @map("is_current")
-  note           String?       @map("note")
+  is_current     Boolean            @default(true) @map("is_current")
+  note           String?            @map("note")
   children       FamilyChild[]
-  clan           Clan          @relation(fields: [clan_id], references: [id], onDelete: Cascade)
-  husband        Person?       @relation("HusbandRelation", fields: [husband_id], references: [id])
-  wife           Person?       @relation("WifeRelation", fields: [wife_id], references: [id])
+  clan           Clan               @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  husband        Person?            @relation("HusbandRelation", fields: [husband_id], references: [id])
+  wife           Person?            @relation("WifeRelation", fields: [wife_id], references: [id])
 
   @@unique([husband_id, wife_id, marriage_order])
   @@index([clan_id])
@@ -242,9 +247,9 @@ model FamilyUnit {
 // 子女与父母关系类型（中文族谱继子女/养子是标配）
 enum ChildRelationType {
   BIOLOGICAL // 亲生
-  ADOPTED     // 收养
-  STEP        // 继子女（再婚带来的）
-  FOSTER      // 寄养/过继
+  ADOPTED // 收养
+  STEP // 继子女（再婚带来的）
+  FOSTER // 寄养/过继
 }
 
 model FamilyChild {
@@ -274,9 +279,9 @@ model PersonAncestry {
 
   @@id([ancestor_id, descendant_id])
   // [I-1 修复 2026-08-01] 三个索引覆盖 getClanFullTree / getSubTree / findMainLineagePath 全部命中条件
-  @@index([ancestor_id, depth])     // getSubTree: WHERE ancestor_id=? AND depth<=N
-  @@index([descendant_id])           // getDirectParent: WHERE descendant_id=? AND depth=1
-  @@index([descendant_id, depth])    // buildLineagePath: WHERE descendant_id IN (...) AND depth=1
+  @@index([ancestor_id, depth]) // getSubTree: WHERE ancestor_id=? AND depth<=N
+  @@index([descendant_id]) // getDirectParent: WHERE descendant_id=? AND depth=1
+  @@index([descendant_id, depth]) // buildLineagePath: WHERE descendant_id IN (...) AND depth=1
   @@map("person_ancestry")
 }
 
@@ -289,7 +294,7 @@ model MediaArchive {
   taken_location               String?                    @map("taken_location")
   description                  String?                    @map("description")
   category                     String?                    @map("category") // 影像分类：个人照片、村寨风貌、祭祀活动等
-  is_cover                    Boolean                    @default(false) @map("is_cover") // 是否为聚落封面
+  is_cover                     Boolean                    @default(false) @map("is_cover") // 是否为聚落封面
   created_at                   DateTime                   @default(now()) @map("created_at")
   updated_at                   DateTime                   @updatedAt @map("updated_at")
   file_size                    BigInt                     @default(0) @map("file_size")
@@ -311,6 +316,7 @@ model MediaArchive {
   video_material_links         VideoMaterialLink[]
   lineage_video_material_links LineageVideoMaterialLink[]
   migration_location_media     MigrationLocationMedia[]
+  photo_claim_records          PhotoClaimRecord[]
 
   @@index([clan_id, category])
   @@map("media_archives")
@@ -735,24 +741,24 @@ model OcrUsageLog {
 
 // ========== PDF 导入记录表（v1.0 需求文档）==========
 model PdfImportLog {
-  id              BigInt          @id @default(autoincrement()) @map("id")
-  task_id         String          @unique @map("task_id")
-  user_id         String          @map("user_id")
-  clan_id         BigInt          @map("clan_id")
-  file_name       String          @map("file_name")
-  file_size       BigInt          @map("file_size")
-  file_path       String?         @map("file_path")
-  parse_mode      String          @map("parse_mode") // text | ocr
-  total_pages     Int             @default(0) @map("total_pages")
-  total_records   Int             @default(0) @map("total_records")
-  success_records Int             @default(0) @map("success_records")
-  failed_records  Int             @default(0) @map("failed_records")
-  status          String          @default("pending") @map("status") // pending|parsing|preview|correcting|importing|completed|failed
-  error_message   String?         @map("error_message")
-  created_at      DateTime        @default(now()) @map("created_at")
-  completed_at    DateTime?       @map("completed_at")
-  user            User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  clan            Clan            @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  id              BigInt         @id @default(autoincrement()) @map("id")
+  task_id         String         @unique @map("task_id")
+  user_id         String         @map("user_id")
+  clan_id         BigInt         @map("clan_id")
+  file_name       String         @map("file_name")
+  file_size       BigInt         @map("file_size")
+  file_path       String?        @map("file_path")
+  parse_mode      String         @map("parse_mode") // text | ocr
+  total_pages     Int            @default(0) @map("total_pages")
+  total_records   Int            @default(0) @map("total_records")
+  success_records Int            @default(0) @map("success_records")
+  failed_records  Int            @default(0) @map("failed_records")
+  status          String         @default("pending") @map("status") // pending|parsing|preview|correcting|importing|completed|failed
+  error_message   String?        @map("error_message")
+  created_at      DateTime       @default(now()) @map("created_at")
+  completed_at    DateTime?      @map("completed_at")
+  user            User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  clan            Clan           @relation(fields: [clan_id], references: [id], onDelete: Cascade)
   temp_records    PdfParseTemp[]
 
   @@index([user_id])
@@ -764,25 +770,25 @@ model PdfImportLog {
 
 // ========== PDF 解析临时数据表（v1.0 需求文档）==========
 model PdfParseTemp {
-  id                BigInt          @id @default(autoincrement()) @map("id")
-  import_log_id     BigInt          @map("import_log_id")
-  row_number        Int             @map("row_number")
-  full_name         String          @map("full_name")
-  gender            String          @default("UNKNOWN") @map("gender") // M | F | UNKNOWN
-  generation        Int?            @map("generation")
-  birth_date        DateTime?       @map("birth_date")
-  death_date        DateTime?       @map("death_date")
-  is_living         Boolean         @default(true) @map("is_living")
-  parent_name       String?         @map("parent_name")
-  spouse_name       String?         @map("spouse_name")
-  biography         String?         @map("biography")
-  burial_place      String?         @map("burial_place")
-  notes             String?         @map("notes")
-  confidence_score  Decimal?        @map("confidence_score") @db.Decimal(5, 2)
-  original_text     String?         @map("original_text")
-  is_corrected      Boolean         @default(false) @map("is_corrected")
-  created_at        DateTime        @default(now()) @map("created_at")
-  import_log        PdfImportLog    @relation(fields: [import_log_id], references: [id], onDelete: Cascade)
+  id               BigInt       @id @default(autoincrement()) @map("id")
+  import_log_id    BigInt       @map("import_log_id")
+  row_number       Int          @map("row_number")
+  full_name        String       @map("full_name")
+  gender           String       @default("UNKNOWN") @map("gender") // M | F | UNKNOWN
+  generation       Int?         @map("generation")
+  birth_date       DateTime?    @map("birth_date")
+  death_date       DateTime?    @map("death_date")
+  is_living        Boolean      @default(true) @map("is_living")
+  parent_name      String?      @map("parent_name")
+  spouse_name      String?      @map("spouse_name")
+  biography        String?      @map("biography")
+  burial_place     String?      @map("burial_place")
+  notes            String?      @map("notes")
+  confidence_score Decimal?     @map("confidence_score") @db.Decimal(5, 2)
+  original_text    String?      @map("original_text")
+  is_corrected     Boolean      @default(false) @map("is_corrected")
+  created_at       DateTime     @default(now()) @map("created_at")
+  import_log       PdfImportLog @relation(fields: [import_log_id], references: [id], onDelete: Cascade)
 
   @@index([import_log_id])
   @@index([confidence_score])
@@ -887,6 +893,7 @@ model PhotoClaimRecord {
   status               PhotoClaimStatus @default(PENDING) @map("status")
   created_at           DateTime         @default(now()) @map("created_at")
   claimer              User             @relation(fields: [claimer_user_id], references: [id], onDelete: Cascade)
+  media                MediaArchive     @relation(fields: [media_id], references: [id], onDelete: Cascade)
 
   @@index([media_id])
   @@index([claimer_user_id])
@@ -1538,6 +1545,44 @@ model UserStorage {
   @@map("user_storage")
 }
 
+// ==================== 存储扩容申请（人工审核流，2024 真实性整改）====================
+// 支付 Provider 未配置时，只能走人工审核；不允许伪造支付 / 立即扩容。
+model StorageUpgradeRequest {
+  id                  BigInt               @id @default(autoincrement()) @map("id")
+  clan_id             BigInt               @map("clan_id")
+  applicant_id        String               @map("applicant_id")
+  plan_code           String               @map("plan_code")
+  plan_name           String               @map("plan_name")
+  quota_bytes         BigInt               @map("quota_bytes")
+  current_quota_bytes BigInt               @map("current_quota_bytes")
+  reason              String?              @map("reason")
+  contact_info        String?              @map("contact_info")
+  status              StorageUpgradeStatus @default(PENDING) @map("status")
+  reviewed_at         DateTime?            @map("reviewed_at")
+  reviewer_id         String?              @map("reviewer_id")
+  reviewer_note       String?              @map("reviewer_note")
+  applied_quota_bytes BigInt?              @map("applied_quota_bytes")
+  created_at          DateTime             @default(now()) @map("created_at")
+  updated_at          DateTime             @updatedAt @map("updated_at")
+
+  clan      Clan  @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  applicant User  @relation("StorageUpgradeApplicant", fields: [applicant_id], references: [id])
+  reviewer  User? @relation("StorageUpgradeReviewer", fields: [reviewer_id], references: [id])
+
+  @@index([clan_id, status])
+  @@index([applicant_id])
+  @@map("storage_upgrade_requests")
+}
+
+enum StorageUpgradeStatus {
+  PENDING  @map("PENDING")
+  APPROVED @map("APPROVED")
+  REJECTED @map("REJECTED")
+  CANCELED @map("CANCELED")
+
+  @@map("storage_upgrade_status")
+}
+
 // ==================== 族谱邀请与身份验证 H5 相关 ====================
 
 // 邀请二维码记录表
@@ -1858,20 +1903,20 @@ enum QuizDifficulty {
 
 // 地方记忆题库 - 用户创建的本地知识问题
 model LocalMemoryQuiz {
-  id            BigInt              @id @default(autoincrement()) @map("id")
-  location      String              @map("location")
-  region        String?             @map("region")
-  decade        Int                 @map("decade")
-  question      String              @map("question")
-  answer        String?             @map("answer")
-  status        MemoryQuizStatus    @default(PENDING) @map("status")
-  creator_id    String              @map("creator_id")
-  tags          String?             @map("tags")
-  created_at    DateTime            @default(now()) @map("created_at")
-  updated_at    DateTime            @updatedAt @map("updated_at")
+  id         BigInt           @id @default(autoincrement()) @map("id")
+  location   String           @map("location")
+  region     String?          @map("region")
+  decade     Int              @map("decade")
+  question   String           @map("question")
+  answer     String?          @map("answer")
+  status     MemoryQuizStatus @default(PENDING) @map("status")
+  creator_id String           @map("creator_id")
+  tags       String?          @map("tags")
+  created_at DateTime         @default(now()) @map("created_at")
+  updated_at DateTime         @updatedAt @map("updated_at")
 
-  creator       User                @relation(fields: [creator_id], references: [id], onDelete: Cascade)
-  answers       LocalMemoryAnswer[]
+  creator User                @relation(fields: [creator_id], references: [id], onDelete: Cascade)
+  answers LocalMemoryAnswer[]
 
   @@index([location, decade])
   @@index([status])
@@ -1881,16 +1926,16 @@ model LocalMemoryQuiz {
 
 // 地方记忆答案 - 用户提交的答案
 model LocalMemoryAnswer {
-  id            BigInt      @id @default(autoincrement()) @map("id")
-  quiz_id       BigInt      @map("quiz_id")
-  user_id       String      @map("user_id")
-  content       String      @map("content")
-  endorsements  Int         @default(0) @map("endorsements")
-  is_verified   Boolean     @default(false) @map("is_verified")
-  created_at    DateTime    @default(now()) @map("created_at")
+  id           BigInt   @id @default(autoincrement()) @map("id")
+  quiz_id      BigInt   @map("quiz_id")
+  user_id      String   @map("user_id")
+  content      String   @map("content")
+  endorsements Int      @default(0) @map("endorsements")
+  is_verified  Boolean  @default(false) @map("is_verified")
+  created_at   DateTime @default(now()) @map("created_at")
 
-  quiz          LocalMemoryQuiz @relation(fields: [quiz_id], references: [id], onDelete: Cascade)
-  user          User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  quiz LocalMemoryQuiz @relation(fields: [quiz_id], references: [id], onDelete: Cascade)
+  user User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([quiz_id])
   @@index([user_id])
@@ -1900,14 +1945,14 @@ model LocalMemoryAnswer {
 
 // 用户记忆徽章
 model MemoryBadge {
-  id            BigInt   @id @default(autoincrement()) @map("id")
-  user_id       String   @map("user_id")
-  badge_type    String   @map("badge_type")
-  location      String?  @map("location")
-  description   String?  @map("description")
-  awarded_at    DateTime @default(now()) @map("awarded_at")
+  id          BigInt   @id @default(autoincrement()) @map("id")
+  user_id     String   @map("user_id")
+  badge_type  String   @map("badge_type")
+  location    String?  @map("location")
+  description String?  @map("description")
+  awarded_at  DateTime @default(now()) @map("awarded_at")
 
-  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
   @@index([badge_type])
@@ -1916,13 +1961,13 @@ model MemoryBadge {
 
 // 用户已验证的地区记录
 model UserVerifiedLocation {
-  id            BigInt   @id @default(autoincrement()) @map("id")
-  user_id       String   @map("user_id")
-  location      String   @map("location")
-  decade        Int      @map("decade")
-  verified_at   DateTime @default(now()) @map("verified_at")
+  id          BigInt   @id @default(autoincrement()) @map("id")
+  user_id     String   @map("user_id")
+  location    String   @map("location")
+  decade      Int      @map("decade")
+  verified_at DateTime @default(now()) @map("verified_at")
 
-  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, location, decade])
   @@index([user_id])
@@ -1966,15 +2011,15 @@ enum SmsCodePurpose {
 }
 
 model SmsVerifyCode {
-  id         BigInt          @id @default(autoincrement()) @map("id")
-  phone      String          @map("phone")
-  code       String          @map("code")
-  purpose    SmsCodePurpose  @map("purpose")
-  ip_address String?         @map("ip_address")
-  is_used    Boolean         @default(false) @map("is_used")
-  expires_at DateTime        @map("expires_at")
-  created_at DateTime        @default(now()) @map("created_at")
-  used_at    DateTime?       @map("used_at")
+  id         BigInt         @id @default(autoincrement()) @map("id")
+  phone      String         @map("phone")
+  code       String         @map("code")
+  purpose    SmsCodePurpose @map("purpose")
+  ip_address String?        @map("ip_address")
+  is_used    Boolean        @default(false) @map("is_used")
+  expires_at DateTime       @map("expires_at")
+  created_at DateTime       @default(now()) @map("created_at")
+  used_at    DateTime?      @map("used_at")
 
   @@index([phone, purpose, is_used])
   @@index([expires_at])
@@ -1988,7 +2033,7 @@ model SmsVerifyCode {
 model LoginAttempt {
   id              BigInt    @id @default(autoincrement()) @map("id")
   subject_type    String    @map("subject_type") // USER | PLATFORM_ADMIN
-  subject_key     String    @map("subject_key")  // phone or username
+  subject_key     String    @map("subject_key") // phone or username
   failed_count    Int       @default(0) @map("failed_count")
   locked_until    DateTime? @map("locked_until")
   last_attempt_at DateTime  @default(now()) @map("last_attempt_at")
@@ -2019,19 +2064,19 @@ model ClanReviewAttachment {
 
 // 家族公告
 model ClanAnnouncement {
-  id           BigInt             @id @default(autoincrement()) @map("id")
-  clan_id      BigInt             @map("clan_id")
-  title        String             @map("title") @db.VarChar(200)
-  content      String             @map("content") @db.Text
-  cover_url   String?            @map("cover_url")
-  is_pinned   Boolean            @default(false) @map("is_pinned")
-  is_active   Boolean            @default(true) @map("is_active")
-  published_at DateTime?         @map("published_at")
-  created_by   String             @map("created_by")
-  created_at   DateTime          @default(now()) @map("created_at")
-  updated_at   DateTime          @updatedAt @map("updated_at")
-  clan         Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
-  creator      User              @relation(fields: [created_by], references: [id], onDelete: Cascade)
+  id           BigInt    @id @default(autoincrement()) @map("id")
+  clan_id      BigInt    @map("clan_id")
+  title        String    @map("title") @db.VarChar(200)
+  content      String    @map("content") @db.Text
+  cover_url    String?   @map("cover_url")
+  is_pinned    Boolean   @default(false) @map("is_pinned")
+  is_active    Boolean   @default(true) @map("is_active")
+  published_at DateTime? @map("published_at")
+  created_by   String    @map("created_by")
+  created_at   DateTime  @default(now()) @map("created_at")
+  updated_at   DateTime  @updatedAt @map("updated_at")
+  clan         Clan      @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  creator      User      @relation(fields: [created_by], references: [id], onDelete: Cascade)
 
   @@index([clan_id, is_active, published_at])
   @@index([clan_id, is_pinned])
@@ -2040,21 +2085,21 @@ model ClanAnnouncement {
 
 // 内容举报
 model ContentReport {
-  id           BigInt             @id @default(autoincrement()) @map("id")
-  clan_id      BigInt             @map("clan_id")
-  reporter_id  String             @map("reporter_id")
-  target_type  ReportTargetType   @map("target_type")
-  target_id    BigInt             @map("target_id")
-  reason       String             @map("reason")
-  description  String?            @map("description")
-  status       ReportStatus       @default(PENDING) @map("status")
-  handled_by   String?            @map("handled_by")
-  handled_at   DateTime?          @map("handled_at")
-  result       String?            @map("result")
-  created_at   DateTime          @default(now()) @map("created_at")
-  reporter     User              @relation("ReportReporter", fields: [reporter_id], references: [id], onDelete: Cascade)
-  handler      User?             @relation("ReportHandler", fields: [handled_by], references: [id], onDelete: SetNull)
-  clan         Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  id          BigInt           @id @default(autoincrement()) @map("id")
+  clan_id     BigInt           @map("clan_id")
+  reporter_id String           @map("reporter_id")
+  target_type ReportTargetType @map("target_type")
+  target_id   BigInt           @map("target_id")
+  reason      String           @map("reason")
+  description String?          @map("description")
+  status      ReportStatus     @default(PENDING) @map("status")
+  handled_by  String?          @map("handled_by")
+  handled_at  DateTime?        @map("handled_at")
+  result      String?          @map("result")
+  created_at  DateTime         @default(now()) @map("created_at")
+  reporter    User             @relation("ReportReporter", fields: [reporter_id], references: [id], onDelete: Cascade)
+  handler     User?            @relation("ReportHandler", fields: [handled_by], references: [id], onDelete: SetNull)
+  clan        Clan             @relation(fields: [clan_id], references: [id], onDelete: Cascade)
 
   @@index([clan_id, status])
   @@index([target_type, target_id])
@@ -2071,8 +2116,8 @@ model ClanAlbum {
   default_privacy SpacePrivacyLevel @default(clan) @map("default_privacy")
   photo_count     Int               @default(0) @map("photo_count")
   creator_id      String            @map("creator_id")
-  created_at      DateTime         @default(now()) @map("created_at")
-  updated_at      DateTime         @updatedAt @map("updated_at")
+  created_at      DateTime          @default(now()) @map("created_at")
+  updated_at      DateTime          @updatedAt @map("updated_at")
   clan            Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
   media           MediaArchive[]
 
@@ -2082,17 +2127,17 @@ model ClanAlbum {
 
 // 举报目标类型枚举
 enum ReportTargetType {
-  MEDIA       // 影像
-  BIO         // 生平
-  POST        // 寻亲帖
-  MEMBER      // 成员信息
+  MEDIA // 影像
+  BIO // 生平
+  POST // 寻亲帖
+  MEMBER // 成员信息
 }
 
 // 举报状态枚举
 enum ReportStatus {
-  PENDING     // 待处理
-  CONFIRMED   // 已确认违规
-  REJECTED    // 已驳回
+  PENDING // 待处理
+  CONFIRMED // 已确认违规
+  REJECTED // 已驳回
 }
 
 // AI工具使用记录（家族维度扩展）
@@ -2103,7 +2148,7 @@ model ClanToolUsageLog {
   tool_type      ToolType        @map("tool_type")
   media_id       BigInt?         @map("media_id")
   credits_used   Int             @map("credits_used")
-  estimated_cost Decimal          @map("estimated_cost") @db.Decimal(10, 4)
+  estimated_cost Decimal         @map("estimated_cost") @db.Decimal(10, 4)
   status         ToolUsageStatus @default(pending) @map("status")
   input_url      String?         @map("input_url")
   output_url     String?         @map("output_url")
@@ -2121,39 +2166,39 @@ model ClanToolUsageLog {
 
 // 家族大事件类型枚举
 enum FamilyEventType {
-  ancestor_worship  // 祭祖
-  genealogy         // 修谱
-  building          // 建祠
-  birth             // 诞辰
-  death             // 逝世
-  gathering         // 聚会
-  other             // 其他
+  ancestor_worship // 祭祖
+  genealogy // 修谱
+  building // 建祠
+  birth // 诞辰
+  death // 逝世
+  gathering // 聚会
+  other // 其他
 }
 
 // 族谱文档风格枚举
 enum GenealogyDocumentStyle {
-  traditional  // 传统悬挂式
-  modern       // 现代图文混排
-  simple       // 简约列表式
+  traditional // 传统悬挂式
+  modern // 现代图文混排
+  simple // 简约列表式
 }
 
 // 家族大事件表
 model FamilyEvent {
-  id             BigInt           @id @default(autoincrement()) @map("id")
-  clan_id        BigInt           @map("clan_id")
-  event_name     String           @map("event_name") @db.VarChar(100)
-  event_type     FamilyEventType  @map("event_type")
-  event_date     DateTime?        @map("event_date")
-  event_year     Int?             @map("event_year")
-  location       String?          @map("location") @db.VarChar(200)
-  description    String?          @map("description") @db.Text
-  media_ids      Json?            @map("media_ids") // 关联的照片ID列表
-  created_by     String           @map("created_by")
-  created_at     DateTime         @default(now()) @map("created_at")
-  updated_at     DateTime         @updatedAt @map("updated_at")
+  id          BigInt          @id @default(autoincrement()) @map("id")
+  clan_id     BigInt          @map("clan_id")
+  event_name  String          @map("event_name") @db.VarChar(100)
+  event_type  FamilyEventType @map("event_type")
+  event_date  DateTime?       @map("event_date")
+  event_year  Int?            @map("event_year")
+  location    String?         @map("location") @db.VarChar(200)
+  description String?         @map("description") @db.Text
+  media_ids   Json?           @map("media_ids") // 关联的照片ID列表
+  created_by  String          @map("created_by")
+  created_at  DateTime        @default(now()) @map("created_at")
+  updated_at  DateTime        @updatedAt @map("updated_at")
 
-  clan      Clan       @relation(fields: [clan_id], references: [id], onDelete: Cascade)
-  creator   User       @relation(fields: [created_by], references: [id], onDelete: Cascade)
+  clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  creator User @relation(fields: [created_by], references: [id], onDelete: Cascade)
 
   @@index([clan_id, event_type])
   @@index([clan_id, event_year])
@@ -2167,12 +2212,12 @@ model GenealogyDocument {
   version_name   String                 @map("version_name") @db.VarChar(200)
   version_number Int                    @default(1) @map("version_number")
   file_url       String?                @map("file_url") @db.VarChar(500)
-  file_size      BigInt?               @map("file_size")
-  page_count     Int?                  @map("page_count")
+  file_size      BigInt?                @map("file_size")
+  page_count     Int?                   @map("page_count")
   style          GenealogyDocumentStyle @default(traditional) @map("style")
-  scope_summary  Json?                 @map("scope_summary") // 范围摘要：{branch, generation_range, person_count}
-  created_by     String                @map("created_by")
-  created_at     DateTime              @default(now()) @map("created_at")
+  scope_summary  Json?                  @map("scope_summary") // 范围摘要：{branch, generation_range, person_count}
+  created_by     String                 @map("created_by")
+  created_at     DateTime               @default(now()) @map("created_at")
 
   clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
   creator User @relation(fields: [created_by], references: [id], onDelete: Cascade)
@@ -2183,21 +2228,21 @@ model GenealogyDocument {
 
 // 全族迁徙视频项目表
 model ClanMigrationVideo {
-  id              BigInt             @id @default(autoincrement()) @map("id")
-  clan_id         BigInt             @map("clan_id")
-  title           String             @map("title") @db.VarChar(200)
-  start_year      Int?               @map("start_year")
-  end_year        Int?               @map("end_year")
-  branch_filter   String?            @map("branch_filter") // 指定房支
-  style           String             @default("nostalgic") @map("style")
-  status          VideoProjectStatus @default(queued) @map("status")
-  video_url       String?            @map("video_url") @db.VarChar(500)
-  duration_seconds Int?              @map("duration_seconds")
-  file_size       BigInt?            @map("file_size")
-  event_count     Int                @default(0) @map("event_count")
-  created_by      String             @map("created_by")
-  created_at      DateTime           @default(now()) @map("created_at")
-  completed_at    DateTime?          @map("completed_at")
+  id               BigInt             @id @default(autoincrement()) @map("id")
+  clan_id          BigInt             @map("clan_id")
+  title            String             @map("title") @db.VarChar(200)
+  start_year       Int?               @map("start_year")
+  end_year         Int?               @map("end_year")
+  branch_filter    String?            @map("branch_filter") // 指定房支
+  style            String             @default("nostalgic") @map("style")
+  status           VideoProjectStatus @default(queued) @map("status")
+  video_url        String?            @map("video_url") @db.VarChar(500)
+  duration_seconds Int?               @map("duration_seconds")
+  file_size        BigInt?            @map("file_size")
+  event_count      Int                @default(0) @map("event_count")
+  created_by       String             @map("created_by")
+  created_at       DateTime           @default(now()) @map("created_at")
+  completed_at     DateTime?          @map("completed_at")
 
   clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
   creator User @relation(fields: [created_by], references: [id], onDelete: Cascade)

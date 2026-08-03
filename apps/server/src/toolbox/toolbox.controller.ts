@@ -7,6 +7,7 @@ import { AIProcessorService } from './services/ai-processor.service';
 import { ProcessImageDto } from './dto/process-image.dto';
 import { PurchasePackageDto, PACKAGE_PRICES } from './dto/purchase-package.dto';
 import { AllocateCreditsDto } from './dto/allocate-credits.dto';
+import { CapabilityService } from '../common/capability.service';
 
 @ApiTags('工具箱')
 @ApiBearerAuth()
@@ -17,6 +18,7 @@ export class ToolboxController {
     private readonly creditService: CreditService,
     private readonly packageService: PackageService,
     private readonly aiProcessor: AIProcessorService,
+    private readonly capabilities: CapabilityService,
   ) {}
 
   @Get('credits')
@@ -43,6 +45,8 @@ export class ToolboxController {
     @Request() req,
     @Body() dto: PurchasePackageDto,
   ) {
+    this.capabilities.assertAvailable('ai_tools');
+
     // 校验支付金额是否与套餐价格一致
     const expectedPrice = PACKAGE_PRICES[dto.package_type];
     if (dto.amount !== expectedPrice) {
@@ -65,6 +69,7 @@ export class ToolboxController {
     @Body() dto: ProcessImageDto,
   ) {
     const userId = req.user.userId;
+    this.capabilities.assertAvailable('ai_tools');
 
     // 检查并扣减额度
     const deductResult = await this.creditService.checkAndDeductCredits(
@@ -100,7 +105,7 @@ export class ToolboxController {
       }
     }
 
-    // 调用AI处理（模拟）
+    // 调用已配置的真实 AI Provider
     const processResult = await this.aiProcessor.processImage(
       dto.tool_type,
       dto.image_url,

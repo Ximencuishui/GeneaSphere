@@ -3,9 +3,16 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
+import { useCapabilityStore } from '@/stores/capability'
 
 const route = useRoute()
 const router = useRouter()
+const capabilityStore = useCapabilityStore()
+
+// 能力状态
+const smsAvailable = computed(() => capabilityStore.isAvailable('sms'))
+const smsReason = computed(() => capabilityStore.reasonOf('sms'))
 
 // 状态
 const sending = ref(false)
@@ -60,7 +67,7 @@ const showNoBalance = computed(() => balance.value <= 0)
 
 // 校验余额
 const canSend = computed(() => {
-  return balance.value >= estimatedCost.value && smsContent.value.trim().length > 0 && recipientCount.value > 0
+  return smsAvailable.value && balance.value >= estimatedCost.value && smsContent.value.trim().length > 0 && recipientCount.value > 0
 })
 
 // 获取余额
@@ -89,11 +96,16 @@ const fetchMembers = async () => {
 
 // 初始化
 onMounted(async () => {
+  await capabilityStore.refresh()
   await Promise.all([fetchBalance(), fetchMembers()])
 })
 
 // 提交发送
 const handleSend = async () => {
+  if (!smsAvailable.value) {
+    ElMessage.warning(`短信能力未配置：${smsReason.value}`)
+    return
+  }
   if (!canSend.value) {
     if (balance.value < estimatedCost.value) {
       try {
@@ -185,6 +197,19 @@ const goToRecharge = () => {
 
 <template>
   <div class="sms-send-page">
+    <ElAlert
+      v-if="!smsAvailable"
+      :title="`短信能力暂未配置：${smsReason}`"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #default>
+        <div>{{ smsReason }}</div>
+        <div class="muted">提交按钮已禁用，余额查询与发送历史仍可使用。请联系平台管理员配置短信服务。</div>
+      </template>
+    </ElAlert>
     <ElCard>
       <template #header>
         <div class="card-header">
@@ -335,6 +360,7 @@ const goToRecharge = () => {
               :disabled="!canSend && !showNoBalance"
               @click="handleSend"
             >
+              <ElIcon v-if="!smsAvailable" style="margin-right: 4px"><InfoFilled /></ElIcon>
               {{ sendType === 'SCHEDULED' ? '设置定时发送' : '发送短信' }}
             </ElButton>
           </div>
@@ -345,6 +371,11 @@ const goToRecharge = () => {
 </template>
 
 <style scoped>
+.muted {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 4px;
+}
 .sms-send-page {
   max-width: 900px;
   margin: 0 auto;

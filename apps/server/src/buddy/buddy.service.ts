@@ -389,6 +389,172 @@ export class BuddyService {
   }
 
   /**
+   * 获取我作为被匹配方的记录（谁在找我）
+   * - 明确只返回 matched_user_id = currentUser 的 PENDING/ACCEPTED 记录
+   * - 复用现有 BuddyMatch 状态机，UI 上可执行 accept/decline/ignore
+   */
+  async getInboundMatches(userId: string, status?: string) {
+    const whereClause: any = {
+      matched_user_id: userId,
+    };
+    if (status) {
+      whereClause.status = status;
+    }
+    return this.prisma.buddyMatchRecord.findMany({
+      where: whereClause,
+      include: {
+        requester: {
+          select: {
+            id: true,
+            nickname: true,
+            avatar_url: true,
+            birth_date: true,
+          },
+        },
+        matched_user: {
+          select: {
+            id: true,
+            nickname: true,
+            avatar_url: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  /**
+   * 按照片找：上传照片后，在尊重 allow_photo_find_me 隐私设置的前提下，
+   * 查找曾被标记/上传到同一张或同时期同地点照片的家族成员与跨家族伙伴
+   * - 仅返回开启了 allow_photo_find_me 隐私的用户
+   * - 跨家族匹配需双方都允许 allow_cross_clan_friend_finding
+   */
+  async findByPhoto(
+    userId: string,
+    dto: { media_id?: number; taken_year?: number; taken_location?: string },
+  ) {
+    // 读取当前用户的隐私设置
+    const userSetting = await this.prisma.userSetting.findUnique({
+      where: { user_id: userId },
+    });
+    const allowCrossClan =
+      userSetting?.allow_cross_clan_friend_finding !== false;
+
+    // 收集候选照片 ID：指定的媒体 + 同年同地的家族照片
+    const targetMediaIds: bigint[] = [];
+    if (dto.media_id) {
+      targetMediaIds.push(BigInt(dto.media_id));
+    }
+
+    if (dto.taken_year || dto.taken_location) {
+      const where: any = { deleted_at: null };
+      if (dto.taken_year) where.taken_year = dto.taken_year;
+      if (dto.taken_location) {
+        where.taken_location = { contains: dto.taken_location };
+      }
+      const candidates = await this.prisma.mediaArchive.findMany({
+        where,
+        select: { id: true, taken_year: true, taken_location: true, file_url: true, thumb_url: true },
+        take: 200,
+      });
+      for (const c of candidates) targetMediaIds.push(c.id);
+    }
+
+    if (targetMediaIds.length === 0) {
+      throw new BadRequestException('请提供 media_id 或同时提供 taken_year/taken_location');
+    }
+
+    // 查找这些照片关联到的人物（不区分人物族属，先收集，再做隐私过滤）
+    // Person -> PersonUserLink -> User 间接关联
+    const personLinks = await this.prisma.mediaPersonLink.findMany({
+      where: { media_id: { in: targetMediaIds } },
+      include: {
+        person: {
+          select: {
+            id: true,
+            full_name: true,
+            clan_id: true,
+            user_links: {
+              select: {
+                user: {
+                  select: {
+                    id: true,
+                    nickname: true,
+                    avatar_url: true,
+                    birth_date: true,
+                    setting: {
+                      select: {
+                        allow_photo_find_me: true,
+                        allow_cross_clan_friend_finding: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        media: {
+          select: {
+            id: true,
+            file_url: true,
+            thumb_url: true,
+            taken_year: true,
+            taken_location: true,
+          },
+        },
+      },
+      take: 200,
+    });
+
+    const candidatesMap = new Map<string, any>();
+    for (const link of personLinks) {
+      for (const userLink of link.person.user_links ?? []) {
+        const linkedUser = userLink.user;
+        if (!linkedUser) continue;
+        if (linkedUser.id === userId) continue;
+        if (linkedUser.setting?.allow_photo_find_me === false) continue;
+        if (!allowCrossClan) {
+          if (linkedUser.setting?.allow_cross_clan_friend_finding === false) continue;
+        }
+        const userIdStr = String(linkedUser.id);
+        const existing = candidatesMap.get(userIdStr);
+        if (!existing) {
+          candidatesMap.set(userIdStr, {
+            matched_user: {
+              id: linkedUser.id,
+              nickname: linkedUser.nickname || link.person.full_name || '匿名用户',
+              avatar_url: linkedUser.avatar_url,
+              birth_date: linkedUser.birth_date,
+            },
+            shared_photos: [
+              {
+                media_id: link.media.id,
+                file_url: link.media.thumb_url || link.media.file_url,
+                taken_year: link.media.taken_year,
+                taken_location: link.media.taken_location,
+              },
+            ],
+            match_reasons: [`共同出现在照片 #${link.media.id} 中`],
+          });
+        } else {
+          if (!existing.shared_photos.find((p: any) => p.media_id === link.media.id)) {
+            existing.shared_photos.push({
+              media_id: link.media.id,
+              file_url: link.media.thumb_url || link.media.file_url,
+              taken_year: link.media.taken_year,
+              taken_location: link.media.taken_location,
+            });
+            existing.match_reasons.push(`共同出现在照片 #${link.media.id} 中`);
+          }
+        }
+      }
+    }
+
+    return Array.from(candidatesMap.values()).slice(0, 50);
+  }
+
+  /**
    * 获取我的匹配列表
    */
   async getMyMatches(userId: string, status?: string) {
@@ -514,6 +680,17 @@ export class BuddyService {
             id: true,
             nickname: true,
             avatar_url: true,
+          },
+        },
+        // 关联媒体表，方便前端展示缩略图
+        media: {
+          select: {
+            id: true,
+            file_url: true,
+            thumb_url: true,
+            taken_year: true,
+            taken_location: true,
+            description: true,
           },
         },
       },

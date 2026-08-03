@@ -1,18 +1,28 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Picture, Location, Refresh } from '@element-plus/icons-vue'
 import userApi from '@/api/user'
 import type { UserPhotoItem, Pagination } from '@/types'
 
 const loading = ref(false)
+const error = ref<string | null>(null)
 const photos = ref<UserPhotoItem[]>([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const filterYear = ref<number | undefined>(undefined)
 const filterClanId = ref<string>('')
+const filterTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
+// 简单防重：记一个递增的请求序号，回调时过期响应被丢弃
+let requestSeq = 0
 
 async function fetchPhotos() {
+  if (loading.value) return
+  const mySeq = ++requestSeq
   loading.value = true
+  error.value = null
   try {
     const res = (await userApi.photos.list({
       page: currentPage.value,
@@ -20,10 +30,30 @@ async function fetchPhotos() {
       taken_year: filterYear.value,
       clan_id: filterClanId.value || undefined,
     })) as unknown as Pagination<UserPhotoItem>
-    photos.value = res.data
+    if (mySeq !== requestSeq) return
+    // 去重：仅按 id 去重
+    const seen = new Set<string>()
+    const deduped = (res.data || []).filter((p) => {
+      const k = String(p.id)
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    // 切换分页时重置，筛选条件不变时增量追加
+    if (currentPage.value === 1) {
+      photos.value = deduped
+    } else {
+      const existing = new Set(photos.value.map((p) => String(p.id)))
+      photos.value = photos.value.concat(deduped.filter((p) => !existing.has(String(p.id))))
+    }
     total.value = res.pagination.total
+  } catch (err: any) {
+    if (mySeq !== requestSeq) return
+    error.value = err?.response?.data?.message || err?.message || '加载失败，请重试'
   } finally {
-    loading.value = false
+    if (mySeq === requestSeq) {
+      loading.value = false
+    }
   }
 }
 
@@ -45,6 +75,19 @@ function handleFilterReset() {
   fetchPhotos()
 }
 
+function handleRetry() {
+  fetchPhotos()
+}
+
+// 输入防抖：clan_id 输入时延迟 400ms 再请求
+function onClanIdInput() {
+  if (filterTimer.value) clearTimeout(filterTimer.value)
+  filterTimer.value = setTimeout(() => {
+    currentPage.value = 1
+    fetchPhotos()
+  }, 400)
+}
+
 const availableYears = computed(() => {
   const years = new Set<number>()
   photos.value.forEach((p) => {
@@ -53,7 +96,14 @@ const availableYears = computed(() => {
   return Array.from(years).sort((a, b) => b - a)
 })
 
+const reachedEnd = computed(() => photos.value.length >= total.value && total.value > 0)
+
 onMounted(fetchPhotos)
+onBeforeUnmount(() => {
+  if (filterTimer.value) clearTimeout(filterTimer.value)
+  // 取消未决请求序号：后续响应被丢弃
+  requestSeq++
+})
 </script>
 
 <template>
@@ -85,12 +135,31 @@ onMounted(fetchPhotos)
           clearable
           style="width: 200px; margin-left: 12px"
           @clear="fetchPhotos"
+          @input="onClanIdInput"
         />
         <ElButton style="margin-left: 12px" @click="handleFilterReset">
           重置
         </ElButton>
         <span class="meta">共 {{ total }} 张照片</span>
       </div>
+
+      <!-- 错误态 -->
+      <ElAlert
+        v-if="error"
+        :title="error"
+        type="error"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 12px"
+      >
+        <template #default>
+          <div>{{ error }}</div>
+          <ElButton size="small" type="primary" plain @click="handleRetry" style="margin-top: 8px">
+            <ElIcon><Refresh /></ElIcon>
+            重试
+          </ElButton>
+        </template>
+      </ElAlert>
 
       <!-- 照片网格 -->
       <div v-if="photos.length > 0" class="photo-grid">
@@ -146,6 +215,10 @@ onMounted(fetchPhotos)
         @current-change="handlePageChange"
         @size-change="handleSizeChange"
       />
+
+      <ElDivider v-if="reachedEnd && photos.length > 0">
+        <span class="end-marker">已显示全部 {{ total }} 张照片</span>
+      </ElDivider>
     </ElCard>
   </div>
 </template>
@@ -242,5 +315,10 @@ onMounted(fetchPhotos)
   margin-top: 24px;
   display: flex;
   justify-content: flex-end;
+}
+
+.end-marker {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

@@ -10,13 +10,28 @@
         </div>
       </template>
       <el-form :inline="true">
-        <el-form-item label="家族 ID">
-          <el-input v-model="form.clanId" placeholder="默认 1" style="width: 160px;" />
+        <el-form-item label="家族">
+          <el-select
+            v-model="form.clanId"
+            placeholder="请选择家族"
+            style="width: 240px;"
+            :disabled="clanOptions.length === 0"
+          >
+            <el-option
+              v-for="opt in clanOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="generating" @click="onGenerate">生成</el-button>
+          <el-button type="primary" :loading="generating" :disabled="!form.clanId" @click="onGenerate">生成</el-button>
         </el-form-item>
       </el-form>
+      <p v-if="clanOptions.length === 0" class="tip" style="margin-top: 8px;">
+        您尚未加入任何家族，无法生成邀请码。
+      </p>
     </el-card>
 
     <el-card v-if="current" style="margin-top: 16px;">
@@ -64,16 +79,39 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
+import { useUserCenterStore } from '@/stores/userCenter'
 
-const form = ref({ clanId: '1' })
+const userStore = useUserCenterStore()
+
+const form = ref({ clanId: '' })
 const generating = ref(false)
 const current = ref<any>(null)
 const list = ref<any[]>([])
 const loading = ref(false)
+
+// 从 userStore.profile.families 读取所有加入的家族（slug 作为表单值，兼容后端 clan_slug 校验）
+const clanOptions = computed<Array<{ label: string; value: string }>>(() => {
+  const families = userStore.profile?.families || []
+  // 优先 primary_clan，再按 families 顺序补充
+  const primary = userStore.profile?.primary_clan
+  const seen = new Set<string>()
+  const result: Array<{ label: string; value: string }> = []
+  if (primary && primary.slug) {
+    seen.add(primary.slug)
+    result.push({ label: `${primary.name}（主家族）`, value: primary.slug })
+  }
+  for (const f of families) {
+    if (f.slug && !seen.has(f.slug)) {
+      seen.add(f.slug)
+      result.push({ label: f.name, value: f.slug })
+    }
+  }
+  return result
+})
 
 const formatDate = (d: string) => (d ? new Date(d).toLocaleString() : '—')
 const statusLabel = (s: string) => ({ ACTIVE: '有效', EXPIRED: '已过期', REVOKED: '已撤销' }[s] || s)
@@ -83,11 +121,13 @@ const onGenerate = async () => {
   try {
     generating.value = true
     const res = await axios.post('/api/invite/peer-qrcode', {
-      clan_id: form.value.clanId,
+      clan_slug: form.value.clanId,
     })
-    const data: any = res.data
+    const data: any = res.data?.data || res.data || {}
     try {
-      data.qrcode_data_url = await QRCode.toDataURL(data.url, { width: 480, margin: 1 })
+      if (data.url) {
+        data.qrcode_data_url = await QRCode.toDataURL(data.url, { width: 480, margin: 1 })
+      }
     } catch {}
     current.value = data
     ElMessage.success('已生成')
@@ -117,7 +157,17 @@ const fetchList = async () => {
   }
 }
 
-onMounted(fetchList)
+onMounted(async () => {
+  // 先拉取用户资料，确保 families 已加载
+  if (!userStore.profile) {
+    await userStore.fetchProfile()
+  }
+  // 设置默认 clanId 为主家族的 slug
+  if (!form.value.clanId && clanOptions.value.length > 0) {
+    form.value.clanId = clanOptions.value[0].value
+  }
+  await fetchList()
+})
 </script>
 
 <style scoped>

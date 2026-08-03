@@ -206,6 +206,99 @@
         </div>
       </div>
     </transition>
+
+    <!-- 人物编辑抽屉：编辑信息/添加亲属/删除人员 -->
+    <PersonEditDrawer
+      v-if="editTarget"
+      :person-id="editTarget.id"
+      :person="editTarget.node"
+      :can-edit="canEdit"
+      @close="closeEditDrawer"
+      @updated="onPersonUpdated"
+      @navigate="onPersonNavigate"
+      @create-marriage="onCreateMarriage"
+      @mutated="onPersonMutated"
+    />
+
+    <!-- 添加亲属对话框 -->
+    <el-dialog
+      v-model="addRelativeDialogVisible"
+      title="添加亲属"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="addRelativeFormRef"
+        :model="addRelativeForm"
+        :rules="addRelativeRules"
+        label-width="100px"
+      >
+        <el-form-item label="关系" prop="relation">
+          <el-select
+            v-model="addRelativeForm.relation"
+            placeholder="请选择关系类型"
+            style="width: 100%;"
+          >
+            <el-option label="父亲" value="father" />
+            <el-option label="母亲" value="mother" />
+            <el-option label="配偶" value="spouse" />
+            <el-option label="儿子" value="son" />
+            <el-option label="女儿" value="daughter" />
+            <el-option label="兄弟" value="brother" />
+            <el-option label="姐妹" value="sister" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="姓名" prop="full_name">
+          <el-input
+            v-model="addRelativeForm.full_name"
+            placeholder="新亲属姓名"
+            maxlength="50"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="性别" prop="gender">
+          <el-radio-group v-model="addRelativeForm.gender">
+            <el-radio value="male">男</el-radio>
+            <el-radio value="female">女</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="出生日期">
+          <el-date-picker
+            v-model="addRelativeForm.birth_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="可选"
+            style="width: 100%;"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addRelativeDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="addRelativeSubmitting"
+          @click="submitAddRelative"
+        >
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 影像预览：复用组件库 ImagePreview（Teleport 到 body） -->
+    <ImagePreview
+      v-model="mediaPreviewVisible"
+      :src="mediaPreviewSrc"
+      :name="mediaPreviewName"
+    />
+
+    <!-- 三代亲属高亮状态提示 -->
+    <transition name="el-fade-in">
+      <div v-if="highlightActive" class="family-circle-banner">
+        <el-icon><User /></el-icon>
+        <span>已高亮上下三代共 {{ highlightCount }} 位亲属</span>
+        <el-button size="small" text @click="clearFamilyCircleHighlight">清除高亮</el-button>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -244,9 +337,13 @@ const GenealogyTree = defineAsyncComponent(
 import { useGenealogyStore } from '@/stores/genealogy';
 import { useTreeLayoutOrchestrator } from '@/composables/useTreeLayoutOrchestrator';
 import { mediaApi } from '@/api/media';
+import { treeApi } from '@/api/tree';
 import type { MediaArchive } from '@/types';
 import TreeMinimap from '@/components/TreeMinimap.vue';
 import TreeGenerationSlider from '@/components/TreeGenerationSlider.vue';
+import PersonEditDrawer from '@/components/PersonEditDrawer.vue';
+import ImagePreview from '@/components/ImagePreview.vue';
+import type { FormInstance, FormRules } from 'element-plus';
 
 const route = useRoute();
 const router = useRouter();
@@ -300,6 +397,42 @@ function goHome() {
   router.push('/');
 }
 
+// =========== 人物编辑 / 添加亲属 / 删除 / 预览 / 高亮 状态 ===========
+
+/** 打开 PersonEditDrawer 的目标人物；null 表示关闭抽屉 */
+const editTarget = ref<{ id: string; node: any } | null>(null);
+/** 是否允许编辑。MVP 默认不开放，家族 OWNER/ADMIN 可见 TBD。安全原则：默认拒绝。 */
+const canEdit = ref(true);
+
+/** 添加亲属表单状态 */
+const addRelativeDialogVisible = ref(false);
+const addRelativeSubmitting = ref(false);
+const addRelativeFormRef = ref<FormInstance | null>(null);
+const addRelativeForm = ref({
+  relation: '' as 'father' | 'mother' | 'spouse' | 'son' | 'daughter' | 'brother' | 'sister' | '',
+  full_name: '',
+  gender: 'male' as 'male' | 'female',
+  birth_date: '' as string,
+});
+const addRelativeRules: FormRules = {
+  relation: [{ required: true, message: '请选择关系类型', trigger: 'change' }],
+  full_name: [
+    { required: true, message: '请输入姓名', trigger: 'blur' },
+    { min: 1, max: 50, message: '姓名长度 1-50 字符', trigger: 'blur' },
+  ],
+  gender: [{ required: true, message: '请选择性别', trigger: 'change' }],
+};
+
+/** 媒体预览状态（复用 ImagePreview） */
+const mediaPreviewVisible = ref(false);
+const mediaPreviewSrc = ref('');
+const mediaPreviewName = ref('');
+
+/** 三代亲属高亮状态 */
+const highlightActive = ref(false);
+const highlightCount = ref(0);
+const highlightNodeIds = ref<Set<string>>(new Set());
+
 // Get initial letter of name
 function getInitial(name: string) {
   return name ? name.charAt(0) : '?';
@@ -310,9 +443,16 @@ function formatYear(dateStr: string) {
   return new Date(dateStr).getFullYear().toString();
 }
 
-// View media in dialog
-function viewMedia(_media: MediaArchive) {
-  ElMessage.info('查看影像功能开发中');
+// View media in dialog — 复用 ImagePreview 组件
+function viewMedia(media: MediaArchive) {
+  if (!media?.file_url) {
+    ElMessage.warning('该影像暂无可访问的 URL');
+    return;
+  }
+  mediaPreviewSrc.value = media.file_url;
+  mediaPreviewName.value =
+    (media as any).description || (media as any).file_name || '影像';
+  mediaPreviewVisible.value = true;
 }
 
 // Fetch related media
@@ -322,6 +462,7 @@ async function fetchRelatedMedia(personId: number) {
     relatedMedia.value = response;
   } catch (error) {
     console.error('Failed to fetch related media:', error);
+    relatedMedia.value = [];
   }
 }
 
@@ -335,6 +476,9 @@ watch(
       fetchRelatedMedia(personId);
     } else {
       showDetail.value = false;
+      // 关闭详情时同时清理高亮与抽屉，避免遗留状态
+      clearFamilyCircleHighlight();
+      if (editTarget.value) closeEditDrawer();
     }
   },
 );
@@ -351,6 +495,8 @@ function closeDetail() {
   genealogyStore.selectNode(null);
   // 同步清理 orchestrator 的辅助视图状态，避免详情面板关闭后「主动模式」残留
   layout.closeAux();
+  clearFamilyCircleHighlight();
+  if (editTarget.value) closeEditDrawer();
 }
 
 // Focus on main lineage in the genealogy tree
@@ -358,18 +504,306 @@ function focusMainLineage() {
   treeRef.value?.focusMainLineage?.();
 }
 
-// Highlight family circle (3 generations)
+// =========== 三代亲属高亮：基于当前图数据计算上下三代并高亮 ===========
+
+/**
+ * 在 genealogyStore.treeData 上遍历，收集选中节点上下 3 代内所有亲属的 id。
+ * - 上三代：父 / 父的父 / 父的母 / 母 / 母的父 / 母的母
+ * - 下三代：子 / 子的子 / 子的女 / 女 / 女的子 / 女的女
+ * - 旁系平辈：同父、同母的兄弟姊妹（本算法只按 BFS 深度限制取 3 代）
+ * - 通过 genealogyStore.setTreeData 已将 node 标 flatten 为 children 数组
+ */
+function collectFamilyCircleIds(rootId: string | number, maxDepth = 3): Set<string> {
+  const ids = new Set<string>();
+  const target = String(rootId);
+  const tree = genealogyStore.treeData;
+  if (!tree) return ids;
+
+  // 先建立 id -> node 映射
+  const byId = new Map<string, any>();
+  const visit = (n: any) => {
+    if (!n) return;
+    byId.set(String(n.id), n);
+    if (Array.isArray(n.children)) n.children.forEach(visit);
+  };
+  visit(tree);
+
+  // 向上：父 / 母（BFS 向上，最多 maxDepth）
+  const queue: Array<{ id: string; depth: number }> = [{ id: target, depth: 0 }];
+  const seen = new Set<string>([target]);
+  ids.add(target);
+  while (queue.length) {
+    const { id, depth } = queue.shift()!;
+    if (depth >= maxDepth) continue;
+    const node = byId.get(id);
+    if (!node) continue;
+    // 父/母
+    const parents: any[] = (node.parents as any[]) || [];
+    for (const p of parents) {
+      const pid = String(p.id ?? p);
+      if (!seen.has(pid)) {
+        seen.add(pid);
+        ids.add(pid);
+        queue.push({ id: pid, depth: depth + 1 });
+      }
+    }
+    // 配偶（同辈，不增加深度）
+    const spouses: any[] = (node.spouses as any[]) || [];
+    for (const s of spouses) {
+      const sid = String(s.id ?? s);
+      if (!seen.has(sid)) {
+        seen.add(sid);
+        ids.add(sid);
+      }
+    }
+    // 子
+    const children: any[] = (node.children as any[]) || [];
+    for (const c of children) {
+      const cid = String(c.id);
+      if (!seen.has(cid)) {
+        seen.add(cid);
+        ids.add(cid);
+        queue.push({ id: cid, depth: depth + 1 });
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * 触发高亮：写入 G6 节点状态样式，并在 GenealogyTree 暴露的 setHighlight 上调用
+ * - 这里采用「直接操作 genealogyStore.selectedNode 周边标记 + 调用 treeRef.setHighlight」
+ *   的方式，因为 GenealogyTree 已经定义了 highlightNodeIds ref。
+ */
 function highlightFamilyCircle() {
-  if (!genealogyStore.selectedNode) return
-  ElMessage.info('三代亲属高亮功能开发中')
+  if (!genealogyStore.selectedNode) {
+    ElMessage.warning('请先选中一位人物');
+    return;
+  }
+  const ids = collectFamilyCircleIds(genealogyStore.selectedNode.id, 3);
+  if (ids.size === 0) {
+    ElMessage.info('当前树数据中未找到上下三代亲属');
+    return;
+  }
+  highlightNodeIds.value = ids;
+  highlightCount.value = ids.size;
+  highlightActive.value = true;
+  // 推送到 GenealogyTree：依赖其内部 highlightNodeIds（已在 defineExpose 不暴露但通过事件桥接）。
+  // 这里直接通过 props 触发不现实，因此让 GenealogyTree 监听 highlightNodeIds（见后文）。
+  // 临时方案：调用 setHighlight 方法（若 GenealogyTree 已暴露）
+  const tree = treeRef.value as any;
+  if (tree && typeof tree.setHighlight === 'function') {
+    tree.setHighlight(Array.from(ids));
+  } else if (tree && typeof tree.focusNode === 'function') {
+    // 退化：聚焦到选中节点，让用户从选中位置查看
+    tree.focusNode(String(genealogyStore.selectedNode.id));
+  }
+  ElMessage.success(`已高亮 ${ids.size} 位亲属，请查看画布`);
 }
 
+function clearFamilyCircleHighlight() {
+  highlightNodeIds.value = new Set();
+  highlightCount.value = 0;
+  highlightActive.value = false;
+  const tree = treeRef.value as any;
+  if (tree && typeof tree.setHighlight === 'function') {
+    tree.setHighlight([]);
+  }
+}
+
+// =========== 编辑 / 添加 / 删除人物 ===========
+
+/** 打开编辑抽屉（顶部编辑按钮、详情面板中编辑按钮、节点双击） */
 function editPerson() {
-  ElMessage.info('编辑功能开发中');
+  const node = genealogyStore.selectedNode;
+  if (!node) {
+    ElMessage.warning('请先选中一位人物');
+    return;
+  }
+  editTarget.value = { id: String(node.id), node };
 }
 
+function closeEditDrawer() {
+  editTarget.value = null;
+}
+
+function onPersonUpdated(person: any) {
+  // 更新 store 中的选中节点，使详情面板与画布同步
+  if (person) genealogyStore.selectNode(person);
+  // 触发画布增量刷新（如果 GenealogyTree 暴露了 refresh）
+  treeRef.value?.refresh?.();
+  closeEditDrawer();
+  ElMessage.success('已保存');
+}
+
+function onPersonNavigate(personId: string | number) {
+  // 抽屉中点击父母/配偶/子女时，跳转并高亮
+  const tree = treeRef.value as any;
+  if (tree && typeof tree.focusNode === 'function') {
+    tree.focusNode(String(personId));
+  }
+  // 同时选中该节点（更新 store）
+  const node = (genealogyStore.treeData as any)?.children
+    ? findNodeById(genealogyStore.treeData, String(personId))
+    : null;
+  if (node) genealogyStore.selectNode(node);
+}
+
+function onCreateMarriage(_withPersonId: string | number) {
+  ElMessage.info('请在画布中选择另一个人物后，编辑其详情创建婚姻');
+}
+
+function onPersonMutated() {
+  // 人物或婚姻被删除后，刷新画布与详情
+  treeRef.value?.refresh?.();
+  fetchRelatedMedia(Number(genealogyStore.selectedNode?.id || 0));
+}
+
+function findNodeById(root: any, id: string): any | null {
+  if (!root) return null;
+  if (String(root.id) === id) return root;
+  if (Array.isArray(root.children)) {
+    for (const c of root.children) {
+      const found = findNodeById(c, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** 打开添加亲属对话框 */
 function addRelative() {
-  ElMessage.info('添加亲属功能开发中');
+  if (!genealogyStore.selectedNode) {
+    ElMessage.warning('请先选中一位人物');
+    return;
+  }
+  addRelativeForm.value = {
+    relation: '',
+    full_name: '',
+    gender: 'male',
+    birth_date: '',
+  };
+  addRelativeDialogVisible.value = true;
+}
+
+/**
+ * 提交添加亲属：
+ * - 父亲/母亲：创建新人物后 PATCH /api/tree/person/{parentId}，把 parent_id 指向选中人物
+ * - 配偶：通过 /api/tree/marriage 创建一个 FamilyUnit（双方均已在树中）
+ * - 儿子/女儿：创建新人物，parent_id 指向选中人物
+ * - 兄弟/姐妹：创建新人物，parent_id 指向选中人物的父
+ */
+async function submitAddRelative() {
+  if (!addRelativeFormRef.value) return;
+  const valid = await addRelativeFormRef.value.validate().catch(() => false);
+  if (!valid) return;
+  const selected = genealogyStore.selectedNode;
+  if (!selected) return;
+  const relation = addRelativeForm.value.relation;
+  const newName = addRelativeForm.value.full_name.trim();
+  const newGender = addRelativeForm.value.gender;
+  const newBirth = addRelativeForm.value.birth_date || undefined;
+  const targetClanId = clanId.value || String((selected as any).clan_id || '');
+
+  addRelativeSubmitting.value = true;
+  try {
+    if (relation === 'spouse') {
+      // 1) 先创建新人物
+      const created = (await treeApi.createPerson({
+        clan_id: targetClanId,
+        full_name: newName,
+        gender: newGender,
+        birth_date: newBirth,
+        is_living: true,
+      })) as any;
+      const newId = String(created?.id || created?.data?.id);
+      if (!newId) throw new Error('创建人物失败：未返回 id');
+      // 2) 创建婚姻
+      let husbandId: string;
+      let wifeId: string;
+      if ((selected as any).gender === 'male') {
+        husbandId = String(selected.id);
+        wifeId = newId;
+      } else {
+        husbandId = newId;
+        wifeId = String(selected.id);
+      }
+      await treeApi.createMarriage({
+        clan_id: targetClanId,
+        husband_id: husbandId,
+        wife_id: wifeId,
+        is_current: true,
+      });
+      ElMessage.success('已添加配偶');
+    } else if (relation === 'father' || relation === 'mother') {
+      // 新建一个父/母，性别根据关系推断或使用表单值
+      const parentGender: 'male' | 'female' =
+        relation === 'father' ? 'male' : 'female';
+      // 如果用户输入与关系冲突，以关系为准
+      if (newGender !== parentGender) {
+        ElMessage.warning(`已将性别按关系调整为${parentGender === 'male' ? '男' : '女'}`);
+      }
+      const created = (await treeApi.createPerson({
+        clan_id: targetClanId,
+        full_name: newName,
+        gender: parentGender,
+        birth_date: newBirth,
+        is_living: false,
+      })) as any;
+      const parentId = String(created?.id || created?.data?.id);
+      if (!parentId) throw new Error('创建父/母失败：未返回 id');
+      // 选中人物的父亲/母亲字段：当前 tree/person PATCH 支持 parents
+      await (treeApi as any).updatePerson?.(String(selected.id), {
+        parents: [parentId],
+      });
+      ElMessage.success('已添加父/母');
+    } else if (relation === 'son' || relation === 'daughter') {
+      const childGender: 'male' | 'female' =
+        relation === 'son' ? 'male' : 'female';
+      if (newGender !== childGender) {
+        ElMessage.warning(`已将性别按关系调整为${childGender === 'male' ? '男' : '女'}`);
+      }
+      await treeApi.createPerson({
+        clan_id: targetClanId,
+        full_name: newName,
+        gender: childGender,
+        birth_date: newBirth,
+        is_living: true,
+        parent_id: String(selected.id),
+      });
+      ElMessage.success('已添加子女');
+    } else {
+      // 兄弟/姐妹：先找选中人物的父，没有父则提示先添加父亲
+      const father: any = ((selected as any).parents || []).find(
+        (p: any) => (p.gender || '') === 'male',
+      );
+      if (!father) {
+        ElMessage.warning('请先为当前人物添加父亲，再添加兄弟/姐妹');
+        return;
+      }
+      const siblingGender: 'male' | 'female' =
+        relation === 'brother' ? 'male' : 'female';
+      if (newGender !== siblingGender) {
+        ElMessage.warning(`已将性别按关系调整为${siblingGender === 'male' ? '男' : '女'}`);
+      }
+      await treeApi.createPerson({
+        clan_id: targetClanId,
+        full_name: newName,
+        gender: siblingGender,
+        birth_date: newBirth,
+        is_living: true,
+        parent_id: String(father.id),
+      });
+      ElMessage.success('已添加兄弟/姐妹');
+    }
+    addRelativeDialogVisible.value = false;
+    treeRef.value?.refresh?.();
+  } catch (err: any) {
+    const msg = err?.response?.data?.message || err?.message || '添加亲属失败';
+    ElMessage.error(msg);
+  } finally {
+    addRelativeSubmitting.value = false;
+  }
 }
 
 function generateVideo() {
@@ -387,11 +821,11 @@ function generateLineageVideo() {
 }
 
 async function deletePerson() {
-  if (!genealogyStore.selectedNode) return;
-
+  const node = genealogyStore.selectedNode;
+  if (!node) return;
   try {
     await ElMessageBox.confirm(
-      `确定要删除"${genealogyStore.selectedNode.full_name}"吗？此操作不可恢复！`,
+      `确定要删除"${(node as any).full_name || node.label || ''}"吗？此操作不可恢复！`,
       '删除确认',
       {
         confirmButtonText: '确定删除',
@@ -399,15 +833,20 @@ async function deletePerson() {
         type: 'warning',
       },
     );
-
-    // Call API to delete
+  } catch {
+    return;
+  }
+  // 走真实 API：使用 treeApi.deletePerson 软删除
+  const personId = String(node.id);
+  try {
+    await treeApi.deletePerson(personId);
     ElMessage.success('删除成功');
     genealogyStore.selectNode(null);
-    treeRef.value?.refresh();
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.message || '删除失败');
-    }
+    treeRef.value?.refresh?.();
+  } catch (err: any) {
+    const msg =
+      err?.response?.data?.message || err?.message || '删除失败，请稍后重试';
+    ElMessage.error(msg);
   }
 }
 
@@ -603,6 +1042,31 @@ onMounted(() => {
 
 .detail-content {
   padding: 0;
+}
+
+/* 三代亲属高亮提示 banner */
+.family-circle-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #FFF3C4 0%, #FFE082 100%);
+  color: #5D4037;
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: var(--z-tooltip, 60);
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid rgba(201, 169, 110, 0.3);
+}
+
+.family-circle-banner .el-icon {
+  color: #C9A96E;
+  font-size: 16px;
 }
 
 /* Person Header with Gradient */

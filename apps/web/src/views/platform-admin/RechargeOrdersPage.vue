@@ -1,7 +1,13 @@
 ﻿<script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
+import { useCapabilityStore } from '@/stores/capability'
+
+const capabilityStore = useCapabilityStore()
+const rechargeAvailable = computed(() => capabilityStore.isAvailable('sms_recharge'))
+const rechargeReason = computed(() => capabilityStore.reasonOf('sms_recharge'))
 
 const loading = ref(false)
 const items = ref<any[]>([])
@@ -60,13 +66,27 @@ const handleExport = async () => {
 
 const statusType = (s: string) => (s === 'SUCCESS' ? 'success' : s === 'FAILED' ? 'danger' : 'warning')
 
-onMounted(() => {
-  fetchList()
+onMounted(async () => {
+  await capabilityStore.refresh()
+  await fetchList()
 })
 </script>
 
 <template>
   <div class="recharge-page">
+    <ElAlert
+      v-if="!rechargeAvailable"
+      :title="`充值与支付能力暂未配置：${rechargeReason}`"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #default>
+        <div>{{ rechargeReason }}</div>
+        <div class="muted">在此期间，订单历史仍可正常查询，但不会产生新的支付回调或自动入账。</div>
+      </template>
+    </ElAlert>
     <ElCard shadow="hover">
       <template #header>
         <div class="page-header">
@@ -155,5 +175,11 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+.muted {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 4px;
 }
 </style>

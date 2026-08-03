@@ -331,9 +331,67 @@ function handleViewTree() {
   router.push(`/tree/${clanStore.currentClan.id}`);
 }
 
-// 下载模板
-function handleDownloadTemplate() {
-  ElMessage.info('模板下载功能开发中...');
+// 下载模板（生成与字段映射一致的 UTF-8/Excel 模板）
+async function handleDownloadTemplate() {
+  const XLSX = await import('xlsx');
+
+  // 表头：与 mappingTableData 中的 field 列保持一一对应
+  const headers = mappingTableData.map((m) => m.systemField.replace(/\s*\*\s*$/, ''));
+  // 字段键（避免表头出现「姓名 *」等符号，便于程序再读入）
+  const headerRow = ['full_name', 'gender', 'birth_date', 'death_date', 'is_living', 'parent_name', 'spouse_name', 'generation', 'description'];
+  // 示例行：完全使用可解析的格式
+  const sampleRows = [
+    {
+      full_name: '张明远',
+      gender: 'male',
+      birth_date: '1920-05-12',
+      death_date: '1998-03-04',
+      is_living: 'false',
+      parent_name: '张德海',
+      spouse_name: '李秀英',
+      generation: '明',
+      description: '示例行：请将真实数据覆盖示例后上传',
+    },
+    {
+      full_name: '李秀英',
+      gender: 'female',
+      birth_date: '1925-08-21',
+      death_date: '',
+      is_living: 'false',
+      parent_name: '',
+      spouse_name: '张明远',
+      generation: '',
+      description: '示例行：配偶姓名需与另一行完全一致才会建立夫妻关系',
+    },
+  ];
+
+  // 第二行写「字段说明」，帮助用户理解
+  const fieldDescriptions = mappingTableData.map((m) => m.description);
+
+  const aoa: any[][] = [];
+  aoa.push(headerRow);
+  aoa.push(fieldDescriptions);
+  for (const r of sampleRows) aoa.push(headerRow.map((h) => r[h as keyof typeof r] ?? ''));
+
+  const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+  // 设置列宽
+  worksheet['!cols'] = headerRow.map(() => ({ wch: 22 }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, '族谱导入模板');
+
+  const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'geneasphere-import-template.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  ElMessage.success('模板已下载，请按格式填写后重新上传');
 }
 
 // 返回

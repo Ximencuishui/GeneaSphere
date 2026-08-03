@@ -1,0 +1,32 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e8]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - heading "登录寻根路" [level=2] [ref=e12]
+        - paragraph [ref=e13]: 管理您的家族数字化档案
+      - generic [ref=e14]:
+        - tablist [ref=e18]:
+          - tab "密码登录" [selected] [ref=e20]
+          - tab "短信登录" [ref=e21]
+        - tabpanel "密码登录" [ref=e23]:
+          - generic [ref=e24]:
+            - textbox "手机号" [ref=e29]
+            - textbox "密码" [ref=e34]
+            - button "登录" [ref=e37] [cursor=pointer]
+      - generic [ref=e39]: 或
+      - generic [ref=e41]:
+        - button "▶ 一键体验族谱管理演示" [ref=e44] [cursor=pointer]:
+          - generic [ref=e45]:
+            - generic [ref=e46]: ▶
+            - text: 一键体验族谱管理演示
+        - button "● 一键体验族员个人页面" [ref=e49] [cursor=pointer]:
+          - generic [ref=e50]:
+            - generic [ref=e51]: ●
+            - text: 一键体验族员个人页面
+      - button "还没有账号？立即注册" [ref=e54] [cursor=pointer]
+      - button "← 返回首页" [ref=e58] [cursor=pointer]
+    - button "🔇 背景音乐" [ref=e4] [cursor=pointer]:
+      - generic [ref=e5]: 🔇
+      - generic [ref=e6]: 背景音乐
+  - alert [ref=e60]:
+    - paragraph [ref=e64]: 欢迎体验族谱管理后台！

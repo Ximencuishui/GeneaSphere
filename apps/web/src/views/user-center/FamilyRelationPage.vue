@@ -196,6 +196,21 @@ async function submitMarriage() {
 }
 
 async function submitSpouse() {
+  // 客户端校验：必填字段检查
+  if (!spouseForm.action) {
+    ElMessage.warning('请选择操作类型')
+    return
+  }
+  if (spouseForm.action !== 'remove') {
+    if (!spouseForm.spouse_name?.trim()) {
+      ElMessage.warning('请输入配偶姓名')
+      return
+    }
+    if (!spouseForm.gender) {
+      ElMessage.warning('请选择配偶性别')
+      return
+    }
+  }
   const persons = await userStore.fetchMyPerson()
   const personId = userStore.linkedPersons[0]?.person_id
   if (!personId) {
@@ -207,7 +222,7 @@ async function submitSpouse() {
       person_id: personId,
       action: spouseForm.action,
       new_spouse: spouseForm.action !== 'remove' ? {
-        full_name: spouseForm.spouse_name,
+        full_name: spouseForm.spouse_name.trim(),
         gender: spouseForm.gender,
         is_external: true,
       } : undefined,

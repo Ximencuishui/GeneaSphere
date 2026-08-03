@@ -168,12 +168,20 @@ export class UserController {
     return this.userService.getOrderDetail(req.user.userId, orderId);
   }
 
-  // ==================== 工具箱 / 小组 / 音像墙 (mock) ====================
+  // ==================== 工具箱 / 小组 / 音像墙（真实数据）====================
 
   @Get('tool-history')
-  @ApiOperation({ summary: 'AI 工具箱历史' })
-  async listToolHistory(@Request() req) {
-    return this.userService.listToolHistory(req.user.userId);
+  @ApiOperation({ summary: 'AI 工具箱历史（按时间倒序）' })
+  async listToolHistory(
+    @Request() req,
+    @Query('page') pageStr = '1',
+    @Query('pageSize') pageSizeStr = '20',
+  ) {
+    return this.userService.listToolHistory(
+      req.user.userId,
+      parseInt(pageStr) || 1,
+      parseInt(pageSizeStr) || 20,
+    );
   }
 
   @Get('groups')
@@ -184,8 +192,16 @@ export class UserController {
 
   @Get('videos')
   @ApiOperation({ summary: '我的音像墙视频' })
-  async listVideos(@Request() req) {
-    return this.userService.listUserVideos(req.user.userId);
+  async listVideos(
+    @Request() req,
+    @Query('page') pageStr = '1',
+    @Query('pageSize') pageSizeStr = '20',
+  ) {
+    return this.userService.listUserVideos(
+      req.user.userId,
+      parseInt(pageStr) || 1,
+      parseInt(pageSizeStr) || 20,
+    );
   }
 
   // ==================== 设置 ====================

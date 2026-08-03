@@ -1,0 +1,77 @@
+- generic [active] [ref=f20e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f20e3]:
+    - generic [ref=f20e5]:
+      - complementary [ref=f20e6]:
+        - generic [ref=f20e12]:
+          - generic [ref=f20e13]: "13800000001"
+          - generic "尚未加入家族" [ref=f20e14]
+        - menubar [ref=f20e15]:
+          - menuitem "个人管理" [expanded] [ref=f20e16]:
+            - menu [ref=f20e25]:
+              - menuitem "个人资料" [ref=f20e26] [cursor=pointer]
+              - menuitem "我的家族" [ref=f20e31] [cursor=pointer]
+              - menuitem "家庭关系" [ref=f20e38] [cursor=pointer]
+          - menuitem "验证管理" [ref=f20e44]
+          - menuitem "内容管理" [ref=f20e54]
+          - menuitem "工具中心" [ref=f20e63]
+        - button "设置" [ref=f20e73] [cursor=pointer]
+      - generic [ref=f20e79]:
+        - banner [ref=f20e80]:
+          - navigation "面包屑" [ref=f20e82]:
+            - generic [ref=f20e83]:
+              - link [ref=f20e84]
+              - text: /
+            - generic [ref=f20e88]:
+              - link "用户中心" [ref=f20e89]
+              - text: /
+            - link "我的家族" [ref=f20e91]
+          - generic [ref=f20e92]:
+            - button [ref=f20e94] [cursor=pointer]
+            - button "13800000001" [ref=f20e97] [cursor=pointer]
+        - main [ref=f20e103]:
+          - generic [ref=f20e105]:
+            - generic [ref=f20e107]:
+              - generic [ref=f20e108]:
+                - heading "正在加载用户中心" [level=3] [ref=f20e109]
+                - generic [ref=f20e113]: 0%
+              - paragraph [ref=f20e114]: 加载用户资料 · 头像/昵称/家族/角色
+            - generic [ref=f20e115]:
+              - generic [ref=f20e120]:
+                - generic [ref=f20e121]: 加载用户资料
+                - generic [ref=f20e122]: 头像/昵称/家族/角色
+              - generic [ref=f20e123]:
+                - generic [ref=f20e124]: "2"
+                - generic [ref=f20e126]:
+                  - generic [ref=f20e127]: 加载设置与通知
+                  - generic [ref=f20e128]: 个人偏好 + 未读数
+              - generic [ref=f20e129]:
+                - generic [ref=f20e130]: "3"
+                - generic [ref=f20e132]:
+                  - generic [ref=f20e133]: 渲染子页面
+                  - generic [ref=f20e134]: 提交首帧 DOM
+              - generic [ref=f20e135]:
+                - generic [ref=f20e136]: "4"
+                - generic [ref=f20e138]:
+                  - generic [ref=f20e139]: 完成加载
+                  - generic [ref=f20e140]: 准备就绪
+            - generic [ref=f20e141]:
+              - generic [ref=f20e142]:
+                - generic [ref=f20e143]: 实时日志
+                - generic [ref=f20e144]: 2 条
+              - generic [ref=f20e145]:
+                - generic [ref=f20e146]:
+                  - generic [ref=f20e147]: 16:09:37
+                  - generic [ref=f20e148]: "[加载用户资料]"
+                  - generic [ref=f20e149]: 开始加载用户中心
+                - generic [ref=f20e150]:
+                  - generic [ref=f20e151]: 16:09:37
+                  - generic [ref=f20e152]: "[加载用户资料]"
+                  - generic [ref=f20e153]: 调用 /api/user/profile
+    - button "🔇 背景音乐" [ref=f20e156] [cursor=pointer]:
+      - generic [ref=f20e157]: 🔇
+      - generic [ref=f20e158]: 背景音乐

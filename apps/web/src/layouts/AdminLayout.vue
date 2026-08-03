@@ -107,7 +107,7 @@ const menuItems = computed(() => [
     title: '概况',
     icon: 'Monitor',
     children: [
-      { title: '控制面板', path: `/zupu/${clanSlug.value}/dashboard` },
+      { title: '控制面板', path: `/zupu/${clanSlug.value}` },
       { title: '族谱树', path: `/tree/${clanSlug.value}` },
     ],
   },

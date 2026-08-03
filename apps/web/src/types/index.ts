@@ -278,6 +278,7 @@ export type UserRoleInClan = 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
 export interface UserClanBrief {
   id: string;
   name: string;
+  slug?: string | null;
   description?: string | null;
   role: UserRoleInClan;
   joined_at?: string;
@@ -295,6 +296,7 @@ export interface UserStats {
 export interface UserPrimaryClan {
   id: string;
   name: string;
+  slug?: string | null;
   description?: string | null;
   role: UserRoleInClan;
 }

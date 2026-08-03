@@ -1,0 +1,97 @@
+{
+  "timestamp": "2026-08-02T14:02:23.137Z",
+  "base": "http://127.0.0.1:3101",
+  "phases": [
+    {
+      "name": "health-baseline-5x200",
+      "concurrency": 5,
+      "total": 200,
+      "durationMs": 223,
+      "rps": 896.9,
+      "avgMs": 5.33,
+      "p50Ms": 4.09,
+      "p95Ms": 13.86,
+      "p99Ms": 18.35,
+      "maxMs": 20.35,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "health-burst-50x100",
+      "concurrency": 50,
+      "total": 100,
+      "durationMs": 90,
+      "rps": 1111.1,
+      "avgMs": 40.51,
+      "p50Ms": 38.73,
+      "p95Ms": 67.46,
+      "p99Ms": 69.49,
+      "maxMs": 70.02,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "statistics-5x100",
+      "concurrency": 5,
+      "total": 100,
+      "durationMs": 30559,
+      "rps": 3.3,
+      "avgMs": 1500.06,
+      "p50Ms": 1443.35,
+      "p95Ms": 2069.13,
+      "p99Ms": 2264.19,
+      "maxMs": 2675.6,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "statistics-burst-30x100",
+      "concurrency": 30,
+      "total": 100,
+      "durationMs": 29137,
+      "rps": 3.4,
+      "avgMs": 7525.35,
+      "p50Ms": 8113.95,
+      "p95Ms": 9246.37,
+      "p99Ms": 9525.75,
+      "maxMs": 9728.4,
+      "errors": {
+        "network": 0,
+        "http4xx": 0,
+        "http5xx": 0,
+        "other": 0
+      }
+    },
+    {
+      "name": "login-fail-5x50",
+      "concurrency": 5,
+      "total": 50,
+      "durationMs": 8201,
+      "rps": 6.1,
+      "avgMs": 805.3,
+      "p50Ms": 452.39,
+      "p95Ms": 2576.17,
+      "p99Ms": 2694.77,
+      "maxMs": 3115.97,
+      "errors": {
+        "network": 0,
+        "http4xx": 50,
+        "http5xx": 0,
+        "other": 0
+      }
+    }
+  ],
+  "goNoGo": "FAIL"
+}

@@ -12,6 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ─── 0. 编码检查（mojibake / replacement chars） ─────────────────
+  encoding:
+    name: Encoding check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check UTF-8 encoding (no mojibake / replacement chars / mid-BOM)
+        run: node scripts/check-encoding.mjs
+
   # ─── 1. 后端：type-check + jest 单测 ───────────────────────────────
   server:
     name: Server (type-check + test)
@@ -56,6 +73,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Check UTF-8 encoding (mojibake / replacement chars / mid-BOM)
+        run: node scripts/check-encoding.mjs
+
       - name: Prisma generate
         run: pnpm prisma generate --schema=packages/db/prisma/schema.prisma
 
@@ -90,6 +110,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Check UTF-8 encoding (mojibake / replacement chars / mid-BOM)
+        run: node scripts/check-encoding.mjs
 
       - name: Type-check (web)
         run: pnpm --filter web exec vue-tsc --noEmit -p tsconfig.app.json

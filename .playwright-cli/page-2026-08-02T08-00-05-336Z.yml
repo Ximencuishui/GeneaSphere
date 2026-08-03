@@ -1,0 +1,104 @@
+- generic [ref=e8]:
+  - generic [ref=e60]:
+    - complementary [ref=e61]:
+      - heading "寻根路 · xungenlu.cn" [level=2] [ref=e63]
+      - menubar [ref=e64]:
+        - menuitem "概况" [ref=e65]
+        - menuitem "人员管理" [ref=e74]
+        - menuitem "内容审核" [ref=e83]
+        - menuitem "地方记忆" [ref=e92]
+        - menuitem "寻亲管理" [ref=e102]
+        - menuitem "家族公告" [ref=e112]
+        - menuitem "数据管理" [ref=e122]
+        - menuitem "影像管理" [ref=e131]
+        - menuitem "工具记录" [ref=e140]
+        - menuitem "印刷服务" [ref=e149]
+        - menuitem "族谱生成" [ref=e158]
+        - menuitem "视频中心" [ref=e167]
+        - menuitem "事件管理" [ref=e176]
+        - menuitem "短信通知" [ref=e185]
+        - menuitem "日志审计" [ref=e195]
+        - menuitem "系统设置" [ref=e204]
+    - generic [ref=e213]:
+      - banner [ref=e214]:
+        - generic [ref=e215]:
+          - button [ref=e216] [cursor=pointer]
+          - navigation "面包屑" [ref=e220]:
+            - generic [ref=e221]:
+              - link [ref=e222]
+              - text: /
+            - link "控制面板" [ref=e227]
+        - generic [ref=e228]:
+          - button [ref=e230] [cursor=pointer]
+          - button "13800000000" [ref=e237] [cursor=pointer]
+      - main [ref=e243]:
+        - generic [ref=e244]:
+          - generic [ref=e245]:
+            - generic [ref=e247]:
+              - generic [ref=e248]:
+                - heading "欢迎回来，13800000000" [level=2] [ref=e249]
+                - paragraph [ref=e250]: 2026年8月2日星期日
+              - button "管理成员" [ref=e251] [cursor=pointer]
+            - generic [ref=e254]:
+              - generic [ref=e255]:
+                - generic [ref=e256]: "0"
+                - generic [ref=e257]: 待办事项
+              - generic [ref=e258]:
+                - generic [ref=e259]: "1002"
+                - generic [ref=e260]: 家族成员
+              - generic [ref=e261]:
+                - generic [ref=e262]: "0"
+                - generic [ref=e263]: 家族影像
+              - generic [ref=e264]:
+                - generic [ref=e265]: 0.0G
+                - generic [ref=e266]: 已用存储
+          - generic [ref=e267]:
+            - generic [ref=e276] [cursor=pointer]:
+              - generic [ref=e277]: "1002"
+              - generic [ref=e278]: 族谱树
+            - generic [ref=e287] [cursor=pointer]:
+              - generic [ref=e288]: "2"
+              - generic [ref=e289]: 在世人数
+            - generic [ref=e298] [cursor=pointer]:
+              - generic [ref=e299]: "0"
+              - generic [ref=e300]: 照片总数
+            - generic [ref=e309] [cursor=pointer]:
+              - generic [ref=e310]: "0"
+              - generic [ref=e311]: 待办总数
+          - generic [ref=e312]:
+            - generic [ref=e314]:
+              - generic [ref=e316]:
+                - generic [ref=e317]: 存储用量
+                - generic [ref=e318]: 0%
+              - generic [ref=e320]:
+                - progressbar [ref=e321]:
+                  - generic [ref=e324]: 0%
+                - generic [ref=e325]:
+                  - generic [ref=e326]:
+                    - generic [ref=e327]: 已使用
+                    - generic [ref=e328]: 0.00 GB
+                  - generic [ref=e329]:
+                    - generic [ref=e330]: 总容量
+                    - generic [ref=e331]: 5 GB
+                  - generic [ref=e332]:
+                    - generic [ref=e333]: 剩余
+                    - generic [ref=e334]: 5.00 GB
+            - generic [ref=e336]:
+              - generic [ref=e337]: 快速入口
+              - generic [ref=e339]:
+                - generic [ref=e340] [cursor=pointer]: 隐私配置
+                - generic [ref=e347] [cursor=pointer]: 字辈管理
+                - generic [ref=e353] [cursor=pointer]: 生平审核
+                - generic [ref=e359] [cursor=pointer]: 寻亲申请
+                - generic [ref=e366] [cursor=pointer]: 云存储
+                - generic [ref=e372] [cursor=pointer]: 印刷订单
+                - generic [ref=e378] [cursor=pointer]: 发送短信
+                - generic [ref=e385] [cursor=pointer]: 短信余额
+          - generic [ref=e393]:
+            - generic [ref=e395]:
+              - generic [ref=e396]: 待办事项
+              - generic [ref=e397]: 影像 0 · 生平 0 · 寻亲 0
+            - paragraph [ref=e418]: 暂无待办事项，一切井然有序
+  - button "🔇 背景音乐" [ref=e4] [cursor=pointer]:
+    - generic [ref=e5]: 🔇
+    - generic [ref=e6]: 背景音乐

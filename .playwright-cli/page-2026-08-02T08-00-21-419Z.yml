@@ -1,0 +1,93 @@
+- generic [active] [ref=f6e1]:
+  - generic:
+    - generic: 寻
+    - generic: 寻根路
+    - generic: xungenlu.cn
+    - generic: 正在加载资源，请稍候…
+  - generic [ref=f6e3]:
+    - generic [ref=f6e4]:
+      - complementary [ref=f6e5]:
+        - heading "寻根路 · xungenlu.cn" [level=2] [ref=f6e7]
+        - menubar [ref=f6e8]:
+          - menuitem "概况" [ref=f6e9]
+          - menuitem "人员管理" [ref=f6e18]
+          - menuitem "内容审核" [ref=f6e27]
+          - menuitem "地方记忆" [ref=f6e36]
+          - menuitem "寻亲管理" [expanded] [ref=f6e46]:
+            - menu [ref=f6e56]:
+              - menuitem "认亲申请" [ref=f6e57] [cursor=pointer]
+              - menuitem "寻亲帖管理" [ref=f6e58] [cursor=pointer]
+          - menuitem "家族公告" [ref=f6e59]
+          - menuitem "数据管理" [ref=f6e69]
+          - menuitem "影像管理" [ref=f6e78]
+          - menuitem "工具记录" [ref=f6e87]
+          - menuitem "印刷服务" [ref=f6e96]
+          - menuitem "族谱生成" [ref=f6e105]
+          - menuitem "视频中心" [ref=f6e114]
+          - menuitem "事件管理" [ref=f6e123]
+          - menuitem "短信通知" [ref=f6e132]
+          - menuitem "日志审计" [ref=f6e142]
+          - menuitem "系统设置" [ref=f6e151]
+      - generic [ref=f6e160]:
+        - banner [ref=f6e161]:
+          - generic [ref=f6e162]:
+            - button [ref=f6e163] [cursor=pointer]
+            - navigation "面包屑" [ref=f6e167]:
+              - generic [ref=f6e168]:
+                - link [ref=f6e169]
+                - text: /
+              - generic [ref=f6e173]:
+                - link "寻亲管理" [ref=f6e174]
+                - text: /
+              - link "认亲申请" [ref=f6e176]
+          - generic [ref=f6e177]:
+            - button [ref=f6e179] [cursor=pointer]
+            - button "13800000000" [ref=f6e186] [cursor=pointer]
+        - main [ref=f6e192]:
+          - generic [ref=f6e194]:
+            - generic [ref=f6e196]:
+              - heading "认亲申请管理" [level=2] [ref=f6e197]
+              - button "查看可回滚快照" [ref=f6e198] [cursor=pointer]
+            - generic [ref=f6e200]:
+              - generic [ref=f6e201]:
+                - tablist [ref=f6e205]:
+                  - tab "待处理" [selected] [ref=f6e207]
+                  - tab "待合并" [ref=f6e208]
+                  - tab "已合并" [ref=f6e209]
+                  - tab "已拒绝" [ref=f6e210]
+                  - tab "需人工核查" [ref=f6e211]
+                - generic:
+                  - tabpanel "待处理"
+              - generic [ref=f6e213]:
+                - table [ref=f6e215]:
+                  - rowgroup [ref=f6e225]:
+                    - row [ref=f6e226]:
+                      - columnheader "申请人" [ref=f6e227]
+                      - columnheader "祖籍地" [ref=f6e229]
+                      - columnheader "字辈信息" [ref=f6e231]
+                      - columnheader "关键祖先" [ref=f6e233]
+                      - columnheader "匹配度" [ref=f6e235]
+                      - columnheader "状态" [ref=f6e237]
+                      - columnheader "申请时间" [ref=f6e239]
+                      - columnheader "操作" [ref=f6e241]
+                - generic [ref=f6e246]:
+                  - table:
+                    - rowgroup
+                  - generic [ref=f6e247]: 暂无数据
+              - generic [ref=f6e253]:
+                - generic [ref=f6e254]: 共 0 条
+                - generic [ref=f6e257] [cursor=pointer]:
+                  - generic:
+                    - combobox [ref=f6e259]
+                    - generic [ref=f6e260]: 20条/页
+                - button "上一页" [disabled] [ref=f6e265]
+                - list [ref=f6e266]:
+                  - listitem "第 1 页" [ref=f6e267]: "1"
+                - button "下一页" [disabled] [ref=f6e268]
+                - generic [ref=f6e269]:
+                  - generic [ref=f6e270]: 前往
+                  - spinbutton "页" [ref=f6e273]: "1"
+                  - generic [ref=f6e274]: 页
+    - button "🔇 背景音乐" [ref=f6e277] [cursor=pointer]:
+      - generic [ref=f6e278]: 🔇
+      - generic [ref=f6e279]: 背景音乐

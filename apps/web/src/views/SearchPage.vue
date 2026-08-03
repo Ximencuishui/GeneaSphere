@@ -86,7 +86,6 @@
           </div>
         </div>
       </div>
-
       <!-- 加载状态 -->
       <div v-if="loading" class="loading-container">
         <el-icon class="is-loading" :size="30"><Loading /></el-icon>
@@ -176,14 +175,62 @@
         </el-alert>
       </div>
     </el-dialog>
+
+    <!-- 帖子详情对话框 -->
+    <el-dialog
+      v-model="showDetailDialog"
+      title="寻亲帖详情"
+      width="640"
+      destroy-on-close
+    >
+      <div v-if="postDetailLoading" v-loading="true" style="height: 200px"></div>
+      <div v-else-if="postDetail" class="post-detail">
+        <div class="detail-row">
+          <span class="label">祖籍地</span>
+          <span class="value">{{ postDetail.origin_place }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="label">字辈关键词</span>
+          <span class="value">
+            <el-tag
+              v-for="kw in postDetail.xipai_keywords"
+              :key="kw"
+              size="small"
+              style="margin-right: 6px; margin-bottom: 4px"
+            >{{ kw }}</el-tag>
+          </span>
+        </div>
+        <div class="detail-row">
+          <span class="label">发布时间</span>
+          <span class="value">{{ formatDate(postDetail.created_at) }}</span>
+        </div>
+        <div v-if="(postDetail as any)?.status" class="detail-row">
+          <span class="label">状态</span>
+          <span class="value">
+            <el-tag :type="(postDetail as any).status === 'PUBLISHED' ? 'success' : 'info'">{{ (postDetail as any).status }}</el-tag>
+          </span>
+        </div>
+        <div v-if="(postDetail as any)?.reject_reason" class="detail-row">
+          <span class="label">拒绝原因</span>
+          <span class="value">{{ (postDetail as any).reject_reason }}</span>
+        </div>
+        <div class="detail-actions">
+          <el-button type="primary" @click="handleViewContact(postDetail)">
+            <el-icon><Phone /></el-icon>
+            查看联系方式
+          </el-button>
+        </div>
+      </div>
+      <el-empty v-else description="未获取到帖子详情" />
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Search, Location, EditPen, Loading } from '@element-plus/icons-vue';
-import { searchPosts, createSearchPost, getContactInfo as getContactApi } from '@/api/search';
+import { Search, Location, EditPen, Loading, Phone } from '@element-plus/icons-vue';
+import { searchPosts, createSearchPost, getContactInfo as getContactApi, getSearchPost } from '@/api/search';
 import type { SearchPost } from '@/types';
 
 const loading = ref(false);
@@ -209,6 +256,11 @@ const keywordInputRef = ref();
 const showContactDialog = ref(false);
 const selectedPost = ref<SearchPost | null>(null);
 const contactInfo = ref('');
+
+// 帖子详情对话框
+const showDetailDialog = ref(false);
+const postDetailLoading = ref(false);
+const postDetail = ref<SearchPost | null>(null);
 
 // 搜索寻亲帖
 async function handleSearch() {
@@ -243,9 +295,20 @@ async function loadAllPosts() {
 }
 
 // 查看帖子详情
-function handleViewPost(_post: SearchPost) {
-  // TODO: 跳转到帖子详情页
-  ElMessage.info('帖子详情功能开发中...');
+async function handleViewPost(post: SearchPost) {
+  showDetailDialog.value = true;
+  postDetailLoading.value = true;
+  postDetail.value = null;
+  try {
+    const res = await getSearchPost(String(post.id));
+    postDetail.value = (res as any) || post;
+  } catch (err: any) {
+    // 详情获取失败时仍使用列表中的基础数据
+    postDetail.value = post;
+    ElMessage.warning(err?.response?.data?.message || '详情获取失败，仅展示列表信息');
+  } finally {
+    postDetailLoading.value = false;
+  }
 }
 
 // 查看联系方式
@@ -474,5 +537,38 @@ onMounted(() => {
 .contact-text {
   color: #409eff;
   font-weight: bold;
+}
+
+.post-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px dashed #ebeef5;
+}
+
+.detail-row .label {
+  width: 96px;
+  color: #909399;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.detail-row .value {
+  flex: 1;
+  color: #303133;
+  font-size: 14px;
+}
+
+.detail-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

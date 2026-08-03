@@ -262,13 +262,12 @@ const openImagePreview = (src: string, name: string) => {
 
 // ==================== Loading Stage Progress ====================
 /**
- * 鍔犺浇闃舵锛? * - fetch   锛氬悜鍚庣鎷夊彇瀹舵棌鏁版嵁锛堟渶閲嶇殑涓€姝ワ紝鍙兘鍥犱负澶ф棌璋辫€岃€楁椂杈冮暱锛? * - parse   锛氬皢鍘熷鏁版嵁杞崲涓?G6 鑺傜偣鏍煎紡
- * - fetch   锛氬悜鍚庣鎷夊彇瀹舵棌鏁版嵁锛堟渶閲嶇殑涓€姝ワ紝鍙兘鍥犱负澶ф棌璋辫€岃€楁椂杈冮暱锟?
- * - parse   锛氬皢鍘熷鏁版嵁杞崲锟?G6 鑺傜偣鏍煎紡
- * - render  锛欸6 鍒涘缓鍥惧疄渚嬨€佽缃竷灞€銆佹覆鏌撹妭鐐逛笌杩炵嚎
- * - finalize锛氳嚜閫傚簲缂╂斁 / 婊氬姩褰掍綅 / 娓呯悊涓存椂鎬? *
- *
+ * 加载阶段：
  * - fetch   ：向后端拉取家族数据（最重的一步，可能因为大族谱而耗时较长）
+ * - parse   ：将原始数据转换为 G6 节点格式
+ * - render  ：G6 创建图实例、设置布局、绘制节点与连线
+ * - finalize：自适应缩放 / 滚动归位 / 清理临时态
+ *
  * 1. 每个阶段都有目标百分比，定时器以 30ms 步长平滑增长，给人「有进度」的感觉
  * 2. 进入下一阶段时百分比会跳到该阶段起点附近，再平滑增长，避免视觉上「回退」
  * 3. 完成后进度条快速到 100% 并延迟 220ms 关闭，给用户一个「完成」的视觉确认
@@ -449,13 +448,13 @@ const fetchTreeData = async (rootId: string = '1') => {
     };
     // 报错：停止定时器，进度条冻结在当前位置，错误占位接管
     failLoading();
-    // 5xx锛坴ite proxy ECONNREFUSED銆佹暟鎹簱鐬柇绛夛級3 绉掑悗鑷姩閲嶈瘯涓€娆★紝
-    // 閬垮厤鐢ㄦ埛鐪嬪埌鐭殏缃戠粶鎶栧姩灏辫鎵嬪姩鐐?閲嶆柊鍔犺浇"
+    // 5xx（site proxy ECONNREFUSED、数据库中断等）3 秒后自动重试一次，
+    // 避免用户看到短暂网络抖动就要手动点“重新加载”
     if (status === 0 || status >= 500) {
       const retryAt = Date.now();
       (errorState.value as any).__autoRetryAt = retryAt;
       setTimeout(() => {
-        // 鏈熼棿鐢ㄦ埛娌℃敼 errorState 鎵嶉噸璇?
+        // 期间用户没改 errorState 才重试
         if ((errorState.value as any)?.__autoRetryAt === retryAt) {
           console.info('[GenealogyTree] 5xx 错误自动重试…');
           retryLoad();
@@ -587,7 +586,7 @@ async function waitForContainerSize(maxRounds = 25, interval = 200): Promise<{ w
   const measure = (): { w: number; h: number } => {
     const el = container.value;
     if (!el) return { w: 0, h: 0 };
-    // 鍙岃矾娴嬮噺锛歰ffset* + getBoundingClientRect 鍙栬緝澶у€硷紙鏇村彲闈狅級
+    // 双路测量：offset* + getBoundingClientRect 取较大值（更可靠）
     const rect = el.getBoundingClientRect();
     const ow = el.offsetWidth;
     const oh = el.offsetHeight;
@@ -597,7 +596,7 @@ async function waitForContainerSize(maxRounds = 25, interval = 200): Promise<{ w
   };
 
   for (let i = 0; i < maxRounds; i++) {
-    // 绗竴杞篃绛変竴甯э紙锟?v-show/loading 鍒囨崲锟?reflow 瀹屾垚锟?
+    // 第一轮也等一帧（让 v-show/loading 切换/reflow 完成）
     if (i === 0) await new Promise((r) => requestAnimationFrame(() => r(null)));
     await new Promise((r) => setTimeout(r, interval));
     const { w, h } = measure();
@@ -831,46 +830,46 @@ const initGraph = async (data: GenealogyNode) => {
   // 计算布局
   const layoutResult = layoutEngine.calculateLayout(layoutNodes, layoutEdges);
 
-  // 鑷€傚簲缂╂斁绛栫暐锛氳閲戝瓧濉旂粨鏋勬纭樉绀猴拷?
-  // - zoom 浼樺厛閫傞厤鐢诲竷楂樺害锛堣浠ｉ檯鍒嗗眰鍙锟?
-  // - X 鏂瑰悜鍏佽婧㈠嚭锛堟í鍚戞粴鍔ㄦ潯娴忚鏀郴锛夛紝浣嗕笉璁╃缉寰楀お灏忥紙鑺傜偣闇€鍙锟?
-  // - 涓績閿氬畾涓讳紶鎵匡紙centerX=0锛夛紝涓昏剦鍦ㄧ敾甯冧腑澶紝鏀郴鍦ㄤ袱渚ф墖褰㈠睍寮€
+  // 自适应缩放策略：让金字塔形结构正确显示：
+  // - zoom 优先适配画布高度（让实际分层可见）
+  // - X 方向允许溢出（横向滚动条浏览支系），但不缩得太小（节点需可读）
+  // - 中心固定主枝条（centerX=0），主枝在画布中央，支系在两侧扇形展开
   const mainLineageIds = new Set(genealogyStore.mainLineage.map(String));
   const baseViewport = layoutEngine.autoFit(layoutResult);
   let viewportConfig = baseViewport;
 
-  // bounds 鏄竷灞€寮曟搸杈撳嚭鐨勬暣鍥惧寘鍥寸洅锛堝惈涓昏剦銆佹敮绯汇€侀厤鍋讹級
+  // bounds 是布局引擎输出的整图包围盒（含主枝、支系、配偶）
   const { maxX, minX, maxY, minY } = layoutResult.bounds;
   const contentW = Math.max(1, maxX - minX);
   const contentH = Math.max(1, maxY - minY);
-  const aspectRatio = contentW / contentH; // >1 鍋忓锛堝鏀郴锛夛紝<1 鍋忛珮锛堝皯鏀郴锟?
+  const aspectRatio = contentW / contentH; // >1 偏宽（多支系），<1 偏高（少支系）
 
-  // zoom锛氳涓讳紶锟?8-10 浠ｇ殑 Y 璺ㄥ害锛堚増 contentH锛夐€傞厤鐢诲竷楂樺害锟?80%
-  // 1000 鑺傜偣鐢ㄦ洿淇濆畧鐨勭缉鏀撅紙閬垮厤缂╁お灏忚妭鐐圭湅涓嶆竻锛夛紝clamp 锟?[0.4, 1.0]
+  // zoom：让主枝 8-10 代的 Y 跨度（≈ contentH）适配画布高度的 80%
+  // 1000 节点用更保守的缩放（避免缩太小节点看不清），clamp 到 [0.4, 1.0]
   const { width: canvasW, height: canvasH } = layoutEngine['canvasSize'] as { width: number; height: number };
   const fitByHeight = (canvasH * 0.8) / contentH;
   const totalNodeCount = layoutNodes.length;
   const zoomByNodeCount = totalNodeCount > 600 ? 0.45 : totalNodeCount > 300 ? 0.6 : 0.85;
-  // 鍙栦笁鑰呬腑杈冨皬鍊硷紝浣嗕繚锟?0.4 闃叉缂╁埌鑺傜偣鐪嬩笉锟?
+  // 取三者中较小值，但保 0.4 防止缩到节点看不清
   let desiredZoom = Math.min(fitByHeight, zoomByNodeCount, baseViewport.zoom * 1.5);
   desiredZoom = Math.max(0.4, Math.min(1.0, desiredZoom));
 
   if (mainLineageIds.size > 0) {
     const mainPositions = layoutResult.nodes.filter(n => mainLineageIds.has(n.id));
     if (mainPositions.length > 0) {
-      // 涓讳紶鎵跨殑绾靛悜鍖呭洿鐩掞紙鐢ㄤ簬鎶婃牴鑺傜偣閿氬畾鍦ㄥ睆骞曚笂锟?15% 浣嶇疆锟?
+      // 主枝条的纵向包围盒（用于把根节点固定在屏幕上 15% 位置）
       let minMainY = Infinity, maxMainY = -Infinity;
       for (const p of mainPositions) {
         minMainY = Math.min(minMainY, p.y - p.height / 2);
         maxMainY = Math.max(maxMainY, p.y + p.height / 2);
       }
-      // 涓昏剦椤堕儴锛堟湵鐔规牴鑺傜偣锛夋樉绀哄湪鐢诲竷涓婃柟 15% 浣嶇疆锛岀粰涓嬫柟鐨勬敮绯荤暀鍑虹┖锟?
+      // 主枝顶部（最远根节点）显示在画布上方 15% 位置，给下方的支系留出空间
       const targetScreenY = canvasH * 0.15;
       const centerY = minMainY + (canvasH / 2 - targetScreenY) / desiredZoom;
       viewportConfig = {
         ...baseViewport,
         zoom: desiredZoom,
-        centerX: 0, // 涓昏剦宸插湪 alignMainLineage 闃舵灞呬腑锟?x=0锛屼綔涓鸿瑙夐敋锟?
+        centerX: 0, // 主枝已在 alignMainLineage 阶段居中（x=0），作为视觉锚点
         centerY,
       };
     } else {
@@ -885,7 +884,7 @@ const initGraph = async (data: GenealogyNode) => {
       };
     }
   }
-  // 鍗曟牴鏃犱富鑴夌殑杈圭晫锛歝enterX/Y 宸茬粡锟?baseViewport 鎻愪緵锛屼笉鍐嶈锟?
+  // 单根无主支的边界：centerX/Y 已经由 baseViewport 提供，不再重复计算
 
   // 创建节点位置映射
   // 缓存当前 layout 的视口配置，供工具栏「重置缩放」按钮复用
@@ -1120,17 +1119,17 @@ const initGraph = async (data: GenealogyNode) => {
         stroke: (d: any) => {
           const sourceMatched = matchesSearch(d.source) && matchesGenderFilter(d.source);
           const targetMatched = matchesSearch(d.target) && matchesGenderFilter(d.target);
-          // 閰嶅伓杈癸細鐜颁换=绮夌孩瀹炵嚎锛屽巻锟?鐏拌壊铏氱嚎
+          // 配偶边：现任=粉红实线，历史=灰色虚线
           if (d.data?.kind === 'spouse') {
             return d.data?.is_current ? '#E91E63' : '#9E9E9E';
           }
-          // 涓讳紶鎵跨埗瀛愯竟锛氶啋鐩噾鑹诧紙婧愭垨鐩爣灞炰簬涓讳紶鎵挎椂楂樹寒锟?
+          // 主枝条父子边：纯金黄色（源或目标属于主枝条时高亮）
           const sourceOnMain = d.source?.data?.is_main_lineage;
           const targetOnMain = d.target?.data?.is_main_lineage;
           if (sourceOnMain && targetOnMain) {
             return '#C9A96E';
           }
-          // 鏅€氱埗瀛愯竟锛氭悳锟?绛涢€夊懡涓繚鐣欎腑鎬х伆锛屾湭鍛戒腑娣＄背锟?
+          // 普通父子边：搜索+筛选命中保留中性灰，未命中淡灰
           return (sourceMatched && targetMatched) ? '#B0BEC5' : '#E8E0D8';
         },
         lineWidth: (d: any) => {
@@ -1208,7 +1207,7 @@ const initGraph = async (data: GenealogyNode) => {
           y2 = Math.max(tl[1], br[1]);
         }
       }
-      // 锟?200px 杈硅窛閬垮厤璺冲彉
+      // 留 200px 边距避免路径重叠
       const marginPx = VIEWPORT_MARGIN;
       const zoom = g.getZoom?.() || 1;
       const marginWorld = marginPx / zoom;
@@ -1538,7 +1537,7 @@ const initGraph = async (data: GenealogyNode) => {
 
     // 应用布局引擎计算的视口变换（缩放 + 居中）
     // 必须在 render() 完成后执行，否则 canvas 变换矩阵未初始化会报 transform undefined
-    // 鏀圭敤 autoFit 绠楀嚭锟?zoom + minZoom 0.25 鍏滃簳锛屾墜锟?translateBy 灞呬腑
+    // 改用 autoFit 算出的 zoom + minZoom 0.25 加底限，再手工 translateBy 居中
     if (
       typeof g6Graph.zoomTo === 'function' &&
       typeof g6Graph.translateBy === 'function' &&
@@ -1568,7 +1567,7 @@ const initGraph = async (data: GenealogyNode) => {
         console.warn('[GenealogyTree] focusElement 失败:', err);
       }
     }
-    // 娓叉煋瀹屾垚锛氳繘搴︽潯蹇€熻窇婊″埌 100% 鍐嶅欢杩熷叧锟?
+    // 渲染完成：进度条快速跑满到 100% 再延时关闭
     finishLoading();
   } catch (e: any) {
     console.error('[GenealogyTree] G6 渲染失败:', e);
@@ -1643,6 +1642,22 @@ const handleSearch = () => {
 const clearSearch = () => {
   searchKeyword.value = '';
   highlightNodeIds.value.clear();
+  if (graph.value && typeof graph.value.draw === 'function') {
+    graph.value.draw();
+  }
+};
+
+/**
+ * 供外部组件（如 TreePage 三代亲属高亮）调用，传入高亮节点 id 数组。
+ * - 清空旧高亮后写入新集合，触发 G6 增量重绘
+ * - 传入空数组表示清空高亮
+ */
+const setHighlight = (ids: Array<string | number>) => {
+  highlightNodeIds.value.clear();
+  for (const id of ids ?? []) {
+    highlightNodeIds.value.add(String(id));
+  }
+  searchResultCount.value = highlightNodeIds.value.size;
   if (graph.value && typeof graph.value.draw === 'function') {
     graph.value.draw();
   }
@@ -1994,6 +2009,8 @@ defineExpose({
   graphChangeVersion,
   refresh: refreshGraph,
   focusMainLineage,
+  /** 外部调用：高亮指定节点集合（如三代亲属） */
+  setHighlight,
   /**
    * 鸟瞰图桥接：返回节点位与视口信息，供 TreeMinimap 同步渲染
    * - 返回 null 表示画布尚未初始化（M2 鸟瞰图在画布 ready 后才显示）

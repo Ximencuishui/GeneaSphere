@@ -14,6 +14,7 @@ const router = useRouter()
 const refreshing = ref(false)
 const project = ref<LineageVideoProject | null>(null)
 const materials = ref<LineageVideoMaterial[]>([])
+const loadError = ref<string | null>(null)
 
 // 轮询定时器
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -87,16 +88,28 @@ async function loadProject() {
   if (!id) return
 
   refreshing.value = true
+  loadError.value = null
   try {
     const res = await lineageVideoApi.getProject(id) as any
     project.value = res
     materials.value = res.materials || []
   } catch (err: any) {
-    ElMessage.error(err.message || '加载失败')
-    router.back()
+    // 保留上下文，不再 router.back() 以免丢失 URL（深链场景）
+    loadError.value = err?.message || '加载失败，请稍后重试'
+    project.value = null
   } finally {
     refreshing.value = false
   }
+}
+
+// 返回列表
+function goBack() {
+  router.push('/user-center/lineage-video')
+}
+
+// 刷新状态
+async function refresh() {
+  await loadProject()
 }
 
 // 轮询
@@ -188,16 +201,24 @@ onBeforeUnmount(() => {
     <ElCard v-loading="refreshing">
       <template #header>
         <div class="header">
-          <h2 class="page-title">{{ project?.center_person?.full_name }} 的直系血脉视频</h2>
+          <h2 class="page-title">{{ project?.center_person?.full_name || '直系血缘视频详情' }}</h2>
           <div class="header-actions">
-            <ElButton text @click="router.push('/user-center/lineage-video')">
+            <ElButton text @click="goBack">
               <ElIcon><ArrowLeft /></ElIcon> 返回列表
             </ElButton>
           </div>
         </div>
       </template>
 
-      <div v-if="project" class="content">
+      <!-- 加载失败 / 资源不存在 -->
+      <div v-if="loadError" class="error-state">
+        <ElEmpty :description="loadError" :image-size="120">
+          <ElButton type="primary" @click="goBack">返回列表</ElButton>
+          <ElButton @click="refresh">重试</ElButton>
+        </ElEmpty>
+      </div>
+
+      <div v-else-if="project" class="content">
         <!-- 状态信息 -->
         <div class="info-row">
           <ElTag :type="statusType as any" size="large">{{ statusText }}</ElTag>

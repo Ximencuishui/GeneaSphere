@@ -1,0 +1,92 @@
+- generic [ref=f4e3]:
+  - generic [ref=f4e4]:
+    - complementary [ref=f4e5]:
+      - heading "寻根路 · xungenlu.cn" [level=2] [ref=f4e7]
+      - menubar [ref=f4e8]:
+        - menuitem "概况" [ref=f4e9]
+        - menuitem "人员管理" [ref=f4e18]
+        - menuitem "内容审核" [expanded] [ref=f4e27]:
+          - menu [ref=f4e36]:
+            - menuitem "影像审核" [ref=f4e37] [cursor=pointer]
+            - menuitem "生平审核" [ref=f4e38] [cursor=pointer]
+            - menuitem "举报管理" [ref=f4e39] [cursor=pointer]
+        - menuitem "地方记忆" [ref=f4e40]
+        - menuitem "寻亲管理" [ref=f4e50]
+        - menuitem "家族公告" [ref=f4e60]
+        - menuitem "数据管理" [ref=f4e70]
+        - menuitem "影像管理" [ref=f4e79]
+        - menuitem "工具记录" [ref=f4e88]
+        - menuitem "印刷服务" [ref=f4e97]
+        - menuitem "族谱生成" [ref=f4e106]
+        - menuitem "视频中心" [ref=f4e115]
+        - menuitem "事件管理" [ref=f4e124]
+        - menuitem "短信通知" [ref=f4e133]
+        - menuitem "日志审计" [ref=f4e143]
+        - menuitem "系统设置" [ref=f4e152]
+    - generic [ref=f4e161]:
+      - banner [ref=f4e162]:
+        - generic [ref=f4e163]:
+          - button [ref=f4e164] [cursor=pointer]
+          - navigation "面包屑" [ref=f4e168]:
+            - generic [ref=f4e169]:
+              - link [ref=f4e170]
+              - text: /
+            - generic [ref=f4e174]:
+              - link "内容审核" [ref=f4e175]
+              - text: /
+            - link "生平审核" [ref=f4e177]
+        - generic [ref=f4e178]:
+          - button [ref=f4e180] [cursor=pointer]
+          - button "13800000000" [ref=f4e187] [cursor=pointer]
+      - main [ref=f4e193]:
+        - generic [ref=f4e195]:
+          - generic [ref=f4e197]:
+            - heading "生平审核" [level=2] [ref=f4e198]
+            - generic [ref=f4e199]:
+              - button "批量通过 (0)" [disabled] [ref=f4e200]
+              - button [disabled] [ref=f4e203]
+              - button "自定义理由驳回" [disabled] [ref=f4e208]
+          - generic [ref=f4e210]:
+            - generic [ref=f4e211]:
+              - tablist [ref=f4e215]:
+                - tab "待审核" [selected] [ref=f4e217]
+                - tab "已通过" [ref=f4e218]
+                - tab "已驳回" [ref=f4e219]
+              - generic:
+                - tabpanel "待审核"
+            - generic [ref=f4e221]:
+              - table [ref=f4e223]:
+                - rowgroup [ref=f4e232]:
+                  - row [ref=f4e233]:
+                    - columnheader [ref=f4e234]:
+                      - generic "选择所有行" [ref=f4e236]:
+                        - generic [ref=f4e237] [cursor=pointer]:
+                          - checkbox "选择所有行" [disabled]
+                    - columnheader "标题" [ref=f4e239]
+                    - columnheader "关联人物" [ref=f4e241]
+                    - columnheader "作者" [ref=f4e243]
+                    - columnheader "内容预览" [ref=f4e245]
+                    - columnheader "提交时间" [ref=f4e247]
+                    - columnheader "操作" [ref=f4e249]
+              - generic [ref=f4e254]:
+                - table:
+                  - rowgroup
+                - generic [ref=f4e255]: 暂无数据
+            - paragraph [ref=f4e307]: 暂无数据
+            - generic [ref=f4e261]:
+              - generic [ref=f4e262]: 共 0 条
+              - generic [ref=f4e265] [cursor=pointer]:
+                - generic:
+                  - combobox [ref=f4e267]
+                  - generic [ref=f4e268]: 20条/页
+              - button "上一页" [disabled] [ref=f4e273]
+              - list [ref=f4e274]:
+                - listitem "第 1 页" [ref=f4e275]: "1"
+              - button "下一页" [disabled] [ref=f4e276]
+              - generic [ref=f4e277]:
+                - generic [ref=f4e278]: 前往
+                - spinbutton "页" [ref=f4e281]: "1"
+                - generic [ref=f4e282]: 页
+  - button "🔇 背景音乐" [ref=f4e285] [cursor=pointer]:
+    - generic [ref=f4e286]: 🔇
+    - generic [ref=f4e287]: 背景音乐
