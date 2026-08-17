@@ -125,8 +125,10 @@ export default defineConfig({
           'vendor-html2canvas': ['html2canvas'],
           // @antv/g6 不放在 manualChunks 中：G6 5.x 内部存在深层循环依赖，
           // 强制合并在一个 chunk 会导致 class extends 初始化顺序错乱
-          // （如 "Cannot access 'zn' before initialization"）。
-          // 让 Rollup 自然分块处理，配合 optimizeDeps.exclude 避免该问题。
+          // （如 "Cannot access 'zn'/'Bn' before initialization"）。
+          // 让 Rollup 自然分块处理，配合 optimizeDeps.exclude 避免该问题；
+          // GenealogyTree 内对 G6 的所有导入均为动态 import（见 loadG6Runtime），
+          // 不会把循环依赖拖进静态合并路径。
           // 'vendor-antv': ['@antv/g6'],
           'vendor-pdfjs': ['pdfjs-dist'],
 
