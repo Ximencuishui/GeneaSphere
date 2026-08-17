@@ -1,6 +1,6 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   ZoomIn,
   ZoomOut,
@@ -21,6 +21,11 @@ import {
   Fold,
   Expand,
   Picture,
+  Histogram,
+  Filter,
+  Upload,
+  ArrowDown,
+  Reading,
 } from '@element-plus/icons-vue';
 import { useGenealogyStore } from '@/stores/genealogy';
 import type { ViewMode } from '@/stores/genealogy';
@@ -28,7 +33,6 @@ import { treeApi } from '@/api/tree';
 import type { GenealogyNode } from '@/types';
 import PersonEditDrawer from './PersonEditDrawer.vue';
 import ImagePreview from './ImagePreview.vue';
-import { Rect as G6Rect } from '@antv/g6/esm/elements/nodes/rect';
 import { LayoutEngine } from '@/utils/layout-engine';
 import type { LayoutNode, LayoutEdge, LayoutConfig, ViewportConfig } from '@/types/layout';
 
@@ -54,6 +58,23 @@ import type { LayoutNode, LayoutEdge, LayoutConfig, ViewportConfig } from '@/typ
 type G6GraphCtor = any;
 type G6TreeToGraphData = (tree: any) => { nodes?: any[]; edges?: any[] };
 type G6Runtime = { Graph: G6GraphCtor; treeToGraphData: G6TreeToGraphData };
+
+/**
+ * 双指缩放行为（移动端 H5，2026-08-17）
+ *
+ * 背景：G6 内置 zoom-canvas 的 pinch 分支与 wheel 分支互斥（trigger 数组二选一），
+ * 且 PinchHandler 发送的 scale=(ratio-1)*5 会被自带分支再 ÷100 当作 wheel delta 处理，
+ * 默认灵敏度下双指缩放几乎无效。
+ *
+ * 本行为复用 G6 的 Shortcut + PinchHandler（pointer 事件双指跟踪），
+ * 还原真实两点距离比 ratio = 1 + scale/5 后直接 graph.zoomTo，缩放体验自然；
+ * wheel 缩放仍由 zoom-canvas 负责，两者互不干扰。
+ *
+ * [2026-08-19 修复] BaseBehavior/Shortcut/CommonEvent/parsePoint 原先为顶层静态导入，
+ * 会把 G6 深层循环依赖（base-behavior ↔ elements ↔ base-node）拖进静态合并路径，
+ * 导致生产构建出现 "Cannot access 'Bn' before initialization"（TDZ）。
+ * 现改为在 loadG6Runtime() 内动态加载，与 Graph/节点/边等其余 G6 扩展保持一致。
+ */
 
 let g6RuntimePromise: Promise<G6Runtime> | null = null;
 
@@ -89,6 +110,12 @@ async function loadG6Runtime(): Promise<G6Runtime> {
     { CollapseExpandNode },
     { GetEdgeActualEnds },
     { UpdateRelatedEdge },
+    // [2026-08-19 修复] 双指缩放行为依赖：动态加载避免 G6 深层循环依赖
+    // 进入静态合并路径（BaseBehavior ↔ elements ↔ base-node 导致 TDZ）。
+    { BaseBehavior },
+    { Shortcut },
+    { CommonEvent },
+    { parsePoint },
   ] = await Promise.all([
     import('@antv/g6/esm/elements/nodes/rect'),
     import('@antv/g6/esm/elements/edges/cubic-horizontal'),
@@ -114,6 +141,10 @@ async function loadG6Runtime(): Promise<G6Runtime> {
     import('@antv/g6/esm/transforms/collapse-expand-node'),
     import('@antv/g6/esm/transforms/get-edge-actual-ends'),
     import('@antv/g6/esm/transforms/update-related-edge'),
+    import('@antv/g6/esm/behaviors/base-behavior'),
+    import('@antv/g6/esm/utils/shortcut'),
+    import('@antv/g6/esm/constants'),
+    import('@antv/g6/esm/utils/point'),
   ]);
 
   // 自定义节点：渲染顺序改为 背景 → 姓名 → 缩略图（缩略图在姓名上方）
@@ -171,6 +202,29 @@ async function loadG6Runtime(): Promise<G6Runtime> {
   register('behavior', 'drag-canvas', DragCanvas);
   register('behavior', 'zoom-canvas', ZoomCanvas);
   register('behavior', 'drag-element', DragElement);
+  // [移动端 H5 2026-08-17] 双指缩放（触摸）
+  // [2026-08-19 修复] 类定义移入动态加载区域：BaseBehavior 等依赖随本函数一起
+  // 动态 import，避免 G6 深层循环依赖进入静态合并路径导致生产构建 TDZ。
+  class PinchZoomBehavior extends BaseBehavior {
+    private shortcut: Shortcut;
+    constructor(context: any, options: any) {
+      super(context, options);
+      this.shortcut = new Shortcut(context.graph);
+      this.shortcut.bind([CommonEvent.PINCH], (event: any) => {
+        const { graph } = this.context;
+        const ratio = 1 + (event.scale || 0) / 5; // 还原两点距离比
+        const zoom = graph.getZoom();
+        const target = Math.min(2, Math.max(0.25, zoom * ratio));
+        const origin = event.viewport ? parsePoint(event.viewport) : undefined;
+        graph.zoomTo(target, false, origin);
+      });
+    }
+    destroy() {
+      this.shortcut.destroy();
+      super.destroy();
+    }
+  }
+  register('behavior', 'pinch-zoom', PinchZoomBehavior);
 
   // transforms：treeToGraphData + compact-box 布局内部依赖的 transforms
   // 注册 key 使用 G6 内置的扩展名（build-in.js 中的 key）
@@ -401,6 +455,39 @@ const viewModeConfig = computed(() => ({
     nodeSep: 32,
     rankSep: 128,  // nodeHeight(72) + 间距(56)，预留配偶节点下方空间
   },
+  // [吊线图 2026-08-17] 传统世系吊线：子女按 child_links.mother_id 归属各妻子节点下；
+  // 卡片显示排行 + 姓名 + 生卒年；过继/收养（child_type !== BIOLOGICAL）连线为虚线。
+  xianshi: {
+    nodeWidth: 56,
+    nodeHeight: 64,
+    avatarSize: 18,
+    nameFontSize: 12,
+    sublabelFontSize: 9,
+    nodeSep: 32,
+    rankSep: 120,  // 预留妻子节点下方子女空间
+  },
+  // [苏式 2026-08-19] 传统苏式谱法：竖排世系条目，字竖排、行间生卒年，
+  // 卡片窄高（仿古谱"世系条"），适合纵向长卷阅读。
+  su: {
+    nodeWidth: 52,
+    nodeHeight: 96,
+    avatarSize: 0,
+    nameFontSize: 14,
+    sublabelFontSize: 9,
+    nodeSep: 28,
+    rankSep: 96,
+  },
+  // [浙式 2026-08-19] 浙江谱式（欧式变体）：世代分格、同辈横排对齐，
+  // 卡片横宽（仿谱牒"世代格"），同代人名对齐成行，利于横向比对世系。
+  zhe: {
+    nodeWidth: 92,
+    nodeHeight: 56,
+    avatarSize: 22,
+    nameFontSize: 12,
+    sublabelFontSize: 9,
+    nodeSep: 24,
+    rankSep: 96,
+  },
 }));
 
 // ==================== Data Fetching ====================
@@ -511,7 +598,20 @@ const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, numb
   };
 
   if (node.children && node.children.length > 0) {
-    const transformed = node.children.map((child) => transformToG6Data(child, generationMap, gen + 1));
+    // [吊线图 2026-08-17] 从父节点 child_links 取每个子女的排行/过继类型，挂到子节点 data，
+    // 供卡片排行展示与"过继虚线"（边样式读 d.target.data.child_type）使用。
+    const linkByChild = new Map<string, any>();
+    for (const l of (node.child_links || [])) linkByChild.set(String(l.child_id), l);
+
+    const transformed = node.children.map((child) => {
+      const g = transformToG6Data(child, generationMap, gen + 1);
+      const link = linkByChild.get(String(child.id));
+      if (link) {
+        g.data.child_type = link.child_type;
+        g.data.birth_order = link.birth_order;
+      }
+      return g;
+    });
     // 主脉子节点放中间，旁系对称分布两侧 → 布局时主脉自然居中
     const mainIdx = transformed.findIndex(c => c.data?.is_main_lineage);
     if (mainIdx > 0) {
@@ -543,6 +643,190 @@ const matchesGenderFilter = (node: any): boolean => {
 const matchesPhotoFilter = (node: any): boolean => {
   if (!showOnlyWithPhotos.value) return true;
   return node.data?.has_photo === true;
+};
+
+// ==================== 传统族谱过滤开关（PRD §2.4）====================
+// 三个独立开关，自由组合，实时生效；纯渲染过滤（不改底层数据），切换后重绘画布。
+// 实现方式：在 initGraph 入口对树做一次"过滤拷贝"，下游（transform / 配偶节点 / 吊线重挂载）
+// 全部零改动 —— 被过滤的节点及其整支子树不进入 G6 数据。
+const filters = reactive({
+  hideWife: false, // 隐藏所有男性的配偶节点（妻子）
+  hideDaughter: false, // 隐藏本族女性后代（女儿，含其整支子树）
+  hideSonInLaw: false, // 隐藏女儿的配偶（女婿）
+});
+
+const filterPopoverVisible = ref(false);
+
+const anyFilterActive = computed(
+  () => filters.hideWife || filters.hideDaughter || filters.hideSonInLaw,
+);
+
+const handleTraditionalFilterChange = () => {
+  if (genealogyStore.treeData) {
+    debouncedInitGraph(genealogyStore.treeData);
+  }
+};
+
+// ==================== 导入 / 导出（树页工具栏，2026-08-17） ====================
+// - 导出 JSON / 导入 Excel / 导入 JSON：OWNER/ADMIN（与后端 requireAdmin 一致）
+// - 导出 PDF：公开端点，所有登录用户可用
+const isTreeAdmin = computed(() => {
+  const token = localStorage.getItem('geneasphere_token');
+  if (!token) return false;
+  try {
+    const payload = JSON.parse(
+      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')),
+    );
+    return payload.role === 'OWNER' || payload.role === 'ADMIN';
+  } catch {
+    return false;
+  }
+});
+
+const exportingJson = ref(false);
+const exportingPdf = ref(false);
+const exportingHanging = ref(false);
+const importing = ref(false);
+const excelInputRef = ref<HTMLInputElement | null>(null);
+const jsonInputRef = ref<HTMLInputElement | null>(null);
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const handleIoCommand = (cmd: string) => {
+  if (cmd === 'export-json') handleExportJson();
+  else if (cmd === 'export-pdf') handleExportPdf();
+  else if (cmd === 'export-hanging') handleExportHanging();
+  else if (cmd === 'import-excel') excelInputRef.value?.click();
+  else if (cmd === 'import-json') jsonInputRef.value?.click();
+};
+
+const handleExportJson = async () => {
+  if (!props.clanId) return;
+  exportingJson.value = true;
+  try {
+    const data: any = await treeApi.exportClanJson(props.clanId);
+    downloadBlob(
+      new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
+      `族谱备份-${props.clanId}.json`,
+    );
+    ElMessage.success('JSON 已导出');
+  } catch {
+    ElMessage.error('导出 JSON 失败');
+  } finally {
+    exportingJson.value = false;
+  }
+};
+
+const handleExportPdf = async () => {
+  if (!props.clanId) return;
+  exportingPdf.value = true;
+  try {
+    const res = await fetch(treeApi.exportGenealogyPdfUrl(props.clanId));
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    downloadBlob(blob, `族谱-${props.clanId}.pdf`);
+    ElMessage.success('PDF 已导出');
+  } catch {
+    ElMessage.error('PDF 生成失败（可能服务器缺少浏览器渲染环境）');
+  } finally {
+    exportingPdf.value = false;
+  }
+};
+
+/** [二期 2026-08-19] 导出完整超长世系挂画 PDF（PRD §2.3；含文件大小提示） */
+const handleExportHanging = async () => {
+  if (!props.clanId) return;
+  try {
+    await ElMessageBox.confirm(
+      '将导出整张超长世系挂画 PDF（文件可能较大，耗时较长），是否继续？',
+      '导出完整大图',
+      { type: 'warning', confirmButtonText: '继续导出', cancelButtonText: '取消' },
+    );
+  } catch {
+    return; // 用户取消
+  }
+  exportingHanging.value = true;
+  try {
+    const res = await fetch(treeApi.exportHangingPdfUrl(props.clanId));
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    downloadBlob(blob, `世系挂画-${props.clanId}.pdf`);
+    ElMessage.success('挂画 PDF 已导出');
+  } catch {
+    ElMessage.error('挂画生成失败');
+  } finally {
+    exportingHanging.value = false;
+  }
+};
+
+const handleExcelFilePicked = async (e: Event) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !props.clanId) return;
+  importing.value = true;
+  try {
+    const res: any = await treeApi.importExcel(file, props.clanId);
+    ElMessage.success(res?.message || '导入完成');
+    refreshGraph();
+  } catch {
+    /* 错误提示由 request 拦截器统一处理 */
+  } finally {
+    importing.value = false;
+  }
+};
+
+const handleJsonFilePicked = async (e: Event) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !props.clanId) return;
+  importing.value = true;
+  try {
+    const res: any = await treeApi.importJson(file, props.clanId);
+    ElMessage.success(res?.message || '导入完成');
+    refreshGraph();
+  } catch {
+    /* 错误提示由 request 拦截器统一处理 */
+  } finally {
+    importing.value = false;
+  }
+};
+
+/**
+ * 过滤拷贝（返回新树对象，不修改原数据）
+ * - hideDaughter：女性"子女"节点整支剔除（含其子树）；
+ * - hideWife：男性主节点的配偶全部移除（女性主节点的"丈夫"不受此开关影响）；
+ * - hideSonInLaw：女性"子女"节点（女儿）的配偶移除。
+ * 已知边界：作为"妻子"出现在他人家庭里的女儿，其妻子节点仍受 hideWife 控制（v1 简化）。
+ */
+const applyTraditionalFilters = (node: GenealogyNode | null, isChild = false): GenealogyNode | null => {
+  if (!node) return null;
+
+  if (isChild && filters.hideDaughter && node.gender === 'female') return null;
+
+  let spouses = node.spouses;
+  if (filters.hideWife && node.gender === 'male') spouses = undefined;
+  if (filters.hideSonInLaw && isChild && node.gender === 'female') spouses = undefined;
+
+  const children = (node.children || [])
+    .map((c) => applyTraditionalFilters(c, true))
+    .filter((c): c is GenealogyNode => c !== null);
+
+  return {
+    ...node,
+    spouses: spouses && spouses.length > 0 ? spouses : undefined,
+    children: children.length > 0 ? children : undefined,
+  };
 };
 
 // Generate initial avatar SVG based on gender and name
@@ -637,6 +921,9 @@ function setupGraphResize(g: any) {
 
 const initGraph = async (data: GenealogyNode) => {
   if (!container.value) return;
+
+  // [传统过滤 2026-08-17] 入口处先做过滤拷贝（PRD §2.4：隐藏妻子/女儿/女婿，纯渲染）
+  data = applyTraditionalFilters(data);
 
   // 加载 G6 运行时（Graph + 必要扩展的注册）。
   // 动态 import 走子路径，绕开主入口的 preset 依赖链，
@@ -738,6 +1025,73 @@ const initGraph = async (data: GenealogyNode) => {
     if (node.children) node.children.forEach(visitSpouses);
   };
   visitSpouses(data);
+
+  // ==================== [吊线图 2026-08-17] 子女重挂载到妻子节点 ====================
+  /**
+   * 传统世系吊线图：子女应按"各妻子分别分支"。
+   * 布局引擎已原生支持"配偶节点带子树"（positionSpouseNodes → layoutSpouseSubtree），
+   * 因此只需把"父 → 子"边替换为"妻子节点 → 子"边，引擎会自动把该子女子树排到妻子下方。
+   *
+   * 匹配规则（child_links，后端已透出）：
+   * - link.mother_id 存在且是该人物的配偶 → 该子女挂到对应妻子节点下；
+   * - 其余（无母/母不在配偶列表）保持挂在父节点下。
+   * 兼容性：仅 xianshi 模式启用；其余视图模式走原逻辑，零改动。
+   */
+  if (genealogyStore.viewMode === 'xianshi') {
+    // 配偶原始 personId → 实际 G6 节点 id（外部配偶 id=sid；族内配偶为副本节点）
+    const spouseNodeIdBySpouseId = new Map<string, string>();
+    for (const n of pendingSpouseNodes) {
+      const originalId = n.data?.originalId ? String(n.data.originalId) : String(n.id);
+      if (!spouseNodeIdBySpouseId.has(originalId)) {
+        spouseNodeIdBySpouseId.set(originalId, String(n.id));
+      }
+    }
+
+    const edgesBySource = new Map<string, any[]>();
+    for (const e of graphData.edges || []) {
+      const s = String(e.source);
+      if (!edgesBySource.has(s)) edgesBySource.set(s, []);
+      edgesBySource.get(s)!.push(e);
+    }
+
+    const removeEdges = new Set<any>();
+    const addedEdges: any[] = [];
+    const visit = (node: any) => {
+      const original = node.data?.original as GenealogyNode | undefined;
+      const links = original?.child_links || [];
+      if (links.length > 0 && original?.spouses) {
+        const spouseIdSet = new Set(original.spouses.map((s: any) => String(s.id)));
+        const edgesOfNode = edgesBySource.get(String(node.id)) || [];
+        const edgeByTarget = new Map(edgesOfNode.map((e: any) => [String(e.target), e]));
+        for (const link of links) {
+          const motherId = link.mother_id ? String(link.mother_id) : undefined;
+          if (!motherId || !spouseIdSet.has(motherId)) continue; // 无母/母非配偶 → 留在父下
+          const childId = String(link.child_id);
+          const fatherEdge = edgeByTarget.get(childId);
+          const wifeNodeId = spouseNodeIdBySpouseId.get(motherId);
+          if (!fatherEdge || !wifeNodeId) continue;
+          removeEdges.add(fatherEdge);
+          addedEdges.push({
+            id: `mother-child-${wifeNodeId}-${childId}`,
+            source: wifeNodeId,
+            target: childId,
+            data: {
+              kind: 'parent-child',
+              child_type: link.child_type,
+              birth_order: link.birth_order,
+            },
+          });
+        }
+      }
+      if (node.children) node.children.forEach(visit);
+    };
+    visit(data);
+
+    if (graphData.edges) {
+      graphData.edges = graphData.edges.filter((e: any) => !removeEdges.has(e));
+    }
+    graphData.edges = [...(graphData.edges || []), ...addedEdges];
+  }
 
   // ==================== 使用自适应布局引擎 ====================
   /**
@@ -968,6 +1322,7 @@ const initGraph = async (data: GenealogyNode) => {
       'drag-canvas',
       'zoom-canvas',
       'drag-element',
+      'pinch-zoom', // [移动端 H5 2026-08-17] 双指缩放（触摸）
     ],
     // 不再使用 G6 布局，使用自定义布局引擎
     layout: undefined,
@@ -1058,9 +1413,17 @@ const initGraph = async (data: GenealogyNode) => {
           let truncated: string;
           if (genealogyStore.viewMode === 'portrait') {
             truncated = name.length > 6 ? name.substring(0, 5) + '..' : name;
+          } else if (genealogyStore.viewMode === 'su') {
+            // [苏式] 竖排世系条：单行最多 5 字，超长截断
+            truncated = name.length > 5 ? name.substring(0, 4) + '…' : name;
+          } else if (genealogyStore.viewMode === 'zhe') {
+            // [浙式] 世代格横排：名字单行显示，不换行
+            truncated = name.length > 6 ? name.substring(0, 5) + '..' : name;
           } else {
             truncated = name.length > 8 ? name.substring(0, 7) + '..' : name;
           }
+          // [浙式] 世代格横排名字不换行；其余视图竖排（每个字一行）
+          if (genealogyStore.viewMode === 'zhe') return truncated;
           // Insert newline between each character for vertical display
           return truncated.split('').join('\n');
         },
@@ -1082,9 +1445,21 @@ const initGraph = async (data: GenealogyNode) => {
           }
           const birth = d.data?.birth_year;
           const death = d.data?.death_year;
-          if (birth && death) return `${birth} - ${death}`;
-          if (birth) return `${birth} - `;
-          return '';
+          const years = birth && death ? `${birth} - ${death}` : birth ? `${birth} - ` : '';
+          // [吊线图 2026-08-17] 排行 + 生卒年：如「第2 · 1900 - 1985」
+          if (genealogyStore.viewMode === 'xianshi' && d.data?.birth_order) {
+            return years ? `第${d.data.birth_order} · ${years}` : `第${d.data.birth_order}`;
+          }
+          // [苏式 2026-08-19] 世系条：生卒年竖排在姓名下方（窄卡，字号小）
+          if (genealogyStore.viewMode === 'su') {
+            return years;
+          }
+          // [浙式 2026-08-19] 世代格：排行 + 生卒年横排
+          if (genealogyStore.viewMode === 'zhe') {
+            const rank = d.data?.birth_order ? `第${d.data.birth_order}` : '';
+            return [rank, years].filter(Boolean).join(' · ');
+          }
+          return years;
         },
         sublabelFill: (d: any) => {
           if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
@@ -1094,7 +1469,7 @@ const initGraph = async (data: GenealogyNode) => {
         },
         sublabelFontSize: config.sublabelFontSize,
         sublabelPlacement: 'bottom',
-        sublabelOffset: genealogyStore.viewMode === 'portrait' ? [0, 10] : [0, -2],
+        sublabelOffset: genealogyStore.viewMode === 'portrait' ? [0, 10] : genealogyStore.viewMode === 'su' ? [0, 4] : [0, -2],
 
         // Gender dot for compact mode
         ...(genealogyStore.viewMode === 'compact' && {
@@ -1144,6 +1519,9 @@ const initGraph = async (data: GenealogyNode) => {
         lineDash: (d: any) => {
           // 历史配偶边用虚线
           if (d.data?.kind === 'spouse' && !d.data?.is_current) return [6, 4];
+          // [吊线图 2026-08-17] 过继/收养/继子女（child_type !== BIOLOGICAL）连线用虚线
+          const childType = d.target?.data?.child_type;
+          if (childType && childType !== 'BIOLOGICAL') return [5, 4];
           return undefined;
         },
         endArrow: false,
@@ -2144,6 +2522,33 @@ defineExpose({
             <el-icon><User /></el-icon>
           </el-button>
         </el-tooltip>
+        <el-tooltip content="吊线图（世系）" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'xianshi' ? 'primary' : 'default'"
+            @click="handleViewModeChange('xianshi')"
+            size="small"
+          >
+            <el-icon><Histogram /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="苏式（竖排世系条）" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'su' ? 'primary' : 'default'"
+            @click="handleViewModeChange('su')"
+            size="small"
+          >
+            <el-icon><Reading /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="浙式（世代分格）" placement="bottom">
+          <el-button
+            :type="genealogyStore.viewMode === 'zhe' ? 'primary' : 'default'"
+            @click="handleViewModeChange('zhe')"
+            size="small"
+          >
+            <el-icon><Grid /></el-icon>
+          </el-button>
+        </el-tooltip>
       </el-button-group>
 
       <el-divider direction="vertical" />
@@ -2158,7 +2563,7 @@ defineExpose({
       >
         <el-option label="全部" value="all" />
         <el-option label="男" value="male" />
-        <el-option label="Ů" value="female" />
+        <el-option label="女" value="female" />
       </el-select>
 
       <el-tooltip content="仅显示有照片" placement="bottom">
@@ -2166,6 +2571,43 @@ defineExpose({
           <el-icon><Picture /></el-icon>
         </el-checkbox>
       </el-tooltip>
+
+      <!-- [传统过滤 PRD §2.4] 隐藏妻子/女儿/女婿，可自由组合，实时重绘 -->
+      <el-popover placement="bottom" :width="176" trigger="click" :visible="filterPopoverVisible" @show="filterPopoverVisible = true" @hide="filterPopoverVisible = false">
+        <template #reference>
+          <el-button
+            :icon="Filter"
+            size="small"
+            :type="anyFilterActive ? 'primary' : 'default'"
+            title="传统族谱过滤"
+          />
+        </template>
+        <div class="filter-panel">
+          <div class="filter-panel-title">传统族谱过滤（默认全关）</div>
+          <el-checkbox v-model="filters.hideWife" @change="handleTraditionalFilterChange">隐藏妻子</el-checkbox>
+          <el-checkbox v-model="filters.hideDaughter" @change="handleTraditionalFilterChange">隐藏女儿</el-checkbox>
+          <el-checkbox v-model="filters.hideSonInLaw" @change="handleTraditionalFilterChange">隐藏女婿</el-checkbox>
+          <div class="filter-panel-hint">仅控制展示，不修改族谱数据</div>
+        </div>
+      </el-popover>
+
+      <!-- [导入/导出 2026-08-17] 树页工具栏：JSON/PDF 导出 + Excel/JSON 导入（导入与导出JSON仅 OWNER/ADMIN） -->
+      <el-dropdown trigger="click" @command="handleIoCommand">
+        <el-button size="small" :icon="Upload" :loading="exportingJson || exportingPdf || importing">
+          导入/导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="export-json" :disabled="!isTreeAdmin || exportingJson">导出 JSON（备份）</el-dropdown-item>
+            <el-dropdown-item command="export-pdf" :disabled="exportingPdf">导出 PDF（分页印刷）</el-dropdown-item>
+            <el-dropdown-item command="export-hanging" :disabled="exportingHanging">导出完整大图（挂画）…</el-dropdown-item>
+            <el-dropdown-item command="import-excel" :disabled="!isTreeAdmin || importing">导入 Excel…</el-dropdown-item>
+            <el-dropdown-item command="import-json" :disabled="!isTreeAdmin || importing">导入 JSON 备份…</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <input ref="excelInputRef" type="file" accept=".xlsx" class="hidden-file-input" @change="handleExcelFilePicked" />
+      <input ref="jsonInputRef" type="file" accept=".json,application/json" class="hidden-file-input" @change="handleJsonFilePicked" />
 
       <el-divider direction="vertical" />
 
@@ -2228,7 +2670,7 @@ defineExpose({
       </span>
       <span class="stat-divider">|</span>
       <span class="stat-item">
-        视图: <strong>{{ genealogyStore.viewMode === 'compact' ? '紧凑' : genealogyStore.viewMode === 'detailed' ? '详细' : '肖像' }}</strong>
+        视图: <strong>{{ genealogyStore.viewMode === 'compact' ? '紧凑' : genealogyStore.viewMode === 'detailed' ? '详细' : genealogyStore.viewMode === 'xianshi' ? '吊线图' : genealogyStore.viewMode === 'su' ? '苏式' : genealogyStore.viewMode === 'zhe' ? '浙式' : '肖像' }}</strong>
       </span>
       <span class="stat-divider">|</span>
       <span class="stat-item">
@@ -2342,6 +2784,14 @@ defineExpose({
   height: 100%;
   background: linear-gradient(135deg, #FAF8F5 0%, #F5F0E8 100%);
   overflow: hidden;
+}
+
+/* [移动端 H5 2026-08-17] 触摸拖拽/双指缩放不被浏览器手势抢占 */
+.genealogy-tree-canvas {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .tree-toolbar {
@@ -2738,5 +3188,33 @@ defineExpose({
     padding: 4px 12px;
     gap: 8px;
   }
+}
+
+/* [传统过滤 PRD §2.4] 过滤面板 */
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.filter-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2c3e50;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #f0ebe3;
+}
+.filter-panel :deep(.el-checkbox) {
+  margin-right: 0;
+  height: 24px;
+}
+.filter-panel-hint {
+  font-size: 11px;
+  color: #a0a0a0;
+  padding-top: 2px;
+}
+
+/* [导入/导出 2026-08-17] 隐藏的原生文件选择框 */
+.hidden-file-input {
+  display: none;
 }
 </style>

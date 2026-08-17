@@ -54,7 +54,8 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const clanId = ref(String(route.query.clanId || '1'))
+// 家族 slug 取自路由参数 /zupu/:slug/invite/reviews
+const clanSlug = route.params.slug as string
 
 const list = ref<any[]>([])
 const status = ref<string>('')
@@ -73,7 +74,7 @@ const fetchList = async () => {
   loading.value = true
   try {
     const res = await axios.get('/api/invite/modification-requests', {
-      params: { clan_id: clanId.value, status: status.value || undefined },
+      params: { clan_slug: clanSlug, status: status.value || undefined },
     })
     list.value = res.data.data
   } catch (e: any) {

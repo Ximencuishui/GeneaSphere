@@ -136,6 +136,49 @@ export const treeApi = {
    */
   deleteMarriage: (familyId: string) =>
     request.delete(`/api/tree/marriage/${familyId}`),
+
+  // ==================== 导入 / 导出（树页工具栏，2026-08-17） ====================
+
+  /**
+   * 导出家族数据 JSON（OWNER/ADMIN；结果可直接用 importJson 重新导入）
+   * clanId 可为数字 id 或 clan slug（后端 resolveClanId 兼容）
+   */
+  exportClanJson: (clanId: string | number) =>
+    request.get(`/api/tree/clan/${clanId}/export`),
+
+  /**
+   * 导出分页 PDF 的 URL（公开端点，可直接 fetch/下载）
+   */
+  exportGenealogyPdfUrl: (clanId: string | number) => `/print/genealogy/${clanId}`,
+
+  /**
+   * 导出完整超长世系挂画 PDF 的 URL（公开端点；文件可能很大）
+   */
+  exportHangingPdfUrl: (clanId: string | number) => `/print/hanging/${clanId}`,
+
+  /**
+   * 导入 Excel（OWNER/ADMIN；FormData）
+   */
+  importExcel: (file: File, clanId: string | number) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('clan_id', String(clanId));
+    return request.post('/import/excel', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  /**
+   * 导入族谱 JSON 备份（OWNER/ADMIN；FormData）
+   */
+  importJson: (file: File, clanId: string | number) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('clan_id', String(clanId));
+    return request.post('/import/json', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 export default treeApi;

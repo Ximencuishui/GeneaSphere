@@ -35,8 +35,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { familyRelationApi } from '@/api/familyRelation'
+
+const route = useRoute()
 
 const disputes = ref<any[]>([])
 const loading = ref(false)
@@ -51,7 +54,7 @@ function formatState(s: any) { return s ? JSON.stringify(s, null, 2) : '无' }
 async function fetchData() {
   loading.value = true
   try {
-    const clanSlug = new URLSearchParams(location.search).get('clanId') || '1'
+    const clanSlug = route.params.slug as string
     disputes.value = await familyRelationApi.admin.listDisputes(clanSlug) as any[]
   } catch (err) {
     console.error(err)

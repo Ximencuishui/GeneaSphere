@@ -98,8 +98,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { familyRelationApi } from '@/api/familyRelation'
+
+const route = useRoute()
 
 const changes = ref<any[]>([])
 const loading = ref(false)
@@ -141,9 +144,9 @@ function formatStateBrief(s: any) {
 async function fetchData() {
   loading.value = true
   try {
-    const clanSlug = new URLSearchParams(location.search).get('clanId') || '1'
+    const clanSlug = route.params.slug as string
     const res: any = await familyRelationApi.admin.listChanges({
-      clanId,
+      clanSlug,
       status: filterStatus.value || undefined,
       change_type: filterType.value || undefined,
       page: page.value,

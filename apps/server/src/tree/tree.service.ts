@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, InternalServerErrorException, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma, PrismaService, Person, Gender } from '@geneasphere/db';
 import { serializeBigInt } from '../common/bigint-serializer';
+import { PedigreeService } from '../pedigree/pedigree.service';
 
 export interface TreeNode {
   id: string;
@@ -18,6 +19,37 @@ export interface TreeNode {
   has_photo: boolean;
   // 是否属于主传承线路（由 getClanFullTree 根据 mainLineage 回填）
   is_main_lineage?: boolean;
+  // [树谱增强 2026-08-17] 与 children[] 一一对应（同下标）的子女边元数据：
+  // 排行 / 过继类型 / 所属家庭 / 父、母归属。吊线图"各妻子女分别分支"、排行展示、
+  // 过继虚线、过滤开关（隐藏女儿/女婿）全部依赖此字段。
+  child_links?: ChildLink[];
+}
+
+/**
+ * 子女边元数据（从 FamilyChild + FamilyUnit 推导，决策清单 §E2）
+ * - child_id    : 对应 children[] 里的节点 id
+ * - birth_order : 排行（FamilyChild.birth_order）
+ * - child_type  : BIOLOGICAL(亲生) | ADOPTED(收养) | STEP(继子女) | FOSTER(寄养/过继)
+ * - family_id   : 所属 FamilyUnit id
+ * - father_id / mother_id : 该家庭中的夫/妻 id（子女从哪个父/母分支）
+ */
+export interface ChildLink {
+  child_id: string;
+  birth_order?: number;
+  child_type?: string;
+  family_id?: string;
+  father_id?: string;
+  mother_id?: string;
+}
+
+/** 内部结构：ChildLink 的原始记录（含夫/妻 id，用于归属匹配） */
+interface ChildLinkEntry {
+  child_id: string;
+  birth_order?: number;
+  child_type?: string;
+  family_id: string;
+  father_id?: string;
+  mother_id?: string;
 }
 
 /**
@@ -77,8 +109,17 @@ export interface ClanTreeResponse {
  */
 @Injectable()
 export class TreeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pedigreeService: PedigreeService,
+  ) {}
 
+  /**
+   * 创建人物；传 parent_id 时同时建立亲子关系。
+   * [双写一致性 2026-08-17] 亲子关系（PersonAncestry + FamilyChild/FamilyUnit）
+   * 统一委托 PedigreeService.attachChildToParents（决策清单 §H1），
+   * 保证树谱新增的人物也具备排行/过继类型（FamilyChild），与册谱世录口径一致。
+   */
   async createPerson(
     data: {
       clan_id: bigint;
@@ -102,35 +143,19 @@ export class TreeService {
         },
       });
 
-      const ancestryRecords: Prisma.PersonAncestryCreateManyInput[] = [];
-
-      ancestryRecords.push({
-        ancestor_id: person.id,
-        descendant_id: person.id,
-        depth: 0,
-      });
-
       if (parent_id) {
-        const parentAncestries = await tx.personAncestry.findMany({
-          where: {
-            descendant_id: parent_id,
-            ancestor: { deleted_at: null },
-          },
-          select: { ancestor_id: true, depth: true },
+        await this.pedigreeService.attachChildToParents(tx, {
+          clan_id: data.clan_id,
+          child_id: person.id,
+          parent_ids: [parent_id],
         });
-
-        for (const pa of parentAncestries) {
-          ancestryRecords.push({
-            ancestor_id: pa.ancestor_id,
-            descendant_id: person.id,
-            depth: pa.depth + 1,
-          });
-        }
+      } else {
+        // 顶层祖先：仅写 self-record
+        await tx.personAncestry.createMany({
+          data: [{ ancestor_id: person.id, descendant_id: person.id, depth: 0 }],
+          skipDuplicates: true,
+        });
       }
-
-      await tx.personAncestry.createMany({
-        data: ancestryRecords,
-      });
 
       return person;
     });
@@ -210,6 +235,9 @@ export class TreeService {
     }
 
     // 7) 把 children 挂到父节点
+    //    [树谱增强 2026-08-17] 同步透出 child_links（排行/过继类型/父、母归属）
+    const subtreeClanId = ancestries[0].descendant.clan_id;
+    const childLinkMap = await this.buildChildLinksMap(subtreeClanId, personIds);
     for (const [parentId, childIds] of childMap) {
       const parentNode = nodeMap.get(parentId);
       if (!parentNode) continue;
@@ -217,6 +245,7 @@ export class TreeService {
       parentNode.children = uniqueChildIds
         .map((id) => nodeMap.get(id))
         .filter((n): n is TreeNode => n !== undefined);
+      parentNode.child_links = this.buildNodeChildLinks(parentId, uniqueChildIds, childLinkMap);
     }
 
     // 8) 根节点
@@ -236,6 +265,7 @@ export class TreeService {
       rootNode.children = directChildIds
         .map((id) => nodeMap.get(id))
         .filter((n): n is TreeNode => n !== undefined);
+      rootNode.child_links = this.buildNodeChildLinks(rootNode.id, directChildIds, childLinkMap);
       console.warn(
         `[TreeService] getSubTree: missing self-record for ancestor ${rootPersonId}; used person.findUnique fallback. Please run the self-record fix script to repair the closure table.`,
       );
@@ -442,22 +472,41 @@ export class TreeService {
 
     const personIds = allPersons.map(p => p.id);
 
-    // 3) 一次性查出所有直接父子关系（depth=1），避免闭包表爆炸
+    // 3) 构建父子映射
+    //    [2026-08-16] 权威源改为 family_children（family_units.husband_id 即父）：
+    //    person_ancestry 是派生索引（闭包表），任何写入端漏同步都会造成漂移；
+    //    family_children 是各写路径（seed/import/tree/pedigree/merge）统一维护的关系表。
+    //    以 family_children 为主，person_ancestry depth=1 仅做兜底补漏（只认男性祖先为父，
+    //    且跳过已有权威父链的孩子，避免"母链/重复记录"把同一孩子挂到多个父节点下）。
+    const childMap = new Map<string, string[]>();
+    const addChild = (parentKey: string, childKey: string) => {
+      if (!childMap.has(parentKey)) childMap.set(parentKey, []);
+      if (!childMap.get(parentKey)!.includes(childKey)) childMap.get(parentKey)!.push(childKey);
+    };
+    const familyChildLinks = await this.prisma.familyChild.findMany({
+      where: { family: { clan_id: clanId } },
+      select: { child_id: true, family: { select: { husband_id: true } } },
+    });
+    const attachedChildIds = new Set<string>();
+    for (const cl of familyChildLinks) {
+      if (!cl.family.husband_id) continue;
+      attachedChildIds.add(cl.child_id.toString());
+      addChild(cl.family.husband_id.toString(), cl.child_id.toString());
+    }
+    // 兜底：闭包表 depth=1（只补 family_children 缺失的孩子，且父系优先）
     const directRelations = await this.prisma.personAncestry.findMany({
       where: {
         ancestor_id: { in: personIds },
         descendant_id: { in: personIds },
         depth: 1,
       },
-      select: { ancestor_id: true, descendant_id: true },
+      include: { ancestor: { select: { gender: true } } },
     });
-
-    // 3) 构建父子映射
-    const childMap = new Map<string, string[]>();
     for (const rel of directRelations) {
-      const parentKey = rel.ancestor_id.toString();
-      if (!childMap.has(parentKey)) childMap.set(parentKey, []);
-      childMap.get(parentKey)!.push(rel.descendant_id.toString());
+      const descId = rel.descendant_id.toString();
+      if (attachedChildIds.has(descId)) continue; // 已有权威父链，跳过母链/重复记录
+      if (rel.ancestor?.gender !== 'male') continue; // 兜底只认父系，避免挂到妻子下
+      addChild(rel.ancestor_id.toString(), descId);
     }
 
     // 4) 批量预取头像
@@ -483,6 +532,8 @@ export class TreeService {
     }
 
     // 6) 把 children 挂到父节点
+    //    [树谱增强 2026-08-17] 同步透出 child_links（排行/过继类型/父、母归属）
+    const childLinkMap = await this.buildChildLinksMap(clanId);
     for (const [parentId, childIds] of childMap) {
       const parentNode = nodeMap.get(parentId);
       if (!parentNode) continue;
@@ -490,18 +541,18 @@ export class TreeService {
       parentNode.children = uniqueChildIds
         .map((id) => nodeMap.get(id))
         .filter((n): n is TreeNode => n !== undefined);
+      parentNode.child_links = this.buildNodeChildLinks(parentId, uniqueChildIds, childLinkMap);
     }
 
-    // 7) 查询配偶信息（FamilyUnit）
-    //    [I-1 修复 2026-08-01] 仅查 rootPersonId 的配偶（及其配对夫妻），其余节点的 spouses 留空 []
-    //    前端点击节点时通过 GET /api/tree/person/:id/detail 补全（已确认非全量加载成本）
-    const rootFamilyUnits = (await this.prisma.familyUnit.findMany({
+    // 7) 查询全族配偶信息（FamilyUnit）
+    //    [2026-08-16 修复] 旧实现只查 rootPersonId 的配偶（I-1 性能优化），
+    //    导致除根节点外所有节点的 spouses 为空 —— 前端除根配偶外看不到任何妻子节点，
+    //    与 PRD「配偶节点」「一人多配偶」「吊线图按妻子分支出子女」的设计不符。
+    //    改为查全族 familyUnit 并为每个节点挂 spouses（depth-limited 模式早已全量挂载）。
+    //    配偶节点在树中体积小、受 viewport culling 控制，1000+ 节点场景仍可流畅渲染。
+    const allFamilyUnits = (await this.prisma.familyUnit.findMany({
       where: {
         clan_id: clanId,
-        OR: [
-          { husband_id: rootPersonId },
-          { wife_id: rootPersonId },
-        ],
       },
       include: {
         husband: { select: { id: true, full_name: true, gender: true } },
@@ -510,7 +561,7 @@ export class TreeService {
     })) as any[];
 
     const spouseMap = new Map<string, SpouseInfo[]>();
-    for (const fam of rootFamilyUnits) {
+    for (const fam of allFamilyUnits) {
       if (fam.husband_id && fam.wife_id) {
         const hId = fam.husband_id.toString();
         const wId = fam.wife_id.toString();
@@ -646,12 +697,15 @@ export class TreeService {
     }
 
     // 7) 挂载子节点
+    //    [树谱增强 2026-08-17] 同步透出 child_links（排行/过继类型/父、母归属）
+    const childLinkMap = await this.buildChildLinksMap(clanId, personIds);
     for (const [parentId, childIds] of childMap) {
       const parentNode = nodeMap.get(parentId);
       if (!parentNode) continue;
       parentNode.children = childIds
         .map(id => nodeMap.get(id))
         .filter((n): n is TreeNode => n !== undefined);
+      parentNode.child_links = this.buildNodeChildLinks(parentId, childIds, childLinkMap);
     }
 
     // 8) 查询配偶信息（只查询在范围内的人的配偶）
@@ -769,9 +823,11 @@ export class TreeService {
     }
 
     // 无用户关联时，退回到族内最远支系末端
+    // [2026-08-16] 深度相同时按 id 升序取（优先主支系/更早创建的人物，
+    // 避免同名深度的测试人物抢占主脉末端）
     const lastDescendant = await this.prisma.personAncestry.findFirst({
       where: { ancestor_id: rootPersonId },
-      orderBy: { depth: 'desc' },
+      orderBy: [{ depth: 'desc' }, { descendant_id: 'asc' }],
       select: { descendant_id: true },
     });
     if (!lastDescendant) return [rootPersonId.toString()];
@@ -781,31 +837,64 @@ export class TreeService {
   /**
    * 从 fromPersonId 沿直接父链回溯到 toAncestorId
    * 优化：一次性查出所有祖先关系，避免 N 次数据库查询
+   *
+   * [2026-08-16 修复] 旧实现只查 `descendant_id IN [fromPersonId, toAncestorId]`
+   * 两个端点的 depth=1 关系，中间人不在查询集合内，回溯走一步就断，
+   * 导致 findMainLineagePath 返回的主传承路径永远只有 2 个节点
+   * （前端「传承路径 2代」、金色主脉高亮仅 2 人、聚焦传承失效）。
+   * 现在先从闭包表取出 fromPersonId 的全部祖先构成候选集，再一次性查这些
+   * 候选人的 depth=1 父链；同一人存在「父+母」两条 depth=1 时优先取男性祖先。
    */
   private async buildLineagePath(
     fromPersonId: bigint,
     toAncestorId: bigint,
   ): Promise<string[]> {
-    // 一次性查出从起点到根的所有 depth=1 祖先关系
+    // 1) 从闭包表取出 fromPersonId 的所有祖先（任意深度），构成候选节点集
+    const ancestorLinks = await this.prisma.personAncestry.findMany({
+      where: {
+        descendant_id: fromPersonId,
+        depth: { gt: 0 },
+      },
+      select: { ancestor_id: true },
+    });
+    const candidateIds = new Set<string>([
+      fromPersonId.toString(),
+      toAncestorId.toString(),
+    ]);
+    for (const a of ancestorLinks) candidateIds.add(a.ancestor_id.toString());
+
+    // 2) 一次性查出候选集中所有人的 depth=1 关系（含祖先性别，父系优先）
+    const candidateBigInts = [...candidateIds].map((id) => BigInt(id));
     const ancestors = await this.prisma.personAncestry.findMany({
       where: {
-        descendant_id: { in: [fromPersonId, toAncestorId] },
+        descendant_id: { in: candidateBigInts },
         depth: 1,
       },
-      select: { ancestor_id: true, descendant_id: true },
+      include: {
+        ancestor: { select: { gender: true } },
+      },
     });
 
-    // 构建 descendant -> parent 的映射
+    // 构建 descendant -> 父系祖先 的映射（同一个人有父+母两条 depth=1 时优先男性）
     const parentMap = new Map<string, string>();
+    const parentGender = new Map<string, string>();
     for (const a of ancestors) {
+      if (a.ancestor_id === a.descendant_id) continue; // 跳过 self-record（正常 depth=1 不应存在）
       const descId = a.descendant_id.toString();
       const anceId = a.ancestor_id.toString();
-      // 避免覆盖更近的祖先（后出现的 depth=1 关系更近）
-      // 由于 findMany 结果无序，手动保证映射正确
-      parentMap.set(descId, anceId);
+      const gender = a.ancestor?.gender;
+      const existing = parentMap.get(descId);
+      if (!existing) {
+        parentMap.set(descId, anceId);
+        parentGender.set(descId, gender || '');
+      } else if (gender === 'male' && parentGender.get(descId) !== 'male') {
+        // 已记录的是母亲（female/未知），当前是父亲 → 覆盖，确保走父系主脉
+        parentMap.set(descId, anceId);
+        parentGender.set(descId, gender);
+      }
     }
 
-    // 从起点沿父链回溯到根
+    // 3) 从起点沿父链回溯到根
     const path: string[] = [fromPersonId.toString()];
     let currentId = fromPersonId.toString();
     const visited = new Set<string>();
@@ -876,6 +965,75 @@ export class TreeService {
   ): Promise<{ avatar_url?: string; thumbnail_url?: string; has_photo: boolean }> {
     const map = await this.batchFindPersonAvatars([personId]);
     return map.get(personId.toString()) || { has_photo: false };
+  }
+
+  // ==================== 子女边元数据（ChildLink） ====================
+  // [树谱增强 2026-08-17] 闭包表只表达"可达性"，排行/过继类型/家庭归属在 FamilyChild。
+  // 这里一次查询拉出（含家庭信息），供三个建树路径（全量/深度限制/子树）共用。
+
+  /**
+   * 批量加载 FamilyChild 并建立 childId -> 家庭记录索引
+   * @param personIds 传了则只查这些子女（深度限制/子树路径）；全量路径传 undefined
+   */
+  private async buildChildLinksMap(
+    clanId: bigint,
+    personIds?: bigint[],
+  ): Promise<Map<string, ChildLinkEntry[]>> {
+    const where = personIds
+      ? { child_id: { in: personIds }, family: { clan_id: clanId } }
+      : { family: { clan_id: clanId } };
+
+    const rows = await this.prisma.familyChild.findMany({
+      where,
+      select: {
+        child_id: true,
+        birth_order: true,
+        child_type: true,
+        family: { select: { id: true, husband_id: true, wife_id: true } },
+      },
+    });
+
+    const map = new Map<string, ChildLinkEntry[]>();
+    for (const r of rows) {
+      const cid = r.child_id.toString();
+      const entry: ChildLinkEntry = {
+        child_id: cid,
+        birth_order: r.birth_order,
+        child_type: r.child_type,
+        family_id: r.family.id.toString(),
+        father_id: r.family.husband_id ? r.family.husband_id.toString() : undefined,
+        mother_id: r.family.wife_id ? r.family.wife_id.toString() : undefined,
+      };
+      if (!map.has(cid)) map.set(cid, []);
+      map.get(cid)!.push(entry);
+    }
+    return map;
+  }
+
+  /**
+   * 为某个父节点生成 child_links[]（与 children[] 同下标一一对应）
+   * 归属规则：优先选"该父/母是家庭 husband/wife"的那条记录；无则取第一条；无记录返回最小占位。
+   */
+  private buildNodeChildLinks(
+    parentId: string,
+    childIds: string[],
+    linkMap: Map<string, ChildLinkEntry[]>,
+  ): ChildLink[] {
+    return childIds.map((cid) => {
+      const entries = linkMap.get(cid) ?? [];
+      const entry =
+        entries.find((e) => e.father_id === parentId || e.mother_id === parentId) ??
+        entries[0];
+      if (!entry) return { child_id: cid };
+      return {
+        child_id: cid,
+        birth_order: entry.birth_order,
+        child_type: entry.child_type,
+        family_id: entry.family_id,
+        father_id: entry.father_id,
+        mother_id: entry.mother_id,
+      };
+    });
   }
 
   private async getDirectParent(personId: bigint): Promise<bigint | null> {

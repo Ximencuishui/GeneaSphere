@@ -158,6 +158,10 @@
               <el-button @click="addRelative" :icon="Plus" size="large">
                 添加亲属
               </el-button>
+              <!-- [树↔册谱联动 2026-08-17] 跳转册谱并定位该人物世录 -->
+              <el-button @click="jumpToCepu" :icon="Tickets" size="large">
+                查看册谱
+              </el-button>
               <el-button @click="generateVideo" :icon="VideoCamera" size="large">
                 生成历史音像墙
               </el-button>
@@ -303,7 +307,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, nextTick } from 'vue';
 import { defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -327,6 +331,7 @@ import {
   VideoPlay,
   Connection,
   ArrowLeft,
+  Tickets,
   HomeFilled,
 } from '@element-plus/icons-vue';
 // 异步加载 GenealogyTree 组件（含 @antv/g6 1MB+ 重库）：
@@ -648,6 +653,34 @@ function onPersonNavigate(personId: string | number) {
     : null;
   if (node) genealogyStore.selectNode(node);
 }
+
+/** [树↔册谱联动 2026-08-17] 树谱 → 册谱：跳转并定位该人物世录条目 */
+function jumpToCepu() {
+  const node = genealogyStore.selectedNode;
+  if (!node) {
+    ElMessage.warning('请先选中一位人物');
+    return;
+  }
+  const clanId = route.params.clanId as string;
+  router.push({ path: `/cepu/${clanId}`, query: { person: String(node.id) } });
+}
+
+/** [树↔册谱联动 2026-08-17] 册谱 → 树谱：?focus=personId 高亮并居中该节点 */
+watch(
+  () => route.query.focus,
+  (focus) => {
+    if (!focus) return;
+    nextTick(() => {
+      onPersonNavigate(String(focus));
+      // 闪烁高亮 2 秒（复用三代亲属高亮通道）
+      const tree = treeRef.value as any;
+      if (tree && typeof tree.setHighlight === 'function') {
+        tree.setHighlight([String(focus)]);
+        setTimeout(() => tree.setHighlight([]), 2000);
+      }
+    });
+  },
+);
 
 function onCreateMarriage(_withPersonId: string | number) {
   ElMessage.info('请在画布中选择另一个人物后，编辑其详情创建婚姻');

@@ -2,13 +2,13 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useCapabilityStore } from '@/stores/capability'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import {
   Monitor,
   User,
   PictureFilled,
-  Collection,
   Connection,
   Setting,
   Printer,
@@ -20,35 +20,28 @@ import {
   Expand,
   UserFilled,
   Menu,
-  DataLine,
   Warning,
-  RefreshRight,
-  Postcard,
-  VideoCamera,
-  Calendar,
+  Search,
+  EditPen,
 } from '@element-plus/icons-vue'
 
 const iconMap: Record<string, any> = {
   Monitor,
   User,
   PictureFilled,
-  Collection,
   Connection,
   Setting,
   Printer,
   Message,
   Document,
-  DataLine,
   Warning,
-  RefreshRight,
-  Postcard,
-  VideoCamera,
-  Calendar,
+  EditPen,
 }
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const capabilityStore = useCapabilityStore()
 
 const isCollapse = ref(false)
 const pendingCount = ref(0)
@@ -56,6 +49,14 @@ const pendingCount = ref(0)
 const notifyVisible = ref(false)
 // 移动端侧边栏显示状态
 const sidebarVisible = ref(false)
+// 菜单搜索关键词（方案 B）
+const menuKeyword = ref('')
+
+onMounted(() => {
+  fetchPendingCount()
+  // 拉取功能能力状态（用于按能力裁剪菜单，如短信未配置时隐藏"通知与短信"）
+  capabilityStore.refresh().catch(() => {})
+})
 
 // 待办数据
 const pendingTodos = ref<{
@@ -94,55 +95,69 @@ watch(
   () => fetchPendingCount(),
 )
 
-onMounted(() => {
-  fetchPendingCount()
-})
-
 // 当前路径的 clan slug（路径参数 :slug）
 const clanSlug = computed(() => (route.params.slug as string) || '')
 
-// 根据当前 slug 动态生成所有菜单路径
+// 根据当前 slug 动态生成所有菜单路径（族谱管理员后台，按职责域重组）
 const menuItems = computed(() => [
   {
-    title: '概况',
+    title: '族谱概况',
     icon: 'Monitor',
     children: [
       { title: '控制面板', path: `/zupu/${clanSlug.value}` },
-      { title: '族谱树', path: `/tree/${clanSlug.value}` },
+      { title: '树谱', path: `/tree/${clanSlug.value}` },
+      { title: '册谱', path: `/cepu/${clanSlug.value}` },
+      { title: '生成族谱', path: `/zupu/${clanSlug.value}/genealogy/generate` },
+      { title: '数据统计', path: `/zupu/${clanSlug.value}/statistics` },
     ],
   },
   {
-    title: '人员管理',
-    icon: 'User',
+    title: '修谱',
+    icon: 'EditPen',
     children: [
-      { title: '成员列表', path: `/zupu/${clanSlug.value}/members` },
-      { title: '权限分配', path: `/zupu/${clanSlug.value}/members?tab=roles` },
-      { title: '邀请二维码', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
-      { title: '验证记录', path: `/zupu/${clanSlug.value}/invite/records` },
-      { title: '信息修改审核', path: `/zupu/${clanSlug.value}/invite/reviews` },
-      { title: '家庭关系变更审核', path: `/zupu/${clanSlug.value}/family-relation/reviews` },
-      { title: '子女归属争议', path: `/zupu/${clanSlug.value}/family-relation/disputes` },
+      { title: '历史版本', path: `/zupu/${clanSlug.value}/genealogy/history` },
       { title: 'PDF 导入管理', path: `/zupu/${clanSlug.value}/import` },
     ],
   },
   {
-    title: '内容审核',
-    icon: 'PictureFilled',
+    title: '族员管理',
+    icon: 'User',
+    children: [
+      { title: '族员列表', path: `/zupu/${clanSlug.value}/members` },
+      { title: '权限分配', path: `/zupu/${clanSlug.value}/members?tab=roles` },
+      { title: '邀请二维码', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
+      { title: '验证记录', path: `/zupu/${clanSlug.value}/invite/records` },
+      { title: '信息修改审核', path: `/zupu/${clanSlug.value}/invite/reviews` },
+    ],
+  },
+  {
+    title: '审核中心',
+    icon: 'Warning',
     children: [
       { title: '影像审核', path: `/zupu/${clanSlug.value}/reviews/media` },
       { title: '生平审核', path: `/zupu/${clanSlug.value}/reviews/bio` },
+      { title: '家庭关系变更审核', path: `/zupu/${clanSlug.value}/family-relation/reviews` },
+      { title: '子女归属争议', path: `/zupu/${clanSlug.value}/family-relation/disputes` },
       { title: '举报管理', path: `/zupu/${clanSlug.value}/reports` },
     ],
   },
   {
-    title: '地方记忆',
-    icon: 'Collection',
+    title: '内容与影像',
+    icon: 'PictureFilled',
     children: [
+      { title: '影像库', path: `/zupu/${clanSlug.value}/media/library` },
+      { title: '相册管理', path: `/zupu/${clanSlug.value}/media/albums` },
+      { title: '家庭图册', path: `/zupu/${clanSlug.value}/family-albums` },
+      { title: '公告管理', path: `/zupu/${clanSlug.value}/announcements` },
       { title: '题库管理', path: `/zupu/${clanSlug.value}/memory/quizzes` },
+      { title: '大事件列表', path: `/zupu/${clanSlug.value}/family-events` },
+      { title: '迁徙管理', path: `/zupu/${clanSlug.value}/migration` },
+      { title: '迁徙历史视频', path: `/zupu/${clanSlug.value}/video/migration` },
+      { title: '大事件视频', path: `/zupu/${clanSlug.value}/video/event` },
     ],
   },
   {
-    title: '寻亲管理',
+    title: '寻亲与合并',
     icon: 'Connection',
     children: [
       { title: '认亲申请', path: `/zupu/${clanSlug.value}/merge/applications` },
@@ -150,81 +165,18 @@ const menuItems = computed(() => [
     ],
   },
   {
-    title: '家族公告',
-    icon: 'Postcard',
-    children: [
-      { title: '公告管理', path: `/zupu/${clanSlug.value}/announcements` },
-    ],
-  },
-  {
-    title: '数据管理',
-    icon: 'DataLine',
-    children: [
-      { title: '数据统计', path: `/zupu/${clanSlug.value}/statistics` },
-      { title: '回收站', path: `/zupu/${clanSlug.value}/trash` },
-      { title: '数据导出', path: `/zupu/${clanSlug.value}/settings/export` },
-    ],
-  },
-  {
-    title: '影像管理',
-    icon: 'PictureFilled',
-    children: [
-      { title: '影像库', path: `/zupu/${clanSlug.value}/media/library` },
-      { title: '相册管理', path: `/zupu/${clanSlug.value}/media/albums` },
-    ],
-  },
-  {
-    title: '工具记录',
-    icon: 'RefreshRight',
-    children: [
-      { title: 'AI工具使用记录', path: `/zupu/${clanSlug.value}/toolbox-usage` },
-      { title: '家庭图册', path: `/zupu/${clanSlug.value}/family-albums` },
-    ],
-  },
-  {
-    title: '印刷服务',
+    title: '族谱印刷',
     icon: 'Printer',
     children: [
-      { title: '订单管理', path: `/zupu/${clanSlug.value}/orders` },
+      { title: '印刷订单', path: `/zupu/${clanSlug.value}/orders` },
     ],
   },
   {
-    title: '族谱生成',
-    icon: 'Document',
-    children: [
-      { title: '生成族谱', path: `/zupu/${clanSlug.value}/genealogy/generate` },
-      { title: '历史版本', path: `/zupu/${clanSlug.value}/genealogy/history` },
-    ],
-  },
-  {
-    title: '视频中心',
-    icon: 'VideoCamera',
-    children: [
-      { title: '迁徙历史视频', path: `/zupu/${clanSlug.value}/video/migration` },
-      { title: '大事件视频', path: `/zupu/${clanSlug.value}/video/event` },
-    ],
-  },
-  {
-    title: '事件管理',
-    icon: 'Calendar',
-    children: [
-      { title: '大事件列表', path: `/zupu/${clanSlug.value}/family-events` },
-      { title: '迁徙管理', path: `/zupu/${clanSlug.value}/migration` },
-    ],
-  },
-  {
-    title: '短信通知',
+    title: '通知与短信',
     icon: 'Message',
     children: [
       { title: '发送短信', path: `/zupu/${clanSlug.value}/sms/send` },
       { title: '余额管理', path: `/zupu/${clanSlug.value}/sms/balance` },
-    ],
-  },
-  {
-    title: '日志审计',
-    icon: 'Document',
-    children: [
-      { title: '操作日志', path: `/zupu/${clanSlug.value}/logs` },
     ],
   },
   {
@@ -235,11 +187,15 @@ const menuItems = computed(() => [
       { title: '字辈管理', path: `/zupu/${clanSlug.value}/settings/xipai` },
       { title: '家族信息', path: `/zupu/${clanSlug.value}/settings/clan-info` },
       { title: '云存储', path: `/zupu/${clanSlug.value}/settings/storage` },
+      { title: '数据导出', path: `/zupu/${clanSlug.value}/settings/export` },
+      { title: 'AI工具使用记录', path: `/zupu/${clanSlug.value}/toolbox-usage` },
+      { title: '回收站', path: `/zupu/${clanSlug.value}/trash` },
+      { title: '操作日志', path: `/zupu/${clanSlug.value}/logs` },
     ],
   },
 ])
 
-// 根据当前路由自动展开对应的父级菜单
+// 根据当前路由自动展开对应的父级菜单；允许用户同时展开多个分组（UX-09）
 const openedMenus = ref<string[]>([])
 const updateOpenedMenus = () => {
   const currentPath = route.path
@@ -247,7 +203,7 @@ const updateOpenedMenus = () => {
     for (const child of item.children) {
       if (child.path === currentPath || currentPath.startsWith(child.path + '?')) {
         if (!openedMenus.value.includes(item.title)) {
-          openedMenus.value = [item.title]
+          openedMenus.value = [...openedMenus.value, item.title]
         }
         return
       }
@@ -289,6 +245,20 @@ const breadcrumbs = computed(() => {
 const handleLogout = () => {
   authStore.logout()
 }
+
+// 方案 B：菜单搜索过滤 + 按能力裁剪（短信未配置时隐藏"通知与短信"组）
+const filteredMenuItems = computed(() => {
+  const kw = menuKeyword.value.trim().toLowerCase()
+  const hideSmsGroup = capabilityStore.loaded && !capabilityStore.isAvailable('sms')
+  return menuItems.value
+    .filter((item) => !(hideSmsGroup && item.title === '通知与短信'))
+    .map((item) => {
+      if (!kw) return item
+      const children = item.children.filter((c) => c.title.toLowerCase().includes(kw))
+      return { ...item, children }
+    })
+    .filter((item) => item.children.length > 0)
+})
 </script>
 
 <template>
@@ -298,6 +268,19 @@ const handleLogout = () => {
       <div class="sidebar-header">
         <h2 v-if="!isCollapse" class="logo">寻根路 · xungenlu.cn</h2>
         <h2 v-else class="logo">寻</h2>
+      </div>
+      <div v-if="!isCollapse" class="menu-search">
+        <ElInput
+          v-model="menuKeyword"
+          placeholder="搜索菜单"
+          clearable
+          size="small"
+          class="menu-search-input"
+        >
+          <template #prefix>
+            <ElIcon><Search /></ElIcon>
+          </template>
+        </ElInput>
       </div>
       <ElMenu
         :default-active="activeMenu"
@@ -310,7 +293,7 @@ const handleLogout = () => {
         router
         class="admin-menu"
       >
-        <template v-for="item in menuItems" :key="item.title">
+        <template v-for="item in filteredMenuItems" :key="item.title">
           <ElSubMenu :index="item.title">
             <template #title>
               <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
@@ -412,7 +395,7 @@ const handleLogout = () => {
             <template #dropdown>
               <ElDropdownMenu>
                 <ElDropdownItem @click="router.push(`/zupu/${clanSlug}/settings/privacy`)">
-                  个人设置
+                  隐私配置
                 </ElDropdownItem>
                 <ElDropdownItem divided @click="handleLogout">
                   退出登录
@@ -456,6 +439,28 @@ const handleLogout = () => {
   justify-content: center;
   border-bottom: 1px solid rgba(255, 252, 248, 0.15);
   background-color: rgba(0, 0, 0, 0.1);
+}
+
+.menu-search {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 252, 248, 0.1);
+}
+
+.menu-search-input :deep(.el-input__wrapper) {
+  background-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 0 1px rgba(255, 252, 248, 0.2) inset;
+}
+
+.menu-search-input :deep(.el-input__inner) {
+  color: #F5E6D3;
+}
+
+.menu-search-input :deep(.el-input__inner::placeholder) {
+  color: rgba(245, 230, 211, 0.6);
+}
+
+.menu-search-input :deep(.el-input__prefix) {
+  color: rgba(245, 230, 211, 0.7);
 }
 
 .logo {

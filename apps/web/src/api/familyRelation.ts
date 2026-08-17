@@ -55,7 +55,7 @@ export const familyRelationApi = {
   /** 管理员端 */
   admin: {
     listChanges: (params: {
-      clanId: string;
+      clanSlug: string;
       status?: string;
       change_type?: string;
       page?: number;
@@ -74,8 +74,8 @@ export const familyRelationApi = {
     markManual: (id: string) =>
       request.post<unknown, any>(`/api/admin/family-relation/changes/${id}/manual`),
 
-    listDisputes: (clanId: string) =>
-      request.get<unknown, any[]>('/api/admin/family-relation/disputes', { params: { clanId } }),
+    listDisputes: (clanSlug: string) =>
+      request.get<unknown, any[]>('/api/admin/family-relation/disputes', { params: { clanSlug } }),
 
     resolveDispute: (id: string, custodyStatus: string) =>
       request.post<unknown, any>(`/api/admin/family-relation/disputes/${id}/resolve`, { custody_status: custodyStatus }),

@@ -12,7 +12,7 @@ import { CapabilityService } from '../common/capability.service';
 @ApiTags('工具箱')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('toolbox')
+@Controller('api/toolbox')
 export class ToolboxController {
   constructor(
     private readonly creditService: CreditService,

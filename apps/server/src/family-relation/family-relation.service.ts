@@ -22,6 +22,7 @@ import { UpdateCustodyDto } from './dto/update-custody.dto';
 import { UpdatePrivacyPreferenceDto } from './dto/privacy-preference.dto';
 import { QueryHistoryDto } from './dto/query-history.dto';
 import { AdminService } from '../admin/admin.service';
+import { PedigreeService } from '../pedigree/pedigree.service';
 
 @Injectable()
 export class FamilyRelationService {
@@ -31,6 +32,7 @@ export class FamilyRelationService {
     private readonly validator: RelationValidator,
     private readonly privacyFilter: PrivacyFilter,
     private readonly adminService: AdminService,
+    private readonly pedigreeService: PedigreeService,
   ) {}
 
   /**
@@ -377,12 +379,24 @@ export class FamilyRelationService {
         },
       });
 
-      await tx.familyChild.create({
-        data: {
-          family_id: familyUnit.id,
-          child_id: child.id,
-          birth_order: 0,
-        },
+      // 双写（PersonAncestry + FamilyChild）统一走 PedigreeService（决策清单 §H1）
+      // - family_id 已创建，直接复用；
+      // - 父母只取同族成员（跨族配偶不进闭包表，避免跨族血缘链）；
+      // - birth_order 由统一入口自动计算 = 该家庭 max(birth_order)+1（替代原硬编码 0）。
+      const spousePerson = currentMarriage?.spouse;
+      const parentIds: bigint[] = [parentPersonId];
+      if (
+        spousePerson &&
+        spousePerson.clan_id === parent.clan_id &&
+        spousePerson.id !== parentPersonId
+      ) {
+        parentIds.push(spousePerson.id);
+      }
+      await this.pedigreeService.attachChildToParents(tx, {
+        clan_id: parent.clan_id,
+        child_id: child.id,
+        parent_ids: parentIds,
+        family_id: familyUnit.id,
       });
 
       // 写入抚养记录

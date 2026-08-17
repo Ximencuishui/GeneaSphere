@@ -2,11 +2,25 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePlatformAuthStore } from '@/stores/platformAuth'
+import { Monitor, House, UserFilled, PictureFilled, Tickets, Setting, TrendCharts, Document, Fold, Expand, Menu } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const authStore = usePlatformAuthStore()
 
 const isCollapse = ref(false)
+// 移动端侧边栏显示状态
+const sidebarVisible = ref(false)
+
+const iconMap: Record<string, any> = {
+  Monitor,
+  House,
+  UserFilled,
+  PictureFilled,
+  Tickets,
+  Setting,
+  TrendCharts,
+  Document,
+}
 
 const menuItems = ref([
   {
@@ -90,7 +104,7 @@ onMounted(async () => {
 
 <template>
   <div class="platform-layout">
-    <ElAside :width="isCollapse ? '64px' : '240px'" class="sidebar">
+    <ElAside :width="isCollapse ? '64px' : '240px'" :class="['sidebar', { visible: sidebarVisible }]">
       <div class="sidebar-header">
         <h2 v-if="!isCollapse" class="logo">平台管理后台</h2>
         <h2 v-else class="logo">GS</h2>
@@ -107,13 +121,14 @@ onMounted(async () => {
         <template v-for="item in menuItems" :key="item.title">
           <ElSubMenu :index="item.title">
             <template #title>
-              <ElIcon><component :is="item.icon" /></ElIcon>
+              <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
               <span>{{ item.title }}</span>
             </template>
             <ElMenuItem
               v-for="child in item.children"
               :key="child.path"
               :index="child.path"
+              @click="sidebarVisible = false"
             >
               {{ child.title }}
             </ElMenuItem>
@@ -126,9 +141,16 @@ onMounted(async () => {
       <ElHeader class="top-bar">
         <div class="left-section">
           <ElButton
-            :icon="isCollapse ? 'Expand' : 'Fold'"
+            :icon="isCollapse ? Expand : Fold"
             @click="isCollapse = !isCollapse"
             text
+            class="collapse-btn"
+          />
+          <ElButton
+            :icon="Menu"
+            text
+            class="mobile-menu-btn"
+            @click="sidebarVisible = true"
           />
           <h3 class="page-title">{{ route.meta.title || '平台控制台' }}</h3>
         </div>
@@ -234,5 +256,65 @@ onMounted(async () => {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
+}
+
+.collapse-btn {
+  display: block;
+}
+
+.mobile-menu-btn {
+  display: none;
+}
+
+/* 移动端适配：抽屉式侧边栏 */
+@media (max-width: 768px) {
+  .collapse-btn {
+    display: none;
+  }
+
+  .mobile-menu-btn {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.3);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  .sidebar.visible {
+    transform: translateX(0);
+  }
+
+  .main-area {
+    width: 100%;
+  }
+
+  .top-bar {
+    padding: 0 12px;
+  }
+
+  .content-area {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .sidebar {
+    width: 240px !important;
+  }
+
+  .top-bar {
+    height: 56px;
+  }
+
+  .content-area {
+    padding: 8px;
+  }
 }
 </style>

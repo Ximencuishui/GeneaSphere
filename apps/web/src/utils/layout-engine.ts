@@ -318,39 +318,6 @@ export class LayoutEngine {
     const finalPositions = Array.from(nodePositions.values());
     const finalBounds = getBoundingBox(finalPositions);
 
-    if (typeof console !== 'undefined') {
-      // 仅 debug 期间打开：暴露金字塔布局的关键指标，便于验证
-      // 最终位置已整体居中（步骤 12/13），绝对坐标偏离 (0,0)。改为按最终 bounds 取样。
-      const minXF = Math.min(...finalPositions.map(p => p.x));
-      const maxXF = Math.max(...finalPositions.map(p => p.x));
-      const minYF = Math.min(...finalPositions.map(p => p.y));
-      const maxYF = Math.max(...finalPositions.map(p => p.y));
-      const debugInfo = {
-        totalNodes: nodes.length,
-        spanX: Math.round(maxXF - minXF),
-        spanY: Math.round(maxYF - minYF),
-        ratioXY: ((maxXF - minXF) / Math.max(1, maxYF - minYF)).toFixed(2),
-        leftmost3: finalPositions
-          .filter(p => p.x <= minXF + 5)
-          .slice(0, 3)
-          .map(p => ({ id: p.id, x: Math.round(p.x), y: Math.round(p.y) })),
-        rightmost3: finalPositions
-          .filter(p => p.x >= maxXF - 5)
-          .slice(0, 3)
-          .map(p => ({ id: p.id, x: Math.round(p.x), y: Math.round(p.y) })),
-        topmost3: finalPositions
-          .filter(p => p.y <= minYF + 5)
-          .slice(0, 3)
-          .map(p => ({ id: p.id, x: Math.round(p.x), y: Math.round(p.y) })),
-        bottommost3: finalPositions
-          .filter(p => p.y >= maxYF - 5)
-          .slice(0, 3)
-          .map(p => ({ id: p.id, x: Math.round(p.x), y: Math.round(p.y) })),
-      };
-      console.log('[LayoutEngine v4] compactBox 输出', debugInfo);
-      (window as any).__layoutBounds = debugInfo;
-    }
-
     return {
       nodes: finalPositions,
       edges,

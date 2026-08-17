@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue';import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TreeSelect from '@/components/TreeSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
+
+// 家族 slug（路由参数 /zupu/:slug/merge/wizard/:appId）
+const clanSlug = computed(() => route.params.slug as string)
 
 // 步骤控制
 const currentStep = ref(0)
@@ -200,12 +203,12 @@ const executeMerge = async () => {
 
 // 返回申请列表
 const goBack = () => {
-  router.push(`/zupu/${clanSlug}//admin/merge/applications`)
+  router.push(`/zupu/${clanSlug.value}/merge/applications`)
 }
 
 // 完成
 const finish = () => {
-  router.push(`/zupu/${clanSlug}//admin/merge/applications`)
+  router.push(`/zupu/${clanSlug.value}/merge/applications`)
 }
 
 // 初始化

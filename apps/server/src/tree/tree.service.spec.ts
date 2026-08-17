@@ -1,4 +1,5 @@
 import { TreeService } from './tree.service';
+import { PedigreeService } from '../pedigree/pedigree.service';
 import { Gender, Person } from '@prisma/client';
 
 describe('TreeService', () => {
@@ -10,6 +11,7 @@ describe('TreeService', () => {
       person: {
         create: jest.fn(),
         findUnique: jest.fn(),
+        findMany: jest.fn(),
       },
       personAncestry: {
         createMany: jest.fn(),
@@ -17,10 +19,20 @@ describe('TreeService', () => {
         findFirst: jest.fn(),
         deleteMany: jest.fn(),
       },
+      familyUnit: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+      },
+      familyChild: {
+        findFirst: jest.fn(),
+        create: jest.fn(),
+        aggregate: jest.fn(),
+      },
       $transaction: jest.fn().mockImplementation((callback: any) => callback(prisma)),
     };
 
-    service = new TreeService(prisma);
+    // 双写统一入口（决策清单 §H1）使用同一个 prisma mock
+    service = new TreeService(prisma, new PedigreeService(prisma));
   });
 
   describe('createPerson', () => {
@@ -65,6 +77,7 @@ describe('TreeService', () => {
             depth: 0,
           },
         ],
+        skipDuplicates: true,
       });
     });
 
@@ -96,6 +109,16 @@ describe('TreeService', () => {
       prisma.personAncestry.findMany.mockResolvedValue([
         { ancestor_id: BigInt(1), depth: 0 },
       ]);
+      // 双写：无现有家庭 → 新建单亲家庭 → 写 FamilyChild
+      prisma.person.findMany.mockResolvedValue([
+        { id: BigInt(1), gender: Gender.male },
+      ]);
+      prisma.familyUnit.findFirst.mockResolvedValue(null);
+      prisma.familyUnit.create.mockResolvedValue({ id: BigInt(10) });
+      prisma.familyChild.findFirst.mockResolvedValue(null);
+      prisma.familyChild.aggregate.mockResolvedValue({
+        _max: { birth_order: null },
+      });
 
       const result = await service.createPerson(
         {
@@ -120,6 +143,16 @@ describe('TreeService', () => {
             depth: 1,
           },
         ],
+        skipDuplicates: true,
+      });
+      // 双写校验：FamilyChild 记录已建立（排行自动 = 1，类型亲生）
+      expect(prisma.familyChild.create).toHaveBeenCalledWith({
+        data: {
+          family_id: BigInt(10),
+          child_id: BigInt(2),
+          birth_order: 1,
+          child_type: 'BIOLOGICAL',
+        },
       });
     });
 
@@ -152,6 +185,15 @@ describe('TreeService', () => {
         { ancestor_id: BigInt(2), depth: 0 },
         { ancestor_id: BigInt(1), depth: 1 },
       ]);
+      prisma.person.findMany.mockResolvedValue([
+        { id: BigInt(2), gender: Gender.male },
+      ]);
+      prisma.familyUnit.findFirst.mockResolvedValue(null);
+      prisma.familyUnit.create.mockResolvedValue({ id: BigInt(10) });
+      prisma.familyChild.findFirst.mockResolvedValue(null);
+      prisma.familyChild.aggregate.mockResolvedValue({
+        _max: { birth_order: null },
+      });
 
       await service.createPerson(
         {
@@ -180,6 +222,7 @@ describe('TreeService', () => {
             depth: 2,
           },
         ],
+        skipDuplicates: true,
       });
     });
   });

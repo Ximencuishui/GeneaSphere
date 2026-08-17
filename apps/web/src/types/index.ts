@@ -98,6 +98,24 @@ export interface GenealogyNode {
   spouses?: SpouseInfo[];
   /** 历史婚姻明细（与 spouses 互补，含 marriage_date / end_reason） */
   marriages_history?: MarriageHistoryEntry[];
+  /** [树谱增强 2026-08-17] 与 children[] 同下标的子女边元数据（排行/过继类型/父、母归属） */
+  child_links?: ChildLink[];
+}
+
+/**
+ * 子女边元数据（后端从 FamilyChild + FamilyUnit 推导）
+ * - 吊线图：按 mother_id 把子女挂到对应妻子节点下（"各妻子女分别分支"）
+ * - 卡片排行：读 birth_order
+ * - 过继虚线：child_type !== 'BIOLOGICAL' 画虚线
+ * - 过滤开关（隐藏女儿/女婿）：结合子女 gender 使用
+ */
+export interface ChildLink {
+  child_id: string;
+  birth_order?: number;
+  child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER';
+  family_id?: string;
+  father_id?: string;
+  mother_id?: string;
 }
 
 /**

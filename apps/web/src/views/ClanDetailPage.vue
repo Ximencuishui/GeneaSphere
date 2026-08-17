@@ -28,6 +28,10 @@
             <el-icon><Share /></el-icon>
             查看族谱树
           </el-button>
+          <el-button type="warning" @click="goToCepu">
+            <el-icon><Reading /></el-icon>
+            查看册谱
+          </el-button>
           <el-button type="success" @click="goToMigration">
             <el-icon><MapLocation /></el-icon>
             查看迁徙地图
@@ -139,7 +143,7 @@
 import { ref, onMounted, reactive, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft, Edit, Share, ArrowRight, MapLocation, Check, Close } from '@element-plus/icons-vue';
+import { ArrowLeft, Edit, Share, ArrowRight, MapLocation, Check, Close, Reading } from '@element-plus/icons-vue';
 import { useClanStore } from '@/stores/clan';
 import { useAuthStore } from '@/stores/auth';
 import { clanApi } from '@/api/clan';
@@ -244,6 +248,10 @@ onMounted(async () => {
 // Methods
 function goToTree() {
   router.push(`/tree/${route.params.id}`);
+}
+
+function goToCepu() {
+  router.push(`/cepu/${route.params.id}`);
 }
 
 function goToMigration() {

@@ -53,6 +53,13 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/cepu/:clanId',
+    name: 'cepu',
+    component: () => import('@/views/CepuPage.vue'),
+    // 允许匿名访问：支持 ?share=<token> 分享只读链接；无凭证时由后端 403，页面给友好提示
+    meta: { title: '册谱' },
+  },
+  {
     path: '/import',
     name: 'import',
     component: () => import('@/views/ImportPage.vue'),
@@ -237,7 +244,7 @@ const routes: RouteRecordRaw[] = [
     props: true,
     children: [
       { path: '', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardPage.vue'), meta: { title: '控制面板', requiresAuth: true, requiresAdmin: true } },
-      { path: 'members', name: 'admin-members', component: () => import('@/views/admin/MembersPage.vue'), meta: { title: '成员管理', requiresAuth: true, requiresAdmin: true } },
+      { path: 'members', name: 'admin-members', component: () => import('@/views/admin/MembersPage.vue'), meta: { title: '族员管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/media', name: 'admin-media-reviews', component: () => import('@/views/admin/MediaReviewPage.vue'), meta: { title: '影像审核', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/bio', name: 'admin-bio-reviews', component: () => import('@/views/admin/BioReviewPage.vue'), meta: { title: '生平审核', requiresAuth: true, requiresAdmin: true } },
       { path: 'merge/applications', name: 'admin-merge-applications', component: () => import('@/views/admin/MergeApplicationsPage.vue'), meta: { title: '认亲申请', requiresAuth: true, requiresAdmin: true } },
@@ -248,7 +255,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings/privacy', name: 'admin-privacy-settings', component: () => import('@/views/admin/PrivacySettingsPage.vue'), meta: { title: '隐私配置', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/xipai', name: 'admin-xipai-settings', component: () => import('@/views/admin/XipaiSettingsPage.vue'), meta: { title: '字辈管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/storage', name: 'admin-storage-settings', component: () => import('@/views/admin/StoragePage.vue'), meta: { title: '云存储', requiresAuth: true, requiresAdmin: true } },
-      { path: 'orders', name: 'admin-orders', component: () => import('@/views/admin/OrdersPage.vue'), meta: { title: '订单管理', requiresAuth: true, requiresAdmin: true } },
+      { path: 'orders', name: 'admin-orders', component: () => import('@/views/admin/OrdersPage.vue'), meta: { title: '印刷订单', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/generate', name: 'admin-genealogy-generate', component: () => import('@/views/admin/GenealogyGeneratePage.vue'), meta: { title: '生成族谱', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/history', name: 'admin-genealogy-history', component: () => import('@/views/admin/GenealogyHistoryPage.vue'), meta: { title: '历史版本', requiresAuth: true, requiresAdmin: true } },
       { path: 'video/migration', name: 'admin-video-migration', component: () => import('@/views/admin/MigrationVideoPage.vue'), meta: { title: '迁徙历史视频', requiresAuth: true, requiresAdmin: true } },

@@ -157,6 +157,12 @@ model Clan {
   clan_migration_videos ClanMigrationVideo[]
   clan_event_videos     ClanEventVideo[]
 
+  // ==================== 册谱模块 v1.0 ====================
+  book_volumes          BookVolume[]
+
+  // ==================== 分享只读链接（二期） ====================
+  share_links           ShareLink[]
+
   @@index([status])
   @@index([register_ip])
   @@index([slug])
@@ -209,6 +215,7 @@ model Person {
   marriages_as_spouse  MarriageHistory[]      @relation("MarriageSpouse")
   custody_as_child     ChildCustodyRecord[]   @relation("CustodyChild")
   custody_as_parent    ChildCustodyRecord[]   @relation("CustodyParent")
+  bio                  PersonBio?
 
   @@index([clan_id])
   @@index([clan_id, migration_branch])
@@ -283,6 +290,98 @@ model PersonAncestry {
   @@index([descendant_id]) // getDirectParent: WHERE descendant_id=? AND depth=1
   @@index([descendant_id, depth]) // buildLineagePath: WHERE descendant_id IN (...) AND depth=1
   @@map("person_ancestry")
+}
+
+// ==================== 册谱模块 v1.0（决策清单 §F1/§A2） ====================
+// 册谱为"文档式编排视图"：人物实体仍只存 Person/FamilyUnit/FamilyChild/PersonAncestry，
+// 本表只存"卷宗结构 + 世录筛选配置"，不存人物副本。
+
+// 册谱卷宗配置表
+// - type: document（文档卷：谱序/凡例/艺文，content 存富文本 HTML）| shilu（世录卷：自动生成人物条目，config 存筛选）
+// - config（世录卷）: { branches[], include_female, hide_wife, hide_daughter, hide_son_in_law, hide_premature, premature_age, layout:'su'|'ou', exclude_person_ids[] }
+model BookVolume {
+  id          BigInt   @id @default(autoincrement()) @map("id")
+  clan_id     BigInt   @map("clan_id")
+  sort_order  Int      @default(0) @map("sort_order") // 卷顺序；导出 PDF 严格按此输出
+  title      String   @map("title") @db.VarChar(200) // 「卷一 谱序源流」
+  type       String   @default("document") @map("type") // document | shilu
+  content    String?  @map("content") @db.Text // 文档卷富文本 HTML；世录卷为 null
+  config     Json?    @map("config") // 世录卷筛选配置
+  created_by String   @map("created_by")
+  created_at DateTime @default(now()) @map("created_at")
+  updated_at DateTime @updatedAt @map("updated_at")
+  clan       Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  annotations BookAnnotation[]
+  versions   BookVolumeVersion[]
+
+  @@index([clan_id, sort_order])
+  @@map("book_volumes")
+}
+
+// 册谱批注（二期）：锚点定位到世录条目（person:<id>）或文档卷段落（para:<序号>）
+model BookAnnotation {
+  id         BigInt     @id @default(autoincrement()) @map("id")
+  volume_id  BigInt     @map("volume_id")
+  anchor     String     @map("anchor") // person:<personId> | para:<序号或文本hash>
+  note       String     @map("note") @db.Text
+  created_by String     @map("created_by")
+  created_at DateTime   @default(now()) @map("created_at")
+  volume     BookVolume @relation(fields: [volume_id], references: [id], onDelete: Cascade)
+
+  @@index([volume_id, anchor])
+  @@map("book_annotations")
+}
+
+// 分享只读链接（二期）：scope = cepu | tree；读端点可通过 ?share=<token> 匿名只读访问
+model ShareLink {
+  id         BigInt    @id @default(autoincrement()) @map("id")
+  clan_id    BigInt    @map("clan_id")
+  scope      String    @default("cepu") @map("scope") // cepu | tree
+  token      String    @unique @map("token")
+  created_by String    @map("created_by")
+  expires_at DateTime? @map("expires_at")
+  created_at DateTime  @default(now()) @map("created_at")
+  clan       Clan      @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id])
+  @@map("share_links")
+}
+
+// 册谱卷宗内容版本历史（二期）：每次标题/内容/配置变更生成快照，可回滚
+model BookVolumeVersion {
+  id         BigInt     @id @default(autoincrement()) @map("id")
+  volume_id  BigInt     @map("volume_id")
+  version    Int        @default(1) @map("version")
+  title      String     @map("title") @db.VarChar(200)
+  content    String?    @map("content") @db.Text
+  config     Json?      @map("config")
+  created_by String     @map("created_by")
+  created_at DateTime   @default(now()) @map("created_at")
+  volume     BookVolume @relation(fields: [volume_id], references: [id], onDelete: Cascade)
+
+  @@unique([volume_id, version])
+  @@index([volume_id])
+  @@map("book_volume_versions")
+}
+
+// 人物传记附表（与 Person 一对一）：册谱世录扩展字段
+// - biography 为规范传记正文（BioReview 审核通过后自动回写，见决策清单 §A3）
+// - premature 为早夭显式覆盖标记；null = 按"享年 < premature_age(默认18)"推导
+model PersonBio {
+  person_id     BigInt   @id @map("person_id")
+  courtesy_name String?  @map("courtesy_name") // 字号
+  native_place  String?  @map("native_place") // 籍贯
+  burial_place  String?  @map("burial_place") // 葬地
+  achievements  String?  @map("achievements") @db.Text // 功名
+  anecdotes     String?  @map("anecdotes") @db.Text // 轶事
+  biography     String?  @map("biography") @db.Text // 传记正文
+  marital_notes String?  @map("marital_notes") @db.Text // 配偶家世/岳家
+  adoption_note String?  @map("adoption_note") @db.Text // 出继/兼祧标注
+  premature     Boolean? @map("premature") // 早夭覆盖标记
+  updated_at    DateTime @updatedAt @map("updated_at")
+  person        Person   @relation(fields: [person_id], references: [id], onDelete: Cascade)
+
+  @@map("person_bios")
 }
 
 model MediaArchive {

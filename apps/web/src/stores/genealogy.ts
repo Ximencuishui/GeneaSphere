@@ -2,7 +2,7 @@ import { defineStore } from "pinia"
 import { ref } from "vue"
 import type { GenealogyNode } from "@/types"
 
-export type ViewMode = 'compact' | 'detailed' | 'portrait'
+export type ViewMode = 'compact' | 'detailed' | 'portrait' | 'xianshi' | 'su' | 'zhe'
 
 export const useGenealogyStore = defineStore("genealogy", () => {
   const selectedNode = ref<GenealogyNode | null>(null)

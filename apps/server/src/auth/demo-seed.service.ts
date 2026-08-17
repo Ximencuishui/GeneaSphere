@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaClient, Gender } from '@geneasphere/db';
 import * as bcrypt from 'bcryptjs';
 import {
@@ -188,6 +188,18 @@ export class DemoSeedService implements OnModuleInit {
         this.logger.log(`✅ PersonUserLink 已创建: user=${demoMemberUser.id} -> 朱小小(person=${zhuxiaoxiao.id})`);
       }
 
+      // [2026-08-16] 确保朱小小挂入族谱树（避免演示族出现"无家庭关联的孤立账号"）：
+      // 以族内最深男性后代为父，补写 person_ancestry / family_units / family_children。
+      // 幂等：已存在父链则跳过。旧库可能已有孤立朱小小，同样在此补挂。
+      const zxxHasParent = await this.prisma.personAncestry.findFirst({
+        where: { descendant_id: zhuxiaoxiao.id, depth: 1, ancestor_id: { not: zhuxiaoxiao.id } },
+        select: { ancestor_id: true },
+      });
+      if (!zxxHasParent) {
+        const attachTarget = await this.attachZhuxiaoxiaoToTree(demoClan.id, zhuxiaoxiao.id);
+        this.logger.log(`✅ 朱小小已挂入族谱: 父=${attachTarget}`);
+      }
+
       // P2-2 修复：确保 demoClan.description 始终有内容（与前端「家族简介」占位文案一致）
       // 首次创建时 line 134 已带 description；后续重启动时也幂等补齐老数据库的空字段。
       const targetDescription = this.buildClanDescription();
@@ -372,25 +384,35 @@ export class DemoSeedService implements OnModuleInit {
       nameIdx++;
       return '朱' + zibei + given;
     };
+    // [2026-08-16 修复] 女性姓名生成：旧实现 nextWifeName 用共享 nameIdx，且
+    // 名字下标恒等于姓氏下标+3（ensureUnique 重试分支也恒差 5），组合空间只有 50 种，
+    // 500+ 位女性（妻子+女儿）姓名大量重复 → family_units.wife_id 只落到 116 个
+    // distinct 人，树谱配偶数据错乱。改为独立单调序号展开完整 50×50=2500 组合。
+    let femaleNameCounter = 0;
+    const FEMALE_NAME_POOL = (() => {
+      const arr: string[] = [];
+      for (const sn of DemoSeedService.MARRIAGE_SURNAMES) {
+        for (const fn of DemoSeedService.FEMALE_GIVEN_NAMES) {
+          arr.push(sn + fn);
+        }
+      }
+      return arr;
+    })();
     const nextWifeName = (): string => {
-      const sn = DemoSeedService.MARRIAGE_SURNAMES[nameIdx % DemoSeedService.MARRIAGE_SURNAMES.length];
-      const fn = DemoSeedService.FEMALE_GIVEN_NAMES[(nameIdx + 3) % DemoSeedService.FEMALE_GIVEN_NAMES.length];
-      nameIdx += 2;
-      return sn + fn;
+      return FEMALE_NAME_POOL[femaleNameCounter++ % FEMALE_NAME_POOL.length];
     };
     const ensureUnique = (baseName: string, isMale: boolean): string => {
       let nm = baseName;
       let attempt = 0;
-      while (usedNames.has(nm) && attempt < 50) {
+      while (usedNames.has(nm) && attempt < 500) {
         if (isMale) {
           const zibei = DemoSeedService.ZIBEI_CHARS[zibeiIdx % DemoSeedService.ZIBEI_CHARS.length];
           zibeiIdx++;
           const given = DemoSeedService.MALE_GIVEN_NAMES[(nameIdx + attempt) % DemoSeedService.MALE_GIVEN_NAMES.length];
           nm = '朱' + zibei + given;
         } else {
-          const sn = DemoSeedService.MARRIAGE_SURNAMES[(nameIdx + attempt) % DemoSeedService.MARRIAGE_SURNAMES.length];
-          const fn = DemoSeedService.FEMALE_GIVEN_NAMES[(nameIdx + attempt + 5) % DemoSeedService.FEMALE_GIVEN_NAMES.length];
-          nm = sn + fn;
+          // 女性重试同样从完整组合池顺序取，保证与 usedNames 永不冲突（池容量 2500 >> 所需 ~740）
+          nm = FEMALE_NAME_POOL[femaleNameCounter++ % FEMALE_NAME_POOL.length];
         }
         attempt++;
       }
@@ -597,6 +619,81 @@ export class DemoSeedService implements OnModuleInit {
     const elapsed = Date.now() - startTime;
     this.logger.log('✅ 朱熹族谱生成完成: ' + totalPersonCount + ' 人, ' + totalFamilyCount + ' 个家庭, ' + totalAncestryCount + ' 条祖先关系 (耗时 ' + elapsed + 'ms)');
     return { totalPersons: totalPersonCount, totalFamilies: totalFamilyCount, totalAncestry: totalAncestryCount };
+  }
+
+  /**
+   * [2026-08-16] 把朱小小挂入族谱树：找族内最深男性后代为父，
+   * 按 pedigree.syncAncestryFromParents 的写模式补齐：
+   *   - person_ancestry：self-record + 父亲的祖先链（depth+1）+ (父, 小小, 1)
+   *   - family_units：复用/新建"父亲单亲家庭"（husband=父, wife=NULL）
+   *   - family_children：绑定家庭与子女（幂等）
+   * 返回父节点 id。
+   */
+  private async attachZhuxiaoxiaoToTree(clanId: bigint, childId: bigint): Promise<string> {
+    // 1) 定位族根（无 depth=1 父链的人，取最小 id 保持稳定）
+    const root = await this.prisma.person.findFirst({
+      where: {
+        clan_id: clanId,
+        deleted_at: null,
+        descendant_links: { none: { depth: 1 } },
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+    if (!root) throw new Error('找不到族根，无法挂载朱小小');
+    // 2) 族内最深男性后代（父链可达，避免挂到配偶/妻子支）
+    const deepest = await this.prisma.personAncestry.findFirst({
+      where: {
+        ancestor_id: root.id,
+        descendant: { clan_id: clanId, deleted_at: null, gender: 'male' },
+      },
+      orderBy: { depth: 'desc' },
+      select: { descendant_id: true, depth: true },
+    });
+    const fatherId = deepest ? deepest.descendant_id : root.id;
+
+    // 3) 闭包表
+    const rows: Array<{ ancestor_id: bigint; descendant_id: bigint; depth: number }> = [];
+    const seen = new Set<string>();
+    const push = (ancestorId: bigint, descendantId: bigint, depth: number) => {
+      const key = `${ancestorId}:${descendantId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({ ancestor_id: ancestorId, descendant_id: descendantId, depth });
+    };
+    push(childId, childId, 0);
+    const fatherAncestries = await this.prisma.personAncestry.findMany({
+      where: { descendant_id: fatherId, ancestor: { deleted_at: null } },
+      select: { ancestor_id: true, depth: true },
+    });
+    for (const pa of fatherAncestries) push(pa.ancestor_id, childId, pa.depth + 1);
+    if (!fatherAncestries.some((pa) => pa.ancestor_id === fatherId)) push(fatherId, childId, 1);
+    await this.prisma.personAncestry.createMany({ data: rows, skipDuplicates: true });
+
+    // 4) family_units：复用父亲的单亲家庭，否则新建
+    let family = await this.prisma.familyUnit.findFirst({
+      where: { clan_id: clanId, husband_id: fatherId, wife_id: null },
+      select: { id: true },
+    });
+    if (!family) {
+      family = await this.prisma.familyUnit.create({
+        data: { clan_id: clanId, husband_id: fatherId, wife_id: null, union_type: 'normal' },
+        select: { id: true },
+      });
+    }
+
+    // 5) family_children（幂等）
+    const existing = await this.prisma.familyChild.findFirst({
+      where: { family_id: family.id, child_id: childId },
+      select: { id: true },
+    });
+    if (!existing) {
+      await this.prisma.familyChild.create({
+        data: { family_id: family.id, child_id: childId, birth_order: 1, child_type: 'BIOLOGICAL' },
+      });
+    }
+
+    return fatherId.toString();
   }
 }
 interface HistoricalFigure {

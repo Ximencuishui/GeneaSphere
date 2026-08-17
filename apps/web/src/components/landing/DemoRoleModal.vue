@@ -129,7 +129,7 @@ function handleClose() {
           <h3 class="role-title">族谱管理平台</h3>
           <p class="role-subtitle">以管理员身份登录</p>
           <ul class="role-features">
-            <li>控制面板 · 成员管理</li>
+            <li>控制面板 · 族员管理</li>
             <li>内容审核 · 归宗合并</li>
             <li>字辈 · 订单 · 操作日志</li>
           </ul>
@@ -200,7 +200,7 @@ function handleClose() {
           <h3 class="role-title">族谱管理平台</h3>
           <p class="role-subtitle">以管理员身份登录</p>
           <ul class="role-features">
-            <li>控制面板 · 成员管理</li>
+            <li>控制面板 · 族员管理</li>
             <li>内容审核 · 归宗合并</li>
             <li>字辈 · 订单 · 操作日志</li>
           </ul>

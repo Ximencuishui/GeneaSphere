@@ -209,9 +209,9 @@ onMounted(() => {
     <ElCard>
       <template #header>
         <div class="page-header">
-          <h2>成员管理</h2>
+          <h2>族员管理</h2>
           <ElRadioGroup v-model="activeTab" size="large">
-            <ElRadioButton value="members">成员列表</ElRadioButton>
+            <ElRadioButton value="members">族员列表</ElRadioButton>
             <ElRadioButton value="roles">权限分配</ElRadioButton>
           </ElRadioGroup>
         </div>

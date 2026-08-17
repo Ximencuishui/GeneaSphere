@@ -33,6 +33,7 @@ import { FamilyEventModule } from './family-event/family-event.module';
 import { GenealogyDocumentModule } from './genealogy-document/genealogy-document.module';
 import { ClanMigrationVideoModule } from './clan-migration-video/clan-migration-video.module';
 import { ClanEventVideoModule } from './clan-event-video/clan-event-video.module';
+import { CepuModule } from './cepu/cepu.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { ClanEventVideoModule } from './clan-event-video/clan-event-video.module
     GenealogyDocumentModule,
     ClanMigrationVideoModule,
     ClanEventVideoModule,
+    CepuModule,
   ],
   controllers: [AppController],
   providers: [

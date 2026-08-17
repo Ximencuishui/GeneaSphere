@@ -3,7 +3,7 @@ import { nextTick, ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserCenterStore } from '@/stores/userCenter'
 import { useAuthStore } from '@/stores/auth'
-import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, Folder, SwitchButton } from '@element-plus/icons-vue'
+import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, Folder, SwitchButton, Search } from '@element-plus/icons-vue'
 import PageLoader, { type PageLoaderLog } from '@/components/PageLoader.vue'
 
 const route = useRoute()
@@ -13,6 +13,19 @@ const authStore = useAuthStore()
 
 // 移动端侧边栏
 const mobileSidebarVisible = ref(false)
+// 移动端通知抽屉
+const mobileNotifyVisible = ref(false)
+// 菜单搜索关键词（方案 B）
+const menuKeyword = ref('')
+
+// 方案 B：菜单搜索过滤（空组隐藏）
+const filteredMenuGroups = computed(() => {
+  const kw = menuKeyword.value.trim().toLowerCase()
+  if (!kw) return menuGroups
+  return menuGroups
+    .map((g) => ({ ...g, children: g.children.filter((c) => c.title.toLowerCase().includes(kw)) }))
+    .filter((g) => g.children.length > 0)
+})
 
 // 通知面板
 const notifyVisible = ref(false)
@@ -46,18 +59,12 @@ const menuGroups = [
       { title: '个人资料', icon: 'User', path: '/user-center/profile' },
       { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
       { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
-    ],
-  },
-  {
-    name: '验证管理',
-    icon: 'CircleCheck',
-    children: [
       { title: '我的验证', icon: 'CircleCheck', path: '/user-center/verify' },
       { title: '验证记录', icon: 'Tickets', path: '/user-center/verify/records' },
     ],
   },
   {
-    name: '内容管理',
+    name: '内容与空间',
     icon: 'Folder',
     children: [
       { title: '我的时光', icon: 'PictureFilled', path: '/user-center/timeline' },
@@ -65,26 +72,46 @@ const menuGroups = [
       { title: '我的标注', icon: 'EditPen', path: '/user-center/annotations' },
       { title: '我的记忆贡献', icon: 'Collection', path: '/user-center/memory-contributions' },
       { title: '我的音像墙', icon: 'VideoCamera', path: '/user-center/videos' },
+      { title: '个人空间', icon: 'House', path: '/user-center/personal-space/albums' },
     ],
   },
   {
-    name: '工具中心',
+    name: '互动与工具',
     icon: 'Tools',
     children: [
       { title: '我的工具箱', icon: 'Tools', path: '/user-center/toolbox' },
-      { title: '我的订单', icon: 'List', path: '/user-center/orders' },
       { title: '我的小组', icon: 'ChatLineRound', path: '/user-center/groups' },
       { title: '寻找小伙伴', icon: 'UserFilled', path: '/user-center/buddies' },
       { title: '直系血缘视频', icon: 'VideoPlay', path: '/user-center/lineage-video' },
-      { title: '个人空间', icon: 'House', path: '/user-center/personal-space/albums' },
+    ],
+  },
+  {
+    name: '交易',
+    icon: 'Tickets',
+    children: [
+      { title: '我的订单', icon: 'List', path: '/user-center/orders' },
     ],
   },
 ]
 
+// 子页面 → 所属菜单项（前缀匹配，用于详情页的高亮与面包屑）
+const subPageMap: [RegExp, string][] = [
+  [/^\/user-center\/orders\/.+/, '/user-center/orders'],
+  [/^\/user-center\/groups\/.+/, '/user-center/groups'],
+  [/^\/user-center\/buddies\/.+/, '/user-center/buddies'],
+  [/^\/user-center\/videos\/(create|\d+)/, '/user-center/videos'],
+  [/^\/user-center\/lineage-video\/.+/, '/user-center/lineage-video'],
+  [/^\/user-center\/family-book\/(preview\/)?\d+/, '/user-center/family-book'],
+  [/^\/user-center\/personal-space\//, '/user-center/personal-space/albums'],
+  [/^\/user-center\/family-relation\/history/, '/user-center/family-relation'],
+]
+
 const activeMenu = computed(() => {
-  // 个人空间子页面统一高亮“个人空间”菜单
-  if (route.path.startsWith('/user-center/personal-space')) {
-    return '/user-center/personal-space/albums'
+  // 精确命中直接返回
+  if (findMenuItem(route.path)) return route.path
+  // 子页面按前缀归类到所属菜单项
+  for (const [re, parent] of subPageMap) {
+    if (re.test(route.path)) return parent
   }
   return route.path
 })
@@ -98,11 +125,8 @@ const findMenuItem = (path: string) => {
 }
 
 const currentMenu = computed(() => {
-  // 个人空间子页面匹配
-  if (route.path.startsWith('/user-center/personal-space')) {
-    return findMenuItem('/user-center/personal-space/albums') || menuGroups[0].children[0]
-  }
-  return findMenuItem(route.path) || menuGroups[0].children[0]
+  // 以 activeMenu（含子页归类结果）为准
+  return findMenuItem(activeMenu.value) || menuGroups[0].children[0]
 })
 
 const roleTagType = computed(() => {
@@ -157,7 +181,13 @@ function handleLogout() {
 }
 
 function gotoAdminDashboard() {
-  router.push('/admin/dashboard')
+  // 有主家族 slug 时直达家族后台，避免多一次 /select-family 跳转
+  const slug = userStore.profile?.primary_clan?.slug
+  if (slug) {
+    router.push(`/zupu/${slug}`)
+  } else {
+    router.push('/select-family')
+  }
 }
 
 /**
@@ -301,7 +331,14 @@ watch(
         :max="99"
         :hidden="userStore.unreadCount === 0"
       >
-        <ElButton icon="Bell" text circle size="large" />
+        <ElButton
+          icon="Bell"
+          text
+          circle
+          size="large"
+          aria-label="查看通知"
+          @click="mobileNotifyVisible = true"
+        />
       </ElBadge>
       <!-- P1-3 修复：移动端直接露出登出入口，不再依赖打开抽屉 -->
       <ElButton
@@ -347,6 +384,19 @@ watch(
           </div>
         </div>
 
+        <div class="menu-search">
+          <ElInput
+            v-model="menuKeyword"
+            placeholder="搜索菜单"
+            clearable
+            size="small"
+          >
+            <template #prefix>
+              <ElIcon><Search /></ElIcon>
+            </template>
+          </ElInput>
+        </div>
+
         <ElMenu
           :default-active="activeMenu"
           class="side-menu"
@@ -354,7 +404,7 @@ watch(
           mode="vertical"
         >
           <ElSubMenu
-            v-for="group in menuGroups"
+            v-for="group in filteredMenuGroups"
             :key="group.name"
             :index="group.name"
           >
@@ -435,6 +485,18 @@ watch(
               </ElTag>
             </div>
           </div>
+          <div class="menu-search">
+            <ElInput
+              v-model="menuKeyword"
+              placeholder="搜索菜单"
+              clearable
+              size="small"
+            >
+              <template #prefix>
+                <ElIcon><Search /></ElIcon>
+              </template>
+            </ElInput>
+          </div>
           <ElMenu
             :default-active="activeMenu"
             class="side-menu"
@@ -442,7 +504,7 @@ watch(
             mode="vertical"
           >
             <ElSubMenu
-              v-for="group in menuGroups"
+              v-for="group in filteredMenuGroups"
               :key="group.name"
               :index="group.name"
             >
@@ -486,6 +548,35 @@ watch(
             </ElButton>
           </div>
         </aside>
+      </ElDrawer>
+
+      <!-- 移动端通知抽屉（UX-03 修复：移动端铃铛可查看通知） -->
+      <ElDrawer v-model="mobileNotifyVisible" title="通知" direction="rtl" size="85%">
+        <div class="notify-panel">
+          <div v-if="userStore.notifications.length === 0" class="notify-empty">暂无通知</div>
+          <div v-else class="notify-list">
+            <div
+              v-for="n in userStore.notifications"
+              :key="n.id"
+              class="notify-item"
+            >
+              <div class="notify-line">
+                <span class="notify-content-title">{{ n.title }}</span>
+                <ElTag
+                  v-if="!n.is_read"
+                  size="small"
+                  type="danger"
+                  effect="plain"
+                  >未读</ElTag
+                >
+              </div>
+              <div class="notify-content-body">{{ n.content }}</div>
+              <div class="notify-content-time">
+                {{ new Date(n.created_at).toLocaleString() }}
+              </div>
+            </div>
+          </div>
+        </div>
       </ElDrawer>
 
       <!-- 主内容区 -->
@@ -681,6 +772,10 @@ watch(
 .user-meta {
   flex: 1;
   min-width: 0;
+}
+
+.menu-search {
+  padding: 12px 16px 4px;
 }
 
 .user-name {

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Post,
   Get,
@@ -164,6 +164,67 @@ export class TreeController {
     }
     const { id } = await this.clanResolver.resolveOrThrow(clanSlug);
     return id;
+  }
+
+  /**
+   * 导出家族数据 JSON（树页工具栏"导出 JSON"用；OWNER/ADMIN）
+   * - 结构与 admin/settings/export 一致（persons/families/family_children/ancestry/xipai），
+   *   可直接用 /import/json 重新导入（备份/迁移）；
+   * - 按树页 URL 的 clanId/slug 解析（复用 resolveClanId）；
+   * - 无 @Public → 全局 JwtAuthGuard 生效，进入前 requireAdmin。
+   */
+  @Get('clan/:clanId/export')
+  async exportClanJson(@Param('clanId') clanId: string, @Req() req: any) {
+    const userId = req?.user?.userId as string | undefined;
+    const clanIdBig = await this.resolveClanId(clanId);
+    if (!userId) throw new ForbiddenException('需要登录');
+    await this.adminService.requireAdmin(clanIdBig, userId);
+
+    const prisma = this.treeService['prisma'];
+    const [clan, persons, families, familyChildren, ancestry, xipai] = await Promise.all([
+      prisma.clan.findUnique({ where: { id: clanIdBig } }),
+      prisma.person.findMany({ where: { clan_id: clanIdBig } }),
+      prisma.familyUnit.findMany({ where: { clan_id: clanIdBig } }),
+      prisma.familyChild.findMany({ where: { family: { clan_id: clanIdBig } } }),
+      prisma.personAncestry.findMany({ where: { ancestor: { clan_id: clanIdBig } } }),
+      prisma.xipai.findMany({ where: { clan_id: clanIdBig } }),
+    ]);
+
+    return {
+      exported_at: new Date().toISOString(),
+      clan: {
+        id: clan?.id.toString(),
+        name: clan?.name,
+        description: clan?.description,
+      },
+      persons: persons.map((p) => ({
+        id: p.id.toString(),
+        full_name: p.full_name,
+        gender: p.gender,
+        birth_date: p.birth_date,
+        death_date: p.death_date,
+        is_living: p.is_living,
+      })),
+      families: families.map((f) => ({
+        id: f.id.toString(),
+        husband_id: f.husband_id?.toString(),
+        wife_id: f.wife_id?.toString(),
+      })),
+      family_children: familyChildren.map((fc) => ({
+        family_id: fc.family_id.toString(),
+        child_id: fc.child_id.toString(),
+        birth_order: fc.birth_order,
+      })),
+      ancestry: ancestry.map((a) => ({
+        ancestor_id: a.ancestor_id.toString(),
+        descendant_id: a.descendant_id.toString(),
+        depth: a.depth,
+      })),
+      xipai: xipai.map((x) => ({
+        generation: x.generation,
+        character: x.character,
+      })),
+    };
   }
 
   @Patch('move-subtree')

@@ -17,8 +17,13 @@ const request = axios.create({
 // Request interceptor
 request.interceptors.request.use(
   (config) => {
-    // Get token from localStorage
-    const token = localStorage.getItem('geneasphere_token') || localStorage.getItem('access_token');
+    // 按当前路由作用域选择 token：
+    // - 平台后台（/platform-admin/*）优先带平台 token（后端用 JWT_PLATFORM_SECRET 校验）
+    // - 家族端带家族 token
+    const isPlatform = router.currentRoute.value.path.startsWith('/platform-admin')
+    const token = isPlatform
+      ? localStorage.getItem('geneasphere_platform_token')
+      : (localStorage.getItem('geneasphere_token') || localStorage.getItem('access_token'));
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -69,20 +74,24 @@ request.interceptors.response.use(
           : null;
       const message = body?.message || (typeof data === 'string' ? data : '') || '';
 
-      // 401 强制登出（无论后端格式如何）
+      // 401：仅当本次请求确实携带了 Authorization（即登录态被拒）时才强制登出，
+      // 避免无凭据的公开/配置类接口 401 把用户误踢下线（如平台端 capability 查询）
       if (status === 401) {
+        const hadAuth = !!(error.config?.headers?.Authorization);
         ElMessage.error(message || STATUS_MESSAGE[401]);
-        localStorage.removeItem('geneasphere_token');
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('geneasphere_platform_token');
-        // 仅在非登录页时跳转，避免覆盖用户当前页
-        if (router.currentRoute.value.path !== '/login' &&
-            router.currentRoute.value.path !== '/platform-admin/login') {
-          // 平台端跳平台登录，其他跳普通登录
-          const target = router.currentRoute.value.path.startsWith('/platform-admin')
-            ? '/platform-admin/login'
-            : '/login';
-          router.push(target);
+        if (hadAuth) {
+          localStorage.removeItem('geneasphere_token');
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('geneasphere_platform_token');
+          // 仅在非登录页时跳转，避免覆盖用户当前页
+          if (router.currentRoute.value.path !== '/login' &&
+              router.currentRoute.value.path !== '/platform-admin/login') {
+            // 平台端跳平台登录，其他跳普通登录
+            const target = router.currentRoute.value.path.startsWith('/platform-admin')
+              ? '/platform-admin/login'
+              : '/login';
+            router.push(target);
+          }
         }
         return Promise.reject(new Error(message || 'UNAUTHORIZED'));
       }
