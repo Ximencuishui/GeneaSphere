@@ -1,0 +1,1688 @@
+{
+  "steps": [
+    {
+      "name": "content-bbox-layer1",
+      "layer": 1,
+      "minX": 0,
+      "minY": 0,
+      "maxX": 1436,
+      "maxY": 580,
+      "count": 3174
+    },
+    {
+      "name": "tooltip-at",
+      "x": 0,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 90,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 180,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 269,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 359,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 449,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 539,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 628,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 718,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 808,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 898,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 987,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1077,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1167,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1257,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1346,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1436,
+      "y": 0,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 0,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 90,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 180,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 269,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 359,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 449,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 539,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 628,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 718,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 808,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 898,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 987,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1077,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1167,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1257,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1346,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1436,
+      "y": 97,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 0,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 90,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 180,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 269,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 359,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 449,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 539,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 628,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 718,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 808,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 898,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 987,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1077,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1167,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1257,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1346,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1436,
+      "y": 193,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 0,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 90,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 180,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 269,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 359,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 449,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 539,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 628,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 718,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 808,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 898,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 987,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1077,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1167,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1257,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1346,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1436,
+      "y": 290,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 0,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 90,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 180,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 269,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 359,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 449,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 539,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 628,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 718,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 808,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 898,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 987,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1077,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1167,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1257,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1346,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1436,
+      "y": 387,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 0,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 90,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 180,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 269,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 359,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 449,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 539,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 628,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 718,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 808,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 898,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 987,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1077,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1167,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1257,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1346,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1436,
+      "y": 483,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 0,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 90,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 180,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 269,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 359,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 449,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 539,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 628,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 718,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 808,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 898,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 987,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1077,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1167,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1257,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1346,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "tooltip-at",
+      "x": 1436,
+      "y": 580,
+      "tooltip": {
+        "cls": "el-button el-button--small is-circle el-tooltip__trigger",
+        "text": "",
+        "x": 16,
+        "y": 12
+      }
+    },
+    {
+      "name": "detail-after-click"
+    },
+    {
+      "name": "node-click-scan",
+      "note": "tooltip not found; click scan finished"
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

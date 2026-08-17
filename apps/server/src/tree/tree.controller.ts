@@ -9,7 +9,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { TreeService, TreeNode, ClanTreeResponse } from './tree.service';
+import { TreeService, TreeNode, ClanTreeResponse, ClanNextBatchResponse } from './tree.service';
 import { CreatePersonDto } from './dto/create-person.dto';
 import { MoveSubTreeDto } from './dto/move-subtree.dto';
 import { UpdatePersonDto } from './dto/update-person.dto';
@@ -126,6 +126,8 @@ export class TreeController {
    * 兼容旧链接：若 URL 段是纯数字（数据库 BigInt 的字符串形式），也按 clan.id 解析。
    *
    * @param depth 可选参数，控制加载代数。默认 0 表示全部加载。正数表示只加载到指定代数。
+   * @param limit 可选参数，控制返回节点数上限（渐进加载首屏优化）。默认 0 表示全部加载；
+   *              正数表示只返回按「主脉优先 + 层级 BFS」截取的前 limit 个核心节点。
    */
   @Public()
   @Get('clan/:clanSlug/full')
@@ -133,10 +135,35 @@ export class TreeController {
     @Param('clanSlug') clanSlug: string,
     @Query('userId') userId?: string,
     @Query('depth') depth?: string,
+    @Query('limit') limit?: string,
   ): Promise<ClanTreeResponse> {
     const clanId = await this.resolveClanId(clanSlug);
     const maxDepth = depth ? parseInt(depth, 10) : 0;
-    return await this.treeService.getClanFullTree(clanId, userId, maxDepth);
+    const nodeLimit = limit ? parseInt(limit, 10) : 0;
+    return await this.treeService.getClanFullTree(clanId, userId, maxDepth, nodeLimit);
+  }
+
+  /**
+   * [渐进加载 2026-08-20] 逐批追加渲染：返回「下一批」核心节点
+   * - offset = 已加载的树节点数（前端把上一轮 shownPersons 传回），
+   *   后端按与首屏一致的规范序遍历序（主脉优先 + 层级 BFS）续取 limit 个；
+   * - 每批只返回新节点本身（子树剥离）+ 父节点 id + 子女边元数据，payload 最小。
+   */
+  @Public()
+  @Get('clan/:clanSlug/next-batch')
+  async getClanNextBatch(
+    @Param('clanSlug') clanSlug: string,
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+    @Query('userId') userId?: string,
+  ): Promise<ClanNextBatchResponse> {
+    const clanId = await this.resolveClanId(clanSlug);
+    const offsetNum = offset ? parseInt(offset, 10) : 0;
+    const batchSize = limit ? parseInt(limit, 10) : 100;
+    if (offsetNum < 0 || batchSize < 1) {
+      throw new BadRequestException('offset must be >= 0 and limit must be >= 1');
+    }
+    return await this.treeService.getClanNextBatch(clanId, offsetNum, batchSize, userId);
   }
 
   /**

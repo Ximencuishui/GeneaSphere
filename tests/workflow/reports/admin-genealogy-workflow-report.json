@@ -1,0 +1,182 @@
+{
+  "base": "http://127.0.0.1:3102",
+  "started_at": "2026-08-17T07:39:30.255Z",
+  "checks": [
+    {
+      "name": "后端健康检查",
+      "ok": true,
+      "detail": "{\"ok\":true,\"latency_ms\":287,\"error\":null}"
+    },
+    {
+      "name": "管理员演示登录",
+      "ok": true,
+      "detail": "role=OWNER"
+    },
+    {
+      "name": "未登录访问工作流 → 401",
+      "ok": true,
+      "detail": "status=401"
+    },
+    {
+      "name": "新建族谱",
+      "ok": true,
+      "detail": "id=8 slug=mswxay31"
+    },
+    {
+      "name": "初始工作流：progress=10%",
+      "ok": true,
+      "detail": "progress=10 done=1"
+    },
+    {
+      "name": "初始工作流：当前阶段=旧谱电子化",
+      "ok": true,
+      "detail": "current=digitize"
+    },
+    {
+      "name": "初始工作流：子阶段1(导入与拍照)进行中",
+      "ok": true,
+      "detail": "sub=current"
+    },
+    {
+      "name": "非管理员访问工作流 → 403",
+      "ok": true,
+      "detail": "status=403"
+    },
+    {
+      "name": "上传旧谱 PDF（导入与拍照）",
+      "ok": true,
+      "detail": "taskId=pdf_1786952376089_jumv5i4"
+    },
+    {
+      "name": "PDF 解析完成（进入 preview）",
+      "ok": true,
+      "detail": "status=preview"
+    },
+    {
+      "name": "解析出人员记录",
+      "ok": true,
+      "detail": "records=10"
+    },
+    {
+      "name": "工作流：导入与拍照 done",
+      "ok": true,
+      "detail": "sub=done"
+    },
+    {
+      "name": "导入记录已落库（pdf_import_logs）",
+      "ok": true,
+      "detail": "logId=3"
+    },
+    {
+      "name": "工作流：OCR 识别 done",
+      "ok": true,
+      "detail": "sub=done"
+    },
+    {
+      "name": "提交左右对照校对",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "校对已写入临时数据表（is_corrected）",
+      "ok": true,
+      "detail": "corrected=4"
+    },
+    {
+      "name": "工作流：左右对照编修 done",
+      "ok": true,
+      "detail": "sub=done"
+    },
+    {
+      "name": "保存数据表（执行导入）",
+      "ok": true,
+      "detail": "success=10"
+    },
+    {
+      "name": "工作流：保存数据表 done",
+      "ok": true,
+      "detail": "sub=done"
+    },
+    {
+      "name": "工作流：旧谱电子化 done",
+      "ok": true,
+      "detail": "stage=done"
+    },
+    {
+      "name": "短信发送：能力未配置 → 503 CAPABILITY_UNAVAILABLE（预期负例）",
+      "ok": true,
+      "detail": "status=503"
+    },
+    {
+      "name": "工作流：发通知族员 done",
+      "ok": true,
+      "detail": "stage=done"
+    },
+    {
+      "name": "族员提交信息修改申请",
+      "ok": true,
+      "detail": "reqId=2"
+    },
+    {
+      "name": "工作流：族员自行更改 done",
+      "ok": true,
+      "detail": "stage=done"
+    },
+    {
+      "name": "工作流：当前阶段推进到「审核」",
+      "ok": true,
+      "detail": "current=review"
+    },
+    {
+      "name": "管理员审核通过修改申请",
+      "ok": true,
+      "detail": "status=APPROVED"
+    },
+    {
+      "name": "工作流：审核 done",
+      "ok": true,
+      "detail": "stage=done"
+    },
+    {
+      "name": "创建册谱卷宗（新谱建成）",
+      "ok": true,
+      "detail": "status=201 body={\"id\":\"5\",\"clan_id\":\"8\",\"sort_order\":1,\"title\":\"卷一 谱序源流（测试）\",\"type\":\"document\",\"content\":\"<p>新谱序文…</p>\",\"config\":null,\"c"
+    },
+    {
+      "name": "工作流：新谱建成 done",
+      "ok": true,
+      "detail": "stage=done"
+    },
+    {
+      "name": "工作流：印刷出谱 done",
+      "ok": true,
+      "detail": "stage=done"
+    },
+    {
+      "name": "工作流：progress=100%",
+      "ok": true,
+      "detail": "progress=100 done=10/10"
+    },
+    {
+      "name": "工作流：无当前阶段（全部完成）",
+      "ok": true,
+      "detail": "current=null"
+    },
+    {
+      "name": "工作流：7 个主阶段全部 done",
+      "ok": true,
+      "detail": "clan_created:done digitize:done notify:done member_edit:done review:done new_book:done print:done"
+    },
+    {
+      "name": "工作流：旧谱电子化 4 子阶段全部 done",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "clan": {
+    "id": "8",
+    "slug": "mswxay31"
+  },
+  "finished_at": "2026-08-17T07:40:10.736Z",
+  "passed": true
+}

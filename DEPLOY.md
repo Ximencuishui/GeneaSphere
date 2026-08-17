@@ -226,6 +226,14 @@ docker compose down
 
 ## 故障排查
 
+### 部署期间访问到半成品文件（ERR_CONNECTION_RESET / 资源加载失败）
+- 前端构建产物现在先完整落到 `apps/web/dist.new`，构建成功后由 `deploy.sh` 的 `swap_web_dist` **原子切换**到 `dist`（同文件系统 rename），nginx 全程只会读到完整版本。
+- 手动部署时请勿直接覆盖 `apps/web/dist`；如需手动替换，请照此流程：
+  ```bash
+  cd /opt/geneasphere/apps/web
+  mv dist dist.old && mv dist.new dist && rm -rf dist.old
+  ```
+
 ### 前端 404 或 API 调用失败
 - 检查 Nginx 配置：`nginx -t`
 - 确认 `proxy_pass` 末尾有 `/`（剥离 /api/ 前缀）

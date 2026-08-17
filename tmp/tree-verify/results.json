@@ -1,0 +1,124 @@
+{
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "treeApi": {
+    "url": "http://localhost:5173/api/tree/clan/zhuxi-demo/full",
+    "status": 200,
+    "timingMs": null,
+    "duration": 0,
+    "contentLength": "169051"
+  },
+  "steps": [
+    {
+      "name": "login-page",
+      "title": "寻根路 · xungenlu.cn · 寻根溯源、家族传承平台"
+    },
+    {
+      "name": "demo-login",
+      "url": "http://localhost:5173/zupu/zhuxi-demo"
+    },
+    {
+      "name": "dashboard-text",
+      "snippet": "寻根路 · xungenlu.cn 概况 控制面板 族谱树 册谱 数据统计 人员与权限 审核中心 内容与影像 寻亲与合并 族谱与印刷 系统设置 / 概况 / 控制面板 13800000000 欢迎回来，13800000000 2026年8月16日星期日 管理成员 0 待办事项 1016 家族成员 20 家族影像 0.0G 已用存储 1016 族谱树 16 在世人数 20 照片总数 0 待办总数 存储用量 0% 0% 已使用 0.00 GB 总容量 5 GB 剩余 5.00 GB 快速入口 隐私配置 字辈管理 生平审核 寻亲申请 云存储 印刷订单 发送短信 短信余额 待办事项 影像 0 · 生平 0 · 寻亲 0 暂无待办事项，一切井然有序 🔇 背景音乐"
+    },
+    {
+      "name": "tree-route",
+      "url": "http://localhost:5173/tree/zhuxi-demo"
+    },
+    {
+      "name": "tree-dom-metrics",
+      "canvasLayers": [
+        {
+          "w": 1440,
+          "h": 852,
+          "cw": 1440,
+          "ch": 852
+        },
+        {
+          "w": 1440,
+          "h": 852,
+          "cw": 1440,
+          "ch": 852
+        },
+        {
+          "w": 1440,
+          "h": 852,
+          "cw": 1440,
+          "ch": 852
+        },
+        {
+          "w": 1440,
+          "h": 852,
+          "cw": 1440,
+          "ch": 852
+        }
+      ],
+      "stats": "总人数: 1016 | 视图: 详细 | 布局: 纵向 金色高亮为主传承线路",
+      "perf": "FPS 60 节点 77 / 501 边 84 / 500 Zoom 0.40 渲染 0ms 压测 1000 节点",
+      "navbarTitle": "族谱全景",
+      "lineageChip": "传承路径 2代",
+      "errorPlaceholder": null,
+      "fallback": null,
+      "loading": null,
+      "toolbar": "全部 导入/导出",
+      "minimap": true,
+      "slider": false,
+      "canvasBox": {
+        "x": 0,
+        "y": 48,
+        "w": 1440,
+        "h": 852
+      },
+      "scroll": {
+        "sw": 1440,
+        "iw": 1440,
+        "sh": 900,
+        "ih": 900
+      }
+    },
+    {
+      "name": "node-click-detail"
+    },
+    {
+      "name": "after-wheel-zoom",
+      "zoomPerf": "FPS 43 节点 53 / 501 边 57 / 500 Zoom 0.60 渲染 0ms 压测 1000 节点"
+    },
+    {
+      "name": "search-dropdown",
+      "items": [
+        "全部",
+        "男",
+        "Ů",
+        "导出 JSON（备份）",
+        "导出 PDF（分页印刷）",
+        "导出完整大图（挂画）…",
+        "导入 Excel…",
+        "导入 JSON 备份…"
+      ]
+    },
+    {
+      "name": "overflow-check",
+      "sw": 1440,
+      "iw": 1440,
+      "hasHOverflow": false
+    },
+    {
+      "name": "console-errors-summary",
+      "total": 0,
+      "unique": 0,
+      "samples": []
+    },
+    {
+      "name": "page-errors-summary",
+      "total": 0,
+      "samples": []
+    },
+    {
+      "name": "failed-requests-summary",
+      "total": 0,
+      "samples": []
+    }
+  ],
+  "treeApiStart": 1786878391210
+}

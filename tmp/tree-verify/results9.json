@@ -1,0 +1,35 @@
+{
+  "steps": [
+    {
+      "name": "zoom-start",
+      "zoom0": "FPS 59 节点 6 / 1000 边 7 / 999 Zoom 1.35 渲染 0ms 压测 1000 节点"
+    },
+    {
+      "name": "node-clusters"
+    },
+    {
+      "name": "resize-test",
+      "before": {
+        "cw": 1440,
+        "ch": 852,
+        "w": 1440,
+        "h": 852
+      },
+      "after": {
+        "cw": 1000,
+        "ch": 652,
+        "w": 1000,
+        "h": 652,
+        "container": {
+          "w": 1000,
+          "h": 652
+        }
+      }
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

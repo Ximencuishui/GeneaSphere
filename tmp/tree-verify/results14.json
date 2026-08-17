@@ -1,0 +1,57 @@
+{
+  "steps": [
+    {
+      "0": [
+        438,
+        544
+      ],
+      "name": "blocks-at-700"
+    },
+    {
+      "name": "snapshot-before",
+      "points": 1426
+    },
+    {
+      "name": "snapshot-after",
+      "points": 1098
+    },
+    {
+      "name": "diff",
+      "removed": 462,
+      "added": 134
+    },
+    {
+      "name": "diff-bbox",
+      "removed": {
+        "minX": 696,
+        "minY": 264,
+        "maxX": 1032,
+        "maxY": 716
+      },
+      "added": {
+        "minX": 724,
+        "minY": 260,
+        "maxX": 832,
+        "maxY": 720
+      },
+      "nodeOld": {
+        "x": 700,
+        "y": 491
+      },
+      "nodeNew": {
+        "x": 790,
+        "y": 491
+      },
+      "canvas": {
+        "w": 1440,
+        "h": 852
+      },
+      "removedLocalized": false
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

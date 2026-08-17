@@ -1,0 +1,103 @@
+{
+  "steps": [
+    {
+      "0": {
+        "x": 717,
+        "y": 324,
+        "d": {
+          "x": 700,
+          "y": 4
+        }
+      },
+      "1": {
+        "x": 806,
+        "y": 487,
+        "d": {
+          "x": 796,
+          "y": 444
+        }
+      },
+      "2": {
+        "x": 806,
+        "y": 39,
+        "d": {
+          "x": 804,
+          "y": 84
+        }
+      },
+      "3": {
+        "x": 1008,
+        "y": 488,
+        "d": {
+          "x": 996,
+          "y": 492
+        }
+      },
+      "name": "clusters"
+    },
+    {
+      "name": "node-extent",
+      "top": 434,
+      "bottom": 546,
+      "nodeHeight": 112
+    },
+    {
+      "name": "edge-follow-test",
+      "node": {
+        "gx": 796,
+        "gy": 444,
+        "extent": {
+          "top": 434,
+          "bottom": 546,
+          "nodeHeight": 112
+        }
+      },
+      "edgeSampleY": 571,
+      "before": {
+        "edgeBelow": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "edgeTop": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        }
+      },
+      "after": {
+        "edgeBelowAtNewX": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "edgeBelowAtOldX": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "edgeTopAtNewX": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "nodeAtNewX": {
+          "r": 253,
+          "g": 232,
+          "b": 240,
+          "a": 255
+        }
+      }
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

@@ -304,16 +304,26 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 const exportingPdf = ref(false);
 const exportDialog = ref(false);
-const exportOpts = ref({ header: '', footer: '', withAnnotations: false });
+const exportOpts = ref({
+  header: '',
+  footer: '',
+  withAnnotations: false,
+  layout: undefined as undefined | 'su' | 'ou' | 'shixi_table',
+});
 
 async function doExportPdf() {
   exportingPdf.value = true;
   try {
-    const url = cepuApi.exportPdfUrl(clanId.value, {
-      header: exportOpts.value.header || undefined,
-      footer: exportOpts.value.footer || undefined,
-      withAnnotations: exportOpts.value.withAnnotations,
-    }, shareToken.value);
+    const url = cepuApi.exportPdfUrl(
+      clanId.value,
+      {
+        header: exportOpts.value.header || undefined,
+        footer: exportOpts.value.footer || undefined,
+        withAnnotations: exportOpts.value.withAnnotations,
+        layout: exportOpts.value.layout,
+      },
+      shareToken.value,
+    );
     const res = await fetch(url);
     if (!res.ok) throw new Error(String(res.status));
     const blob = await res.blob();
@@ -332,7 +342,14 @@ async function doExportWord() {
   exportingWord.value = true;
   try {
     const res = await fetch(
-      cepuApi.exportWordUrl(clanId.value, exportOpts.value.withAnnotations, shareToken.value),
+      cepuApi.exportWordUrl(
+        clanId.value,
+        {
+          withAnnotations: exportOpts.value.withAnnotations,
+          layout: exportOpts.value.layout,
+        },
+        shareToken.value,
+      ),
     );
     if (!res.ok) throw new Error(String(res.status));
     const blob = await res.blob();
@@ -421,6 +438,123 @@ function ouEntryText(e: ShiluEntry): string {
   const burial = e.burial_place ? `葬${e.burial_place}` : '';
   return `${rank}${e.full_name} ${courtesy}${years} ${burial}`.trim();
 }
+
+// === PR#1 世系表开本预览(与后端 PDF 排版同构) ===
+type ShixiDensity = 'normal' | 'condense' | 'condense-strong';
+type ShixiPageSpec = {
+  title: string;
+  gens: number[]; // 标准页使用的世代列表
+  density: ShixiDensity;
+  isSplitCol: boolean; // 单代左右双列模式
+  splitColGen?: number; // 双列模式下的世代
+  splitColEntries?: ShiluEntry[]; // 双列模式下的全部人员
+  splitColHalf?: number; // 双列分割点
+};
+
+function pickShixiDensity(chunkGens: number[], byGen: Map<number, ShiluEntry[]>): ShixiDensity {
+  let maxPerGen = 0;
+  for (const g of chunkGens) {
+    const list = byGen.get(g) || [];
+    if (list.length > maxPerGen) maxPerGen = list.length;
+  }
+  if (maxPerGen > 12) return 'condense-strong';
+  if (maxPerGen > 6) return 'condense';
+  return 'normal';
+}
+
+function shixiEntryHtml(e: ShiluEntry): string {
+  const lines: string[] = [];
+  lines.push(`<div class="shixi-name">${e.full_name}</div>`);
+  if (e.birth_year || e.death_year || e.is_living) {
+    const b = e.birth_year ? `${e.birth_year}` : '?';
+    const d = e.is_living ? '今' : e.death_year ? `${e.death_year}` : '?';
+    lines.push(`<div class="shixi-line">${b}-${d}</div>`);
+  }
+  if (e.courtesy_name) lines.push(`<div class="shixi-line">字${e.courtesy_name}</div>`);
+  if (e.native_place) lines.push(`<div class="shixi-line">籍${e.native_place}</div>`);
+  if (e.burial_place) lines.push(`<div class="shixi-line">葬${e.burial_place}</div>`);
+  if (e.spouses.length) {
+    const sStr = e.spouses
+      .map((s) => `${s.name}${s.native_place ? `（${s.native_place}）` : ''}`)
+      .join('、');
+    lines.push(`<div class="shixi-line">配${sStr}</div>`);
+  }
+  if (e.children.length) {
+    const cStr = e.children
+      .map((c) => `${c.name}${c.child_type && c.child_type !== 'BIOLOGICAL' ? '（继）' : ''}`)
+      .join('、');
+    lines.push(`<div class="shixi-line">子女:${cStr}</div>`);
+  }
+  if (e.achievements) lines.push(`<div class="shixi-line">${e.achievements}</div>`);
+  if (e.biography) lines.push(`<div class="shixi-bio">${e.biography}</div>`);
+  return `<div class="shixi-person">${lines.join('')}</div>`;
+}
+
+const HARD_LIMIT = 16;
+const shixiTablePages = computed(() => {
+  const entries = volumeContent.value?.entries || [];
+  const cfg = (volumeContent.value?.config || {}) as any;
+  const pageGen = Math.max(1, Math.min(20, cfg.page_gen_count ?? 5));
+  const byGen = new Map<number, ShiluEntry[]>();
+  for (const e of entries) {
+    if (!byGen.has(e.generation)) byGen.set(e.generation, []);
+    byGen.get(e.generation)!.push(e);
+  }
+  // 排序:rank 升序
+  for (const arr of byGen.values()) {
+    arr.sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+  }
+  const sortedGens = [...byGen.keys()].sort((a, b) => a - b);
+  const pages: ShixiPageSpec[] = [];
+  for (let i = 0; i < sortedGens.length; i += pageGen) {
+    const chunkGens = sortedGens.slice(i, i + pageGen);
+    let maxPerGen = 0;
+    for (const g of chunkGens) {
+      const list = byGen.get(g) || [];
+      if (list.length > maxPerGen) maxPerGen = list.length;
+    }
+    if (maxPerGen <= HARD_LIMIT) {
+      // 正常一页 + 自动密集模式
+      const min = chunkGens[0];
+      const max = chunkGens[chunkGens.length - 1];
+      const title = chunkGens.length === 1
+        ? `族谱第${min + 1}世世系表`
+        : `族谱第${min + 1}世至第${max + 1}世世系表`;
+      pages.push({
+        title,
+        gens: chunkGens,
+        density: pickShixiDensity(chunkGens, byGen),
+        isSplitCol: false,
+      });
+    } else {
+      // chunk 内有单代人数过多:逐代渲染(>16 用 split-page,其它用标准)
+      for (const g of chunkGens) {
+        const list = byGen.get(g) || [];
+        if (list.length <= HARD_LIMIT) {
+          const title = `族谱第${g + 1}世世系表`;
+          pages.push({
+            title,
+            gens: [g],
+            density: pickShixiDensity([g], byGen),
+            isSplitCol: false,
+          });
+        } else {
+          const half = Math.ceil(list.length / 2);
+          pages.push({
+            title: `族谱第${g + 1}世世系表(${list.length}人)`,
+            gens: [],
+            density: 'condense-strong',
+            isSplitCol: true,
+            splitColGen: g,
+            splitColEntries: list,
+            splitColHalf: half,
+          });
+        }
+      }
+    }
+  }
+  return { cfg, pages, byGen };
+});
 
 // ---------- 卷宗编辑（admin） ----------
 const newVolumeDialog = ref(false);
@@ -654,7 +788,22 @@ onMounted(async () => {
               <el-radio-group v-model="volumeContent.config.layout" size="small">
                 <el-radio-button value="su">苏式</el-radio-button>
                 <el-radio-button value="ou">欧式</el-radio-button>
+                <el-radio-button value="shixi_table">世系表</el-radio-button>
               </el-radio-group>
+              <template v-if="volumeContent.config.layout === 'shixi_table'">
+                <span class="config-label">每页世代：</span>
+                <el-input-number
+                  v-model="volumeContent.config.page_gen_count"
+                  :min="1"
+                  :max="20"
+                  size="small"
+                  controls-position="right"
+                  style="width:110px"
+                />
+                <el-checkbox v-model="volumeContent.config.show_generation_connector" size="small">
+                  显示顶端连接线
+                </el-checkbox>
+              </template>
               <span class="config-label">收录：</span>
               <el-radio-group v-model="volumeContent.config.gender_filter" size="small">
                 <el-radio-button value="all">全部</el-radio-button>
@@ -668,8 +817,8 @@ onMounted(async () => {
               <el-button type="primary" size="small" @click="saveShiluConfig">应用并重新生成</el-button>
             </div>
 
-            <!-- 苏式排版（默认） -->
-            <div v-if="volumeContent.config?.layout !== 'ou'" class="shilu-entries">
+            <!-- 苏式排版（默认 layout=su 或未配置）：横排文字条目 -->
+            <div v-if="!volumeContent.config?.layout || volumeContent.config.layout === 'su'" class="shilu-entries">
               <div
                 v-for="e in volumeContent.entries || []"
                 :id="`shilu-${e.person_id}`"
@@ -690,6 +839,69 @@ onMounted(async () => {
                 </div>
               </div>
               <el-empty v-if="!volumeContent.entries?.length" description="该卷暂无世录条目" :image-size="60" />
+            </div>
+
+            <!-- 世系表开本(PR#1 竖排预览):与 PDF 排版同构,在线翻页查看 -->
+            <div v-else-if="volumeContent.config?.layout === 'shixi_table'" class="shixi-table-view">
+              <div class="shixi-page-list">
+                <article
+                  v-for="(page, pIdx) in shixiTablePages.pages"
+                  :key="pIdx"
+                  class="shixi-page"
+                  :class="[
+                    page.density === 'condense' ? 'condense' : '',
+                    page.density === 'condense-strong' ? 'condense-strong' : '',
+                    shixiTablePages.cfg.show_generation_connector === false ? 'no-connector' : '',
+                  ]"
+                >
+                  <div class="shixi-page-dot" />
+                  <div class="shixi-title">{{ page.title }}</div>
+                  <!-- 标准页:每代一列 -->
+                  <div v-if="!page.isSplitCol" class="shixi-grid">
+                    <div v-for="g in page.gens" :key="g" class="shixi-col">
+                      <div class="shixi-col-header">第{{ g + 1 }}世</div>
+                      <div
+                        v-for="e in (shixiTablePages.byGen.get(g) || [])"
+                        :id="`shilu-${e.person_id}`"
+                        :key="e.person_id"
+                        class="shixi-person"
+                        :class="{ focused: focusedEntryId === e.person_id }"
+                        @click="openPerson(e.person_id, e.full_name, e)"
+                        v-html="shixiEntryHtml(e)"
+                      />
+                    </div>
+                  </div>
+                  <!-- 单代左右双列页 -->
+                  <div v-else class="shixi-grid shixi-grid-split">
+                    <div class="shixi-col">
+                      <div class="shixi-col-header">第{{ (page.splitColGen ?? 0) + 1 }}世·前半</div>
+                      <div
+                        v-for="e in (page.splitColEntries || []).slice(0, page.splitColHalf)"
+                        :id="`shilu-${e.person_id}`"
+                        :key="e.person_id"
+                        class="shixi-person"
+                        :class="{ focused: focusedEntryId === e.person_id }"
+                        @click="openPerson(e.person_id, e.full_name, e)"
+                        v-html="shixiEntryHtml(e)"
+                      />
+                    </div>
+                    <div class="shixi-col">
+                      <div class="shixi-col-header">第{{ (page.splitColGen ?? 0) + 1 }}世·后半</div>
+                      <div
+                        v-for="e in (page.splitColEntries || []).slice(page.splitColHalf)"
+                        :id="`shilu-${e.person_id}`"
+                        :key="e.person_id"
+                        class="shixi-person"
+                        :class="{ focused: focusedEntryId === e.person_id }"
+                        @click="openPerson(e.person_id, e.full_name, e)"
+                        v-html="shixiEntryHtml(e)"
+                      />
+                    </div>
+                  </div>
+                  <div class="shixi-page-footer">第 {{ pIdx + 1 }} 页,共 {{ shixiTablePages.pages.length }} 页</div>
+                </article>
+                <el-empty v-if="!shixiTablePages.pages.length" description="该卷暂无世录条目" :image-size="60" />
+              </div>
             </div>
 
             <!-- 欧式排版（二期）：世代分组格子对齐 -->
@@ -798,14 +1010,26 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <!-- 导出设置（二期：页眉页脚 / 批注输出） -->
-    <el-dialog v-model="exportDialog" title="导出设置" width="440px">
+    <!-- 导出设置（二期：页眉页脚 / 批注输出；PR#1：版式强制） -->
+    <el-dialog v-model="exportDialog" title="导出设置" width="480px">
       <el-form label-width="72px">
         <el-form-item label="页眉">
           <el-input v-model="exportOpts.header" placeholder="默认：族谱名 + 导出日期" />
         </el-form-item>
         <el-form-item label="页脚">
           <el-input v-model="exportOpts.footer" placeholder="默认：第 X 页 / 共 Y 页" />
+        </el-form-item>
+        <el-form-item label="版式">
+          <el-radio-group v-model="exportOpts.layout">
+            <el-radio :value="undefined">按卷配置</el-radio>
+            <el-radio value="shixi_table">世系表开本（竖排）</el-radio>
+            <el-radio value="su">苏式（横排）</el-radio>
+            <el-radio value="ou">欧式（横排）</el-radio>
+          </el-radio-group>
+          <div class="form-hint">
+            选择"世系表开本"时，PDF / Word 均按传统中式开本输出（双层边框、世代竖列、姓名红色楷体、左下角竖排标题）；
+            欧式按辈分横排对齐（与预览一致）。
+          </div>
         </el-form-item>
         <el-form-item label="批注">
           <el-checkbox v-model="exportOpts.withAnnotations">导出内容包含批注</el-checkbox>
@@ -1074,6 +1298,12 @@ onMounted(async () => {
   max-height: 320px;
   overflow-y: auto;
 }
+.form-hint {
+  font-size: 12px;
+  color: #8d6e63;
+  margin-top: 6px;
+  line-height: 1.6;
+}
 .search-group { margin-bottom: 8px; }
 .search-group-title {
   font-size: 12px;
@@ -1094,6 +1324,129 @@ onMounted(async () => {
 .search-sub { font-size: 12px; color: #8d6e63; }
 .slide-right-enter-active, .slide-right-leave-active { transition: margin-right 0.2s ease; }
 .cepu-loading { height: 100%; }
+
+/* [PR#1] 世系表开本在线预览版式(与 PDF 排版同构) */
+.shixi-table-view { padding: 8px 0 24px; }
+.shixi-page-list { display: flex; flex-direction: column; gap: 24px; align-items: center; }
+.shixi-page {
+  width: 720px;
+  max-width: 100%;
+  min-height: 920px;
+  padding: 36px 28px 36px;
+  box-sizing: border-box;
+  position: relative;
+  border: 3px double #333;
+  background: #fffdf6;
+  writing-mode: vertical-rl;
+  font-family: 'KaiTi', 'Songti SC', 'SimSun', 'Microsoft YaHei', serif;
+  overflow: hidden;
+}
+.shixi-page .shixi-page-dot {
+  position: absolute; top: 16px; right: 16px;
+  width: 18px; height: 18px;
+  border: 1.5px solid #333; border-radius: 50%;
+  background: #fffdf6;
+}
+.shixi-page .shixi-title {
+  position: absolute; bottom: 16px; left: 16px;
+  writing-mode: vertical-rl;
+  font-family: 'KaiTi', 'Songti SC', serif;
+  color: #b22222;
+  font-size: 16px;
+  letter-spacing: 6px;
+  line-height: 1.4;
+}
+.shixi-page .shixi-page-footer {
+  position: absolute; bottom: 12px; right: 16px;
+  writing-mode: horizontal-tb;
+  font-size: 12px; color: #888;
+}
+.shixi-grid {
+  display: flex; flex-direction: row-reverse;
+  height: 100%;
+  gap: 12px;
+  align-items: stretch;
+}
+.shixi-col {
+  flex: 1; position: relative;
+  padding: 36px 8px 12px;
+  border-left: 1px solid #888;
+  display: flex; flex-direction: column; align-items: center;
+  writing-mode: vertical-rl;
+  min-height: 800px;
+}
+.shixi-col:last-child { border-left: 1px solid #888; }
+.shixi-col-header {
+  position: absolute; top: 0; right: 0;
+  background: #d9d9d9; border: 1px solid #333;
+  writing-mode: horizontal-tb;
+  font-family: 'KaiTi', 'Songti SC', serif;
+  color: #b22222;
+  font-size: 14px;
+  font-weight: bold;
+  padding: 4px 10px;
+  letter-spacing: 4px;
+}
+.shixi-col::before {
+  content: ''; position: absolute; top: -6px; left: 50%;
+  transform: translateX(-50%);
+  width: 10px; height: 10px;
+  border: 2px solid #333; border-radius: 50%;
+  background: #fffdf6;
+}
+.shixi-col::after {
+  content: ''; position: absolute; top: -1px; left: 50%;
+  width: 100%; height: 0;
+  border-top: 1px solid #333;
+}
+.shixi-page.no-connector .shixi-col::before,
+.shixi-page.no-connector .shixi-col::after { display: none; }
+.shixi-person {
+  margin: 16px 0;
+  text-align: center;
+  max-width: 80px;
+  writing-mode: vertical-rl;
+  line-height: 1.9;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 4px 2px;
+  transition: background 0.15s;
+}
+.shixi-person:hover { background: #f5efdc; }
+.shixi-person.focused {
+  background: #fdf3dc;
+  animation: shixiFlash 2s ease;
+}
+@keyframes shixiFlash {
+  0%, 60% { background: #f7e7b8; }
+  100% { background: #fdf3dc; }
+}
+.shixi-name {
+  font-family: 'KaiTi', 'Songti SC', serif;
+  font-size: 16px;
+  font-weight: bold;
+  color: #b22222;
+  margin-bottom: 6px;
+  letter-spacing: 2px;
+}
+.shixi-line { font-size: 12px; color: #1a1a1a; margin: 2px 0; line-height: 1.8; }
+.shixi-bio { font-size: 12px; color: #1a1a1a; margin-top: 6px; line-height: 1.9; text-align: justify; }
+
+/* [二期] 世系表密集模式(与 PDF 后端排版一致) */
+/* 中等密集:7-12 人/代 */
+.shixi-page.condense .shixi-person { margin: 10px 0; line-height: 1.7; max-width: 76px; }
+.shixi-page.condense .shixi-name { font-size: 14px; margin-bottom: 4px; }
+.shixi-page.condense .shixi-line { font-size: 11.5px; margin: 1px 0; line-height: 1.7; }
+.shixi-page.condense .shixi-col { padding: 32px 6px 10px; }
+/* 强密集:>12 人/代(单代多列时强制启用) */
+.shixi-page.condense-strong .shixi-person { margin: 6px 0; line-height: 1.5; max-width: 70px; padding: 2px 1px; }
+.shixi-page.condense-strong .shixi-name { font-size: 13px; margin-bottom: 3px; }
+.shixi-page.condense-strong .shixi-line { font-size: 11px; margin: 1px 0; line-height: 1.5; }
+.shixi-page.condense-strong .shixi-bio { font-size: 11px; line-height: 1.6; }
+.shixi-page.condense-strong .shixi-col { padding: 30px 4px 8px; min-height: 760px; }
+/* 双列页:左右双列各占一格 */
+.shixi-grid.shixi-grid-split .shixi-col { flex: 1 1 50%; }
+.shixi-grid.shixi-grid-split .shixi-col-header { font-size: 13px; padding: 3px 8px; }
 
 /* [二期] 批注 */
 .volume-annotations, .person-annotations {

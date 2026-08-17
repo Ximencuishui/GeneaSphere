@@ -1,0 +1,13 @@
+{
+  "steps": [
+    {
+      "name": "hover-scan",
+      "note": "no #g6-tooltip appeared in scan"
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "steps": [
+    {
+      "0": {
+        "layer": 0,
+        "nonBg": 0,
+        "colored": 0
+      },
+      "1": {
+        "layer": 1,
+        "nonBg": 187,
+        "colored": 127
+      },
+      "2": {
+        "layer": 2,
+        "nonBg": 0,
+        "colored": 0
+      },
+      "3": {
+        "layer": 3,
+        "nonBg": 0,
+        "colored": 0
+      },
+      "name": "canvas-pixel-density"
+    },
+    {
+      "name": "search-toasts",
+      "toasts": [
+        "找到 17 个匹配结果"
+      ]
+    },
+    {
+      "name": "placeholder-after-search",
+      "phAfter": "找到 17 个结果"
+    },
+    {
+      "name": "detail-panel-after-click"
+    },
+    {
+      "name": "gold-before-focus",
+      "count": 0
+    },
+    {
+      "name": "gold-after-focus",
+      "count": 0
+    },
+    {
+      "name": "gold-after-family-circle",
+      "count": 0
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

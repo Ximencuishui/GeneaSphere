@@ -123,25 +123,36 @@ export const cepuApi = {
   deleteAnnotation: (annotationId: string | number) =>
     request.delete(`/api/cepu/annotations/${annotationId}`),
 
-  /** 导出 PDF URL（支持页眉页脚自定义 + 批注输出 + 分享 token） */
+  /** 导出 PDF URL（PR#1 透传 layout 强制版式；二期：页眉页脚 + 批注 + 分享 token） */
   exportPdfUrl: (
     clanId: string | number,
-    opts: { header?: string; footer?: string; withAnnotations?: boolean } = {},
+    opts: {
+      header?: string;
+      footer?: string;
+      withAnnotations?: boolean;
+      layout?: 'su' | 'ou' | 'shixi_table';
+    } = {},
     share?: string,
   ) => {
     const qs = new URLSearchParams();
     if (opts.header) qs.set('header', opts.header);
     if (opts.footer) qs.set('footer', opts.footer);
     if (opts.withAnnotations) qs.set('withAnnotations', '1');
+    if (opts.layout) qs.set('layout', opts.layout);
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-pdf${q ? `?${q}` : ''}`;
   },
 
-  /** 导出 Word（.doc）URL（支持分享 token） */
-  exportWordUrl: (clanId: string | number, withAnnotations = false, share?: string) => {
+  /** 导出 Word（.doc）URL（PR#1 透传 layout；二期：分享 token） */
+  exportWordUrl: (
+    clanId: string | number,
+    opts: { withAnnotations?: boolean; layout?: 'su' | 'ou' | 'shixi_table' } = {},
+    share?: string,
+  ) => {
     const qs = new URLSearchParams();
-    if (withAnnotations) qs.set('withAnnotations', '1');
+    if (opts.withAnnotations) qs.set('withAnnotations', '1');
+    if (opts.layout) qs.set('layout', opts.layout);
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-word${q ? `?${q}` : ''}`;

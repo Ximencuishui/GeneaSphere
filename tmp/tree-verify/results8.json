@@ -1,0 +1,72 @@
+{
+  "steps": [
+    {
+      "name": "tree-metrics-after-fix",
+      "lineageChip": "传承路径 13代",
+      "stats": "总人数: 1015 | 视图: 详细 | 布局: 纵向 金色高亮为主传承线路",
+      "perf": "FPS 60 节点 18 / 1015 边 45 / 1014 Zoom 0.40 渲染 0ms 压测 1000 节点",
+      "toolbar": "全部 导入/导出",
+      "filterOptions": [],
+      "errorPlaceholder": null,
+      "canvasLayers": [
+        {
+          "w": 1440,
+          "h": 852
+        },
+        {
+          "w": 1440,
+          "h": 852
+        },
+        {
+          "w": 1440,
+          "h": 852
+        },
+        {
+          "w": 1440,
+          "h": 852
+        }
+      ],
+      "overflow": false
+    },
+    {
+      "name": "gender-filter-options",
+      "options": [
+        "全部",
+        "男",
+        "女"
+      ]
+    },
+    {
+      "0": {
+        "layer": 0,
+        "nonBg": 0
+      },
+      "1": {
+        "layer": 1,
+        "nonBg": 217
+      },
+      "2": {
+        "layer": 2,
+        "nonBg": 0
+      },
+      "3": {
+        "layer": 3,
+        "nonBg": 0
+      },
+      "name": "canvas-density"
+    },
+    {
+      "name": "zoomed-perf",
+      "zoomPerf": "FPS 28 节点 2 / 1015 边 3 / 1014 Zoom 3.04 渲染 0ms 压测 1000 节点"
+    },
+    {
+      "name": "tooltip-scan",
+      "tooltipSeen": null
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

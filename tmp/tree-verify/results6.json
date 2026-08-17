@@ -1,0 +1,19 @@
+{
+  "steps": [
+    {
+      "name": "zoom-level-1",
+      "zoom1": "FPS 26 节点 39 / 501 边 41 / 500 Zoom 0.90 渲染 0ms 压测 1000 节点"
+    },
+    {
+      "name": "gold-clusters"
+    },
+    {
+      "name": "blue-clusters"
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

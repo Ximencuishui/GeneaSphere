@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {
+      "name": "search-zhu-xi",
+      "items": [
+        "全部",
+        "男",
+        "Ů"
+      ],
+      "visiblePop": [
+        "导入/导出"
+      ]
+    },
+    {
+      "name": "FATAL",
+      "message": "locator.press: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[placeholder*=\"搜索姓名\"]').first()\u001b[22m\n",
+      "stack": "locator.press: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('input[placeholder*=\"搜索姓名\"]').first()\u001b[22m\n\n    at E:\\GeneaSphere\\tmp\\tree-verify\\verify-tree2.mjs:65:25"
+    }
+  ]
+}

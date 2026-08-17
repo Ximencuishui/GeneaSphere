@@ -1,0 +1,116 @@
+{
+  "base": "http://localhost:5174",
+  "checks": [
+    {
+      "name": "控制面板(/zupu/:slug)：工作流条渲染",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "控制面板(/zupu/:slug)：标题为「修谱工作流」",
+      "ok": true,
+      "detail": "修谱工作流"
+    },
+    {
+      "name": "控制面板(/zupu/:slug)：7 个阶段标签齐全",
+      "ok": true,
+      "detail": "缺失=无"
+    },
+    {
+      "name": "控制面板(/zupu/:slug)：存在已完成与当前高亮阶段",
+      "ok": true,
+      "detail": "done=3 current=1"
+    },
+    {
+      "name": "控制面板(/zupu/:slug)：旧谱电子化 4 子步骤展示",
+      "ok": true,
+      "detail": "子步骤=4"
+    },
+    {
+      "name": "控制面板(/zupu/:slug)：进度百分比展示",
+      "ok": true,
+      "detail": "40%"
+    },
+    {
+      "name": "控制面板：无页面错误",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "修谱-历史版本：工作流条渲染",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "修谱-历史版本：标题为「修谱工作流」",
+      "ok": true,
+      "detail": "修谱工作流"
+    },
+    {
+      "name": "修谱-历史版本：7 个阶段标签齐全",
+      "ok": true,
+      "detail": "缺失=无"
+    },
+    {
+      "name": "修谱-历史版本：存在已完成与当前高亮阶段",
+      "ok": true,
+      "detail": "done=3 current=1"
+    },
+    {
+      "name": "修谱-历史版本：旧谱电子化 4 子步骤展示",
+      "ok": true,
+      "detail": "子步骤=4"
+    },
+    {
+      "name": "修谱-历史版本：进度百分比展示",
+      "ok": true,
+      "detail": "40%"
+    },
+    {
+      "name": "修谱-历史版本：无页面错误",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "修谱-PDF导入管理：工作流条渲染",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "修谱-PDF导入管理：标题为「修谱工作流」",
+      "ok": true,
+      "detail": "修谱工作流"
+    },
+    {
+      "name": "修谱-PDF导入管理：7 个阶段标签齐全",
+      "ok": true,
+      "detail": "缺失=无"
+    },
+    {
+      "name": "修谱-PDF导入管理：存在已完成与当前高亮阶段",
+      "ok": true,
+      "detail": "done=3 current=1"
+    },
+    {
+      "name": "修谱-PDF导入管理：旧谱电子化 4 子步骤展示",
+      "ok": true,
+      "detail": "子步骤=4"
+    },
+    {
+      "name": "修谱-PDF导入管理：进度百分比展示",
+      "ok": true,
+      "detail": "40%"
+    },
+    {
+      "name": "修谱-PDF导入管理：无页面错误",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "screenshots": [
+    "E:\\GeneaSphere\\tests\\workflow\\screenshots\\01-dashboard-workflow.png",
+    "E:\\GeneaSphere\\tests\\workflow\\screenshots\\02-history-workflow.png",
+    "E:\\GeneaSphere\\tests\\workflow\\screenshots\\03-import-workflow.png"
+  ],
+  "passed": true
+}

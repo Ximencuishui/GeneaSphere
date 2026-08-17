@@ -1,0 +1,176 @@
+{
+  "steps": [
+    {
+      "0": {
+        "x": 717,
+        "y": 324,
+        "densest": {
+          "x": 700,
+          "y": 4
+        },
+        "cellCount": 335,
+        "density": 3115
+      },
+      "1": {
+        "x": 806,
+        "y": 487,
+        "densest": {
+          "x": 796,
+          "y": 444
+        },
+        "cellCount": 98,
+        "density": 1288
+      },
+      "2": {
+        "x": 806,
+        "y": 39,
+        "densest": {
+          "x": 804,
+          "y": 84
+        },
+        "cellCount": 76,
+        "density": 1041
+      },
+      "3": {
+        "x": 1008,
+        "y": 488,
+        "densest": {
+          "x": 996,
+          "y": 492
+        },
+        "cellCount": 7,
+        "density": 66
+      },
+      "name": "node-clusters"
+    },
+    {
+      "name": "overlap-check-initial",
+      "clusterCount": 4,
+      "closePairs": []
+    },
+    {
+      "name": "grab-point-content",
+      "grabX": 700,
+      "grabY": 4,
+      "hitCheck": {
+        "r": 255,
+        "g": 243,
+        "b": 196,
+        "a": 255
+      }
+    },
+    {
+      "name": "drag-test",
+      "grab": {
+        "grabX": 700,
+        "grabY": 4
+      },
+      "before": {
+        "center": {
+          "x": 700,
+          "y": 4,
+          "a": 255,
+          "rgb": [
+            255,
+            243,
+            196
+          ]
+        },
+        "up": {
+          "a": 0,
+          "rgb": [
+            0,
+            0,
+            0
+          ]
+        },
+        "down": {
+          "a": 255,
+          "rgb": [
+            255,
+            243,
+            196
+          ]
+        },
+        "refs": [
+          {
+            "x": 796,
+            "y": 444,
+            "a": 255
+          },
+          {
+            "x": 804,
+            "y": 84,
+            "a": 255
+          },
+          {
+            "x": 996,
+            "y": 492,
+            "a": 193
+          }
+        ]
+      },
+      "after": {
+        "newCenter": {
+          "a": 255,
+          "rgb": [
+            255,
+            243,
+            196
+          ]
+        },
+        "oldPos": {
+          "a": 0,
+          "rgb": [
+            0,
+            0,
+            0
+          ]
+        },
+        "up": {
+          "a": 0,
+          "rgb": [
+            0,
+            0,
+            0
+          ]
+        },
+        "down": {
+          "a": 255,
+          "rgb": [
+            255,
+            243,
+            196
+          ]
+        },
+        "refs": [
+          {
+            "x": 796,
+            "y": 444,
+            "a": 255
+          },
+          {
+            "x": 804,
+            "y": 84,
+            "a": 255
+          },
+          {
+            "x": 996,
+            "y": 492,
+            "a": 193
+          }
+        ]
+      }
+    },
+    {
+      "name": "overlap-check-after-drag",
+      "clusterCount": 3,
+      "closePairs": []
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

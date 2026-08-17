@@ -1,0 +1,58 @@
+{
+  "steps": [
+    {
+      "name": "canvas-box",
+      "x": 0,
+      "y": 48,
+      "width": 1440,
+      "height": 852
+    },
+    {
+      "name": "content-bbox",
+      "minX": 1440,
+      "minY": 852,
+      "maxX": -1,
+      "maxY": -1,
+      "sampledCount": 0
+    },
+    {
+      "name": "zoomed-sampling",
+      "res": [
+        {
+          "layer": 0,
+          "nonBg": 0,
+          "colored": 0,
+          "gold": 0
+        },
+        {
+          "layer": 1,
+          "nonBg": 911,
+          "colored": 669,
+          "gold": 188
+        },
+        {
+          "layer": 2,
+          "nonBg": 0,
+          "colored": 0,
+          "gold": 0
+        },
+        {
+          "layer": 3,
+          "nonBg": 0,
+          "colored": 0,
+          "gold": 0
+        }
+      ],
+      "perf": "FPS 61 节点 3 / 501 边 13 / 500 Zoom 4.56 渲染 0ms 压测 1000 节点"
+    },
+    {
+      "name": "gold-after-focus-zoomed",
+      "gold": 188
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

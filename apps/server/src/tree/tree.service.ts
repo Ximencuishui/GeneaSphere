@@ -95,6 +95,30 @@ export interface ClanTreeResponse {
   totalPersons: number;
   // 所有配偶边（含初婚/再婚），供 G6 addEdge 使用
   spouseEdges: SpouseEdge[];
+  // [渐进加载 2026-08-20] limit>0 时：是否只返回了核心子集（true 表示全族人数超过首屏上限）
+  isPartial?: boolean;
+  // [渐进加载 2026-08-20] limit>0 时：本次实际返回的节点数（核心子集大小）
+  shownPersons?: number;
+}
+
+/** [渐进加载 2026-08-20] 逐批追加渲染：一批新增节点的单条记录 */
+export interface ClanBatchItem {
+  /** 新节点（children / child_links 已剥离，尚未加载其子树） */
+  node: TreeNode;
+  /** 父节点 id（父节点必定已加载，前端据此挂载） */
+  parentId: string;
+  /** 父节点 → 该节点的子女边元数据（排行/过继类型/父、母归属），前端补进父节点 child_links */
+  childLink?: ChildLink;
+}
+
+/** [渐进加载 2026-08-20] 逐批追加渲染：下一批节点的响应 */
+export interface ClanNextBatchResponse {
+  items: ClanBatchItem[];
+  totalPersons: number;
+  /** 加载至今的树节点总数（offset + items.length） */
+  shownPersons: number;
+  /** 是否还有未加载的树节点 */
+  isPartial: boolean;
 }
 
 /**
@@ -365,10 +389,17 @@ export class TreeService {
    * 性能优化：避免闭包表 O(N²) 查询，改用直接父子关系查询
    *
    * @param maxDepth 深度限制。0 表示全部加载；正数表示只加载到指定代数。
+   * @param limit 节点数上限（渐进加载首屏优化）。>0 表示只返回按「主脉优先 + 层级 BFS」
+   *              截取的前 limit 个核心节点；0 表示全量返回。
    */
-  async getClanFullTree(clanId: bigint, userId?: string, maxDepth: number = 0): Promise<ClanTreeResponse> {
+  async getClanFullTree(
+    clanId: bigint,
+    userId?: string,
+    maxDepth: number = 0,
+    limit: number = 0,
+  ): Promise<ClanTreeResponse> {
     const startTime = Date.now();
-    console.log(`[TreeService] getClanFullTree start: clanId=${clanId}, maxDepth=${maxDepth}`);
+    console.log(`[TreeService] getClanFullTree start: clanId=${clanId}, maxDepth=${maxDepth}, limit=${limit}`);
 
     // 1) 根节点：单次查询
     const rootPerson = await this.findClanRootPerson(clanId);
@@ -392,34 +423,45 @@ export class TreeService {
     };
     markMainLineage(rootNode);
 
-    // 4) 总人数（深度限制时不查询总数，返回 -1 表示未完整）
+    // 4) 渐进加载：limit>0 时按「主脉优先 + 层级 BFS」截取核心子集
+    let finalRootNode = rootNode;
+    let shownPersons = 0;
+    if (limit > 0) {
+      finalRootNode = this.truncateTreeByPriority(rootNode, limit, mainLineageSet);
+      shownPersons = this.countNodesInTree(finalRootNode);
+    }
+    console.log(`[TreeService] truncateByLimit: ${Date.now() - startTime}ms, shownPersons=${shownPersons}`);
+
+    // 5) 总人数（limit 模式：始终返回全族真实总数，供前端展示「共 Y 人」）
     let totalPersons: number;
-    if (maxDepth > 0) {
-      totalPersons = this.countNodesInTree(rootNode);
-    } else {
+    if (limit > 0 || maxDepth === 0) {
       totalPersons = await this.prisma.person.count({
         where: { clan_id: clanId, deleted_at: null },
       });
+    } else {
+      totalPersons = this.countNodesInTree(rootNode);
     }
 
-    // 5) 收集根节点的配偶边（[I-1 修复 2026-08-01] 子节点配偶由前端按需 getPersonDetail 获取）
+    // 6) 收集根节点的配偶边（[I-1 修复 2026-08-01] 子节点配偶由前端按需 getPersonDetail 获取）
     const spouseEdges: SpouseEdge[] = [];
-    for (const spouse of rootNode.spouses || []) {
+    for (const spouse of finalRootNode.spouses || []) {
       spouseEdges.push({
-        from: rootNode.id,
+        from: finalRootNode.id,
         to: spouse.id,
         order: spouse.marriage_order,
         is_current: spouse.is_current,
       });
     }
 
-    console.log(`[TreeService] getClanFullTree complete: ${Date.now() - startTime}ms, totalPersons=${totalPersons}, isPartial=${maxDepth > 0}`);
+    console.log(`[TreeService] getClanFullTree complete: ${Date.now() - startTime}ms, totalPersons=${totalPersons}, isPartial=${limit > 0 && shownPersons < totalPersons}`);
 
     return {
-      rootNode: this.serializeBigInt(rootNode),
+      rootNode: this.serializeBigInt(finalRootNode),
       mainLineage,
       totalPersons,
       spouseEdges,
+      isPartial: limit > 0 && shownPersons < totalPersons,
+      shownPersons,
     };
   }
 
@@ -434,6 +476,146 @@ export class TreeService {
       }
     }
     return count;
+  }
+
+  /**
+   * 规范优先级遍历序（主脉优先 + 层级 BFS，根 → 子 → 孙…）
+   * - 与逐批加载共用同一顺序：首屏截取 canonical[0..limit)，下一批取 canonical[offset..offset+batch)，
+   *   保证「已加载集合」始终是规范序的前缀（父节点先于子节点被加载，树保持连通）。
+   * - 每层内部：主传承线路子节点排前（父节点分组内主脉优先）。
+   * @returns order 规范序遍历的节点列表；parentMap 子节点 id → 父节点（根节点无父）。
+   */
+  private priorityBfsOrder(
+    root: TreeNode,
+    mainLineageSet: Set<string>,
+  ): { order: TreeNode[]; parentMap: Map<string, TreeNode> } {
+    const order: TreeNode[] = [];
+    const parentMap = new Map<string, TreeNode>();
+    let level: TreeNode[] = [root];
+    while (level.length > 0) {
+      // 收集当前层（保持该层内部顺序）
+      for (const node of level) order.push(node);
+      // 构造下一层：主脉子节点优先（按父节点分组，组内主脉在前）
+      const next: TreeNode[] = [];
+      for (const node of level) {
+        const children = node.children || [];
+        for (const c of children) {
+          parentMap.set(c.id.toString(), node);
+          next.push(c);
+        }
+      }
+      next.sort((a, b) => {
+        const aMain = mainLineageSet.has(a.id.toString()) ? 0 : 1;
+        const bMain = mainLineageSet.has(b.id.toString()) ? 0 : 1;
+        return aMain - bMain;
+      });
+      level = next;
+    }
+    return { order, parentMap };
+  }
+
+  /**
+   * 按节点数上限截取「核心子集」（渐进加载首屏优化）
+   * - 顺序与逐批加载完全一致（priorityBfsOrder：主脉优先 + 层级 BFS），
+   *   保证后续「加载下一批」能无缝续接（offset 即 shownPersons）；
+   * - 返回一棵只含被选中节点的子树（children / child_links 同步过滤），不改动原树。
+   */
+  private truncateTreeByPriority(root: TreeNode, limit: number, mainLineageSet: Set<string>): TreeNode {
+    const { order } = this.priorityBfsOrder(root, mainLineageSet);
+    const collected = new Set<string>();
+    for (let i = 0; i < order.length && collected.size < limit; i++) {
+      collected.add(order[i].id.toString());
+    }
+
+    // 重建截断树：只保留被选中节点（children 与 child_links 同步过滤）
+    const prune = (node: TreeNode): TreeNode => {
+      const children = (node.children || [])
+        .filter((c) => collected.has(c.id.toString()))
+        .map(prune);
+      const childLinks = (node.child_links || []).filter(
+        (l) => collected.has(l.child_id.toString()),
+      );
+      return {
+        ...node,
+        children: children.length > 0 ? children : undefined,
+        child_links: childLinks.length > 0 ? childLinks : undefined,
+      };
+    };
+    return prune(root);
+  }
+
+  /**
+   * 逐批追加渲染：返回「下一批」核心节点（渐进加载的续接批次）
+   * - 沿用与首屏一致的规范遍历序（priorityBfsOrder：主脉优先 + 层级 BFS），
+   *   offset = 已加载树节点数（前端把 shownPersons 传回），即从规范序的该位置续取 batchSize 个；
+   * - 每批只返回新节点本身（子树剥离）+ 父节点 id + 子女边元数据，payload 最小；
+   * - isPartial 由「已加载数 < 树内节点总数」判定；前端以 items 为空作为最终结束信号
+   *   （totalPersons 含不在树上的孤立成员，可能出现 totalPersons 大于树节点数的情形）。
+   */
+  async getClanNextBatch(
+    clanId: bigint,
+    offset: number,
+    batchSize: number,
+    userId?: string,
+  ): Promise<ClanNextBatchResponse> {
+    const startTime = Date.now();
+    console.log(`[TreeService] getClanNextBatch start: clanId=${clanId}, offset=${offset}, batchSize=${batchSize}`);
+
+    const rootPerson = await this.findClanRootPerson(clanId);
+    if (!rootPerson) {
+      throw new NotFoundException(`No root person found for clan ${clanId}`);
+    }
+    const rootNode = await this.getClanTreeOptimized(clanId, rootPerson.id, 0);
+
+    // 主传承线路 + 回填 is_main_lineage（与 getClanFullTree 一致，供前端金色高亮）
+    const mainLineage = await this.findMainLineagePath(clanId, rootPerson.id, userId);
+    const mainLineageSet = new Set(mainLineage.map((id) => id.toString()));
+    const markMainLineage = (n: TreeNode) => {
+      n.is_main_lineage = mainLineageSet.has(n.id);
+      if (n.children) n.children.forEach(markMainLineage);
+    };
+    markMainLineage(rootNode);
+
+    const { order, parentMap } = this.priorityBfsOrder(rootNode, mainLineageSet);
+    const totalPersons = await this.prisma.person.count({
+      where: { clan_id: clanId, deleted_at: null },
+    });
+
+    const items: ClanBatchItem[] = [];
+    const end = Math.min(order.length, offset + batchSize);
+    for (let i = offset; i < end; i++) {
+      const node = order[i];
+      const id = node.id.toString();
+      const parent = parentMap.get(id);
+      if (!parent) continue; // 根节点无父（offset 正常时不会出现）
+      const childLink = (parent.child_links || []).find(
+        (l) => l.child_id.toString() === id,
+      );
+      items.push({
+        node: {
+          ...node,
+          children: undefined,
+          child_links: undefined,
+        },
+        parentId: parent.id.toString(),
+        childLink,
+      });
+    }
+
+    const shownPersons = offset + items.length;
+    const isPartial = shownPersons < totalPersons;
+    console.log(`[TreeService] getClanNextBatch complete: ${Date.now() - startTime}ms, items=${items.length}, shownPersons=${shownPersons}, isPartial=${isPartial}`);
+
+    return {
+      items: items.map((i) => ({
+        node: this.serializeBigInt(i.node),
+        parentId: i.parentId,
+        childLink: i.childLink ? (this.serializeBigInt(i.childLink) as ChildLink) : undefined,
+      })),
+      totalPersons,
+      shownPersons,
+      isPartial,
+    };
   }
 
   /**

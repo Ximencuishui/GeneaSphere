@@ -219,7 +219,7 @@ export class CepuController {
     return { success: true };
   }
 
-  /** 整本 PDF 导出（二期：支持页眉页脚自定义、批注可选输出）；登录或有效分享链接可导出 */
+  /** 整本 PDF 导出（PR#1：支持世系表开本；二期：页眉页脚 + 批注可选输出）；登录或有效分享链接可导出 */
   @Public()
   @UseGuards(ShareAccessGuard)
   @Get(':clanSlug/export-pdf')
@@ -229,15 +229,20 @@ export class CepuController {
     @Query('header') header: string | undefined,
     @Query('footer') footer: string | undefined,
     @Query('withAnnotations') withAnnotations: string | undefined,
+    @Query('layout') layout: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
+    // 校验强制版式参数,只接受白名单值;非法或空 = 按卷配置
+    const forceLayout =
+      layout === 'su' || layout === 'ou' || layout === 'shixi_table' ? layout : undefined;
     try {
       const buffer = await this.cepuService.exportPdf(clanId, {
         header,
         footer,
         withAnnotations: withAnnotations === '1' || withAnnotations === 'true',
+        forceLayout,
       });
       res.set({
         'Content-Type': 'application/pdf',
@@ -261,13 +266,17 @@ export class CepuController {
     @Param('clanSlug') clanSlug: string,
     @Req() req: any,
     @Query('withAnnotations') withAnnotations: string | undefined,
+    @Query('layout') layout: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
+    const forceLayout =
+      layout === 'su' || layout === 'ou' || layout === 'shixi_table' ? layout : undefined;
     try {
       const buffer = await this.cepuService.exportWord(clanId, {
         withAnnotations: withAnnotations === '1' || withAnnotations === 'true',
+        forceLayout,
       });
       res.set({
         'Content-Type': 'application/msword',

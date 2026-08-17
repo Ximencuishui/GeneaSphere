@@ -28,7 +28,6 @@ declare module 'vue' {
     Delete: typeof import('@element-plus/icons-vue')['Delete']
     DemoRoleModal: typeof import('./components/landing/DemoRoleModal.vue')['default']
     Document: typeof import('@element-plus/icons-vue')['Document']
-    DocumentChecked: typeof import('@element-plus/icons-vue')['DocumentChecked']
     Download: typeof import('@element-plus/icons-vue')['Download']
     Edit: typeof import('@element-plus/icons-vue')['Edit']
     EditPen: typeof import('@element-plus/icons-vue')['EditPen']
@@ -95,7 +94,6 @@ declare module 'vue' {
     ElTimePicker: typeof import('element-plus/es')['ElTimePicker']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
-    FolderOpened: typeof import('@element-plus/icons-vue')['FolderOpened']
     FullScreen: typeof import('@element-plus/icons-vue')['FullScreen']
     GenealogyTree: typeof import('./components/GenealogyTree.vue')['default']
     GenealogyWorkflowBar: typeof import('./components/admin/GenealogyWorkflowBar.vue')['default']
@@ -109,7 +107,6 @@ declare module 'vue' {
     Loading: typeof import('@element-plus/icons-vue')['Loading']
     Lock: typeof import('@element-plus/icons-vue')['Lock']
     Management: typeof import('@element-plus/icons-vue')['Management']
-    Message: typeof import('@element-plus/icons-vue')['Message']
     MigrationMap: typeof import('./components/migration/MigrationMap.vue')['default']
     MigrationParticles: typeof import('./components/home/MigrationParticles.vue')['default']
     MusicButton: typeof import('./components/BackgroundMusic/MusicButton.vue')['default']
@@ -142,7 +139,6 @@ declare module 'vue' {
     UserFilled: typeof import('@element-plus/icons-vue')['UserFilled']
     VideoCamera: typeof import('@element-plus/icons-vue')['VideoCamera']
     VideoPlay: typeof import('@element-plus/icons-vue')['VideoPlay']
-    Wallet: typeof import('@element-plus/icons-vue')['Wallet']
     WarningFilled: typeof import('@element-plus/icons-vue')['WarningFilled']
   }
   export interface GlobalDirectives {

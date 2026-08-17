@@ -34,10 +34,31 @@ export const treeApi = {
 
   /**
    * Get full clan tree data with avatar info and main lineage
+   * @param params.limit >0 时只返回「主脉优先 + 层级 BFS」截取的前 limit 个核心节点
+   *（渐进加载首屏优化；0/缺省 = 全量）
+   * @param params.depth 深度限制（可选，0 = 全部）
    */
-  getClanFullTree: (clanId: string, userId?: string) =>
+  getClanFullTree: (
+    clanId: string,
+    params?: { userId?: string; depth?: number; limit?: number },
+  ) =>
     request.get(`/api/tree/clan/${clanId}/full`, {
-      params: userId ? { userId } : {},
+      params,
+      timeout: 120000,
+    }),
+
+  /**
+   * [渐进加载 2026-08-20] 逐批追加渲染：获取「下一批」核心节点
+   * - offset = 已加载的树节点数（上一轮响应的 shownPersons），
+   *   后端按与首屏一致的规范序遍历序（主脉优先 + 层级 BFS）续取 limit 个；
+   * - 响应 items 为扁平的新节点列表（子树剥离），前端合并进现有树后增量重绘。
+   */
+  getClanNextBatch: (
+    clanId: string,
+    params: { offset: number; limit: number },
+  ) =>
+    request.get(`/api/tree/clan/${clanId}/next-batch`, {
+      params,
       timeout: 120000,
     }),
 

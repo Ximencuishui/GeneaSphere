@@ -204,12 +204,42 @@ deploy_project() {
 
         log_info "构建前端..."
         # 先修复 vue-tsc 可能的问题，跳过类型检查直接用 vite build
+        # 输出到 dist.new（而非原地覆盖 dist）：构建成功后由 swap_web_dist 原子切换，
+        # 避免部署过程中 nginx 读到写了一半的文件（此前会出现 ERR_CONNECTION_RESET / 404）。
         cd "$PROJECT_DIR/apps/web"
-        NODE_OPTIONS='--max-old-space-size=1024' npx vite build 2>&1 | tail -5
+        NODE_OPTIONS='--max-old-space-size=1024' npx vite build --outDir dist.new 2>&1 | tail -5
         cd "$PROJECT_DIR"
     fi
 
     log_info "项目构建完成"
+}
+
+# ==================== 原子切换前端 dist ====================
+# 新构建产物先完整落在 apps/web/dist.new，确认无误后一次性 rename 切换。
+# 同文件系统上 mv 是原子操作，因此 nginx 全程只会读到「旧完整版本」或「新完整版本」，
+# 杜绝部署窗口期读到半成品文件（此前表现为 ERR_CONNECTION_RESET / 资源加载失败）。
+# source 模式：vite 构建到 dist.new；bundle 模式：deploy-pack.sh 上传到 dist.new。
+swap_web_dist() {
+    local WEB_DIR="$PROJECT_DIR/apps/web"
+
+    if [ ! -d "$WEB_DIR/dist.new" ]; then
+        log_warn "未找到 $WEB_DIR/dist.new，跳过原子切换"
+        return 0
+    fi
+
+    # 首次部署：没有旧 dist，直接改名
+    if [ ! -d "$WEB_DIR/dist" ]; then
+        mv "$WEB_DIR/dist.new" "$WEB_DIR/dist"
+        log_info "前端 dist 首次部署完成"
+        return 0
+    fi
+
+    # 原子切换（两次 mv 之间窗口极小；同文件系统 rename 不会复制文件）
+    rm -rf "$WEB_DIR/dist.old"
+    mv "$WEB_DIR/dist" "$WEB_DIR/dist.old"
+    mv "$WEB_DIR/dist.new" "$WEB_DIR/dist"
+    rm -rf "$WEB_DIR/dist.old"
+    log_info "前端 dist 已原子切换（旧版本已清理）"
 }
 
 # ==================== 配置 .env ====================
@@ -462,6 +492,7 @@ main() {
     install_pm2
     install_tesseract
     deploy_project
+    swap_web_dist
     setup_env
     setup_nginx
     start_server

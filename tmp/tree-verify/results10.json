@@ -1,0 +1,165 @@
+{
+  "steps": [
+    {
+      "name": "zoom-start",
+      "zoom0": "FPS 59 节点 6 / 1000 边 7 / 999 Zoom 1.35 渲染 0ms 压测 1000 节点"
+    },
+    {
+      "0": {
+        "x": 717,
+        "y": 324,
+        "cellCount": 335,
+        "density": 3115
+      },
+      "1": {
+        "x": 806,
+        "y": 487,
+        "cellCount": 98,
+        "density": 1288
+      },
+      "2": {
+        "x": 806,
+        "y": 39,
+        "cellCount": 76,
+        "density": 1041
+      },
+      "3": {
+        "x": 1008,
+        "y": 488,
+        "cellCount": 7,
+        "density": 66
+      },
+      "name": "node-clusters"
+    },
+    {
+      "name": "overlap-check-initial",
+      "clusterCount": 4,
+      "closePairs": [
+        {
+          "a": {
+            "x": 806,
+            "y": 487,
+            "cellCount": 98,
+            "density": 1288
+          },
+          "b": {
+            "x": 806,
+            "y": 39,
+            "cellCount": 76,
+            "density": 1041
+          },
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "name": "drag-test",
+      "from": {
+        "x": 717,
+        "y": 324
+      },
+      "delta": {
+        "dx": 90,
+        "dy": 0
+      },
+      "before": {
+        "nodeCenter": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        },
+        "up30": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        },
+        "down30": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        },
+        "right25": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "up60": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 1
+        }
+      },
+      "after": {
+        "nodeCenter": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "up30": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "down30": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "right25": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        },
+        "up60": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 0
+        }
+      },
+      "oldPosAfter": {
+        "r": 0,
+        "g": 0,
+        "b": 0,
+        "a": 0
+      }
+    },
+    {
+      "name": "overlap-check-after-drag",
+      "clusterCount": 4,
+      "closePairs": [
+        {
+          "a": {
+            "x": 890,
+            "y": 487,
+            "cellCount": 99,
+            "density": 1290
+          },
+          "b": {
+            "x": 890,
+            "y": 39,
+            "cellCount": 76,
+            "density": 1040
+          },
+          "dx": 0,
+          "dy": 0
+        }
+      ]
+    },
+    {
+      "name": "console-errors",
+      "total": 0,
+      "samples": []
+    }
+  ]
+}

@@ -287,6 +287,53 @@ let lastViewportConfig: ViewportConfig | null = null;
 /** 工具栏是否折叠（折叠后只显示图标 + 搜索框，节省顶部空间） */
 const toolbarCollapsed = ref(false);
 
+/**
+ * 渐进加载（大族谱首屏优化，2026-08-20）
+ * - partialTree：true 表示当前画布只渲染了「核心子集」（后端 limit 截断），
+ *   底部提示条提供「加载下一批」入口，逐批追加渲染直至全族加载完毕。
+ * - shownPersons：已加载的树节点数（后端返回，也是下一批的 offset）。
+ * - loadingMoreBatch：下一批加载中（按钮 loading 态）。
+ */
+const partialTree = ref(false);
+const shownPersons = ref(0);
+const loadingMoreBatch = ref(false);
+
+/** 首屏核心卡片数上限（用户要求「最多 100 个卡片」） */
+const INITIAL_CARD_LIMIT_CAP = 100;
+/** 首屏核心卡片数下限（避免小屏一屏只显示几张卡片） */
+const INITIAL_CARD_LIMIT_FLOOR = 16;
+
+/**
+ * 根据当前显示屏（画布容器）大小计算首屏核心卡片数上限：
+ * - 以「卡片宽 + 水平间距」为格子宽、「卡片高 + 行间距」为格子高，
+ *   估算 1:1 缩放（肉眼可读）下屏幕能放下的卡片数；
+ * - 结果夹在 [下限, 100] 之间，既保证核心成员可见，又不会密密麻麻。
+ */
+function computeInitialCardLimit(): number {
+  const el = container.value;
+  const vw = el?.clientWidth || window.innerWidth || 1440;
+  const vh = el?.clientHeight || window.innerHeight || 900;
+  const config = viewModeConfig.value[genealogyStore.viewMode];
+  const cellW = Math.max(40, config.nodeWidth + config.nodeSep);
+  const cellH = Math.max(60, config.nodeHeight + 44);
+  const byScreen =
+    Math.max(1, Math.floor(vw / cellW)) * Math.max(1, Math.floor(vh / cellH));
+  return Math.min(INITIAL_CARD_LIMIT_CAP, Math.max(INITIAL_CARD_LIMIT_FLOOR, byScreen));
+}
+
+/** 下一批预计加载人数（最后一批自动收窄到剩余人数，按钮文案更准确） */
+const nextBatchHint = computed(() => {
+  const batch = computeInitialCardLimit();
+  if (!genealogyStore.totalPersons) return batch;
+  const remaining = Math.max(0, genealogyStore.totalPersons - shownPersons.value);
+  return Math.min(batch, remaining);
+});
+
+/** 逐批加载按钮文案 */
+const loadMoreLabel = computed(() =>
+  loadingMoreBatch.value ? '加载中…' : `加载下一批（+${nextBatchHint.value} 人）`,
+);
+
 /** initGraph 防抖定时器 ID，避免快速切换视图模式时重复重建 */
 let initGraphDebounceTimer: number | null = null;
 
@@ -299,6 +346,19 @@ const errorState = ref<{ code: number; message: string } | null>(null);
 const searchKeyword = ref('');
 const layoutDirection = ref<'TB' | 'LR'>('TB');
 const filterGender = ref<'all' | 'male' | 'female'>('all');
+
+/** 视图模式中文名映射（替代三元链，新增 viewMode 时只需补一行） */
+const VIEW_MODE_LABEL: Record<string, string> = {
+  compact: '紧凑',
+  detailed: '详细',
+  portrait: '肖像',
+  xianshi: '吊线图',
+  su: '苏式',
+  zhe: '浙式',
+};
+const viewModeLabel = computed(
+  () => VIEW_MODE_LABEL[genealogyStore.viewMode] ?? '未识别',
+);
 const highlightNodeIds = ref<Set<string>>(new Set());
 const showOnlyWithPhotos = ref(false);
 const searchResultCount = ref(0);
@@ -507,18 +567,26 @@ function describeError(status: number, fallback: string): string {
   return fallback;
 }
 
-const fetchTreeData = async (rootId: string = '1') => {
+const fetchTreeData = async (rootId: string = '1', opts?: { limit?: number }) => {
   // 拉取阶段：进入 fetch，progressTimer 会驱动 0→32% 平滑增长
   startLoading();
   errorState.value = null;
   try {
     if (props.clanId) {
-      const response: any = await treeApi.getClanFullTree(props.clanId);
+      // [渐进加载 2026-08-20] 首屏传 limit（按屏幕大小计算的卡片上限），
+      // 后端只返回「主脉优先 + 层级 BFS」截取的核心子集，payload 与渲染量大幅下降；
+      // 「加载完整族谱」时不传 limit → 全量。
+      const response: any = await treeApi.getClanFullTree(
+        props.clanId,
+        opts?.limit ? { limit: opts.limit } : undefined,
+      );
       // API 完成：进入 parse 阶段，进度条会跳到 30 附近再平滑增长到 60%
       setLoadingStage('parse');
       if (response?.rootNode) {
         genealogyStore.setMainLineage(response.mainLineage || []);
         genealogyStore.totalPersons = response.totalPersons || 0;
+        partialTree.value = !!response.isPartial;
+        shownPersons.value = response.shownPersons || 0;
         return response.rootNode;
       }
     }
@@ -559,7 +627,9 @@ const retryLoad = async () => {
   errorState.value = null;
   const rootId = props.rootPersonId || '1';
   try {
-    const data = await fetchTreeData(rootId);
+    // 重试同样走渐进加载（首屏 limit），避免大族谱重试时又回到慢路径
+    const limit = props.clanId ? computeInitialCardLimit() : undefined;
+    const data = await fetchTreeData(rootId, limit ? { limit } : undefined);
     if (data) {
       const treeData = (data as any).data || data;
       genealogyStore.setTreeData(treeData);
@@ -567,6 +637,101 @@ const retryLoad = async () => {
     }
   } catch {
     // 错误已由 fetchTreeData 内设置到 errorState，无需再处理
+  }
+};
+
+/**
+ * [渐进加载 2026-08-20] 遍历树，收集全部节点 id（用于统计已加载数 / 计算下一批 offset）
+ */
+function collectNodeIds(root: GenealogyNode | null): string[] {
+  const ids: string[] = [];
+  const walk = (n: GenealogyNode | null) => {
+    if (!n) return;
+    ids.push(String(n.id));
+    for (const c of n.children || []) walk(c);
+  };
+  walk(root);
+  return ids;
+}
+
+/**
+ * [渐进加载 2026-08-20] 把「下一批」节点合并进现有树：
+ * - 按 parentId 找到已加载的父节点，追加到其 children；
+ * - 同步把子女边元数据（childLink：排行/过继类型/母归属）补进父节点 child_links；
+ * - 返回实际新增的节点数（父节点缺失/重复 id 的项跳过，返回 0 表示没有新内容）。
+ */
+function mergeBatchIntoTree(root: GenealogyNode | null, items: any[]): number {
+  if (!root || !Array.isArray(items) || items.length === 0) return 0;
+  const byId = new Map<string, GenealogyNode>();
+  const walk = (n: GenealogyNode) => {
+    byId.set(String(n.id), n);
+    for (const c of n.children || []) walk(c);
+  };
+  walk(root);
+
+  let added = 0;
+  for (const item of items) {
+    const parent = byId.get(String(item?.parentId));
+    const node = item?.node as GenealogyNode | undefined;
+    if (!parent || !node) continue;
+    const childId = String(node.id);
+    if (byId.has(childId)) continue; // 已存在（防重复追加）
+    parent.children = parent.children || [];
+    parent.children.push(node);
+    byId.set(childId, node);
+    if (item.childLink) {
+      parent.child_links = parent.child_links || [];
+      if (!parent.child_links.some((l) => String(l.child_id) === childId)) {
+        parent.child_links.push(item.childLink);
+      }
+    }
+    added++;
+  }
+  return added;
+}
+
+/**
+ * [渐进加载 2026-08-20] 加载下一批成员（逐批追加渲染）
+ * - 不重新拉取全量：只向后端取规范序遍历序中「下一批」节点（主脉优先 + 层级 BFS），
+ *   合并进现有 treeData 后重建画布，每次只多渲染一屏，全程流畅；
+ * - 直到后端返回空批 / isPartial=false 时结束，提示条自动消失。
+ */
+const loadMoreBatch = async () => {
+  if (!props.clanId || loadingMoreBatch.value) return;
+  if (!genealogyStore.treeData) return;
+  loadingMoreBatch.value = true;
+  try {
+    const offset = collectNodeIds(genealogyStore.treeData).length;
+    const batchSize = computeInitialCardLimit();
+    const res: any = await treeApi.getClanNextBatch(props.clanId, {
+      offset,
+      limit: batchSize,
+    });
+    const items: any[] = res?.items || [];
+    if (items.length === 0) {
+      // 没有更多可加载（树内节点已全部加载）
+      partialTree.value = false;
+      shownPersons.value = 0;
+      ElMessage.success('已加载全部族谱成员');
+      return;
+    }
+    const treeData = genealogyStore.treeData;
+    const added = mergeBatchIntoTree(treeData, items);
+    if (added === 0) {
+      partialTree.value = false;
+      shownPersons.value = 0;
+      ElMessage.success('已加载全部族谱成员');
+      return;
+    }
+    genealogyStore.totalPersons = res.totalPersons || genealogyStore.totalPersons;
+    shownPersons.value = res.shownPersons || shownPersons.value + added;
+    partialTree.value = !!res.isPartial;
+    // 追加渲染：重新布局 + 重绘（复用完整管线：配偶边/吊线重挂载/过滤/裁剪/LOD 全兼容）
+    await initGraph(treeData);
+  } catch {
+    // 错误提示由 request 拦截器统一处理
+  } finally {
+    loadingMoreBatch.value = false;
   }
 };
 
@@ -644,6 +809,57 @@ const matchesPhotoFilter = (node: any): boolean => {
   if (!showOnlyWithPhotos.value) return true;
   return node.data?.has_photo === true;
 };
+
+// ==================== [吊线图调色板 2026-08-19] 妻子分支着色 ====================
+/**
+ * 传统吊线图场景下，同一父亲的多位妻子应能直观区分各自子女分支。
+ * 实现策略：每位妻子按 person_id 用 djb2 哈希取色，同一妻子永远是同一颜色；
+ * 该色再统一传到「妻子节点描边」与「妻子→子女」边上。
+ *
+ * - 仅 xianshi 模式启用：其他 5 种视图（compact / detailed / portrait / su / zhe）
+ *   永远不向 data.palette 写入颜色，原有 stroke / lineDash 逻辑不受影响。
+ * - 选用 8 色低饱和「传统卷轴」色系（朱砂/黛绿/松烟/赭石/紫袍/青瓷/檀褐/郁金），
+ *   与既有主枝金 #C9A96E、配偶粉 #E91E63 区分度高，且在浅米背景上对比充分。
+ */
+const WIFE_PALETTE: string[] = [
+  '#C0392B', // 朱砂红
+  '#27AE60', // 黛绿
+  '#2980B9', // 松烟蓝
+  '#D68910', // 赭石
+  '#7D3C98', // 紫袍
+  '#138D75', // 青瓷
+  '#6E2C00', // 檀褐
+  '#B9770E', // 郁金
+];
+
+/** djb2 字符串哈希 → 非负 32 位整数 */
+function hashPersonId(id: string | number): number {
+  const s = String(id);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+/** 取妻子对应调色板色（同一 person_id 永远返回同一颜色） */
+function getWifePaletteColor(personId: string | number): string {
+  return WIFE_PALETTE[hashPersonId(personId) % WIFE_PALETTE.length];
+}
+
+/**
+ * 把 hex 颜色转成低透明度 rgba 字符串，用于边阴影 / 光晕。
+ * 例：paletteShadow('#C0392B', 0.18) → 'rgba(192, 57, 43, 0.18)'
+ */
+function paletteShadow(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return `rgba(0,0,0,${alpha})`;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 0xff;
+  const g = (n >> 8) & 0xff;
+  const b = n & 0xff;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 // ==================== 传统族谱过滤开关（PRD §2.4）====================
 // 三个独立开关，自由组合，实时生效；纯渲染过滤（不改底层数据），切换后重绘画布。
@@ -970,6 +1186,14 @@ const initGraph = async (data: GenealogyNode) => {
       const sid = String(s.id);
       let spouseNodeId = sid;
 
+      // [吊线图调色板 2026-08-19] 仅 xianshi 模式给妻子节点挂 palette：
+      // 同一 person_id 通过 djb2 哈希 → 同一颜色，重渲染不变。
+      // 仅女性配偶有 palette；男性配偶无子女分支，挂在 data 上也不影响任何渲染。
+      const wifePalette =
+        genealogyStore.viewMode === 'xianshi' && s.gender === 'female'
+          ? getWifePaletteColor(s.id)
+          : undefined;
+
       // 收集配偶节点（不在初始布局中）
       if (!existingNodeMap.has(sid)) {
         pendingSpouseNodes.push({
@@ -981,6 +1205,7 @@ const initGraph = async (data: GenealogyNode) => {
             has_photo: false,
             is_external_spouse: true,
             original: null,
+            ...(wifePalette ? { palette: wifePalette } : {}),
           },
           style: {
             opacity: 0.45,
@@ -1002,6 +1227,7 @@ const initGraph = async (data: GenealogyNode) => {
             is_duplicate_spouse: true,
             originalId: sid,
             original: null,
+            ...(wifePalette ? { palette: wifePalette } : {}),
           },
           style: {
             opacity: 0.45,
@@ -1070,6 +1296,9 @@ const initGraph = async (data: GenealogyNode) => {
           const fatherEdge = edgeByTarget.get(childId);
           const wifeNodeId = spouseNodeIdBySpouseId.get(motherId);
           if (!fatherEdge || !wifeNodeId) continue;
+          // [吊线图调色板 2026-08-19] 妻子 → 子女边按妻子 person_id 取色，
+          // 保证与妻子节点 data.palette 完全一致；同一妻子所有子女边同色。
+          const palette = getWifePaletteColor(motherId);
           removeEdges.add(fatherEdge);
           addedEdges.push({
             id: `mother-child-${wifeNodeId}-${childId}`,
@@ -1079,6 +1308,7 @@ const initGraph = async (data: GenealogyNode) => {
               kind: 'parent-child',
               child_type: link.child_type,
               birth_order: link.birth_order,
+              palette,
             },
           });
         }
@@ -1203,10 +1433,11 @@ const initGraph = async (data: GenealogyNode) => {
   const { width: canvasW, height: canvasH } = layoutEngine['canvasSize'] as { width: number; height: number };
   const fitByHeight = (canvasH * 0.8) / contentH;
   const totalNodeCount = layoutNodes.length;
-  const zoomByNodeCount = totalNodeCount > 600 ? 0.45 : totalNodeCount > 300 ? 0.6 : 0.85;
-  // 取三者中较小值，但保 0.4 防止缩到节点看不清
+  // [渐进加载 2026-08-20] 核心子集模式：不因节点数压低缩放，卡片保持肉眼可读
+  const zoomByNodeCount = partialTree.value ? 1.0 : totalNodeCount > 600 ? 0.45 : totalNodeCount > 300 ? 0.6 : 0.85;
+  // 取三者中较小值，但保 0.4（核心子集模式保 0.6）防止缩到节点看不清
   let desiredZoom = Math.min(fitByHeight, zoomByNodeCount, baseViewport.zoom * 1.5);
-  desiredZoom = Math.max(0.4, Math.min(1.0, desiredZoom));
+  desiredZoom = Math.max(partialTree.value ? 0.6 : 0.4, Math.min(1.0, desiredZoom));
 
   if (mainLineageIds.size > 0) {
     const mainPositions = layoutResult.nodes.filter(n => mainLineageIds.has(n.id));
@@ -1354,6 +1585,9 @@ const initGraph = async (data: GenealogyNode) => {
           if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
             return '#D0D0D0';
           }
+          // [吊线图调色板 2026-08-19] 妻子节点描边用 palette，与子女分支边同色
+          // （仅 xianshi 模式会写入 data.palette，其余视图此分支不触发）
+          if (d.data?.palette) return d.data.palette;
           if (d.data?.is_main_lineage) return '#C9A96E';
           if (d.data?.is_main_lineage) return '#D4A04A';
           const gender = d.data?.gender;
@@ -1492,8 +1726,14 @@ const initGraph = async (data: GenealogyNode) => {
       },
       style: {
         stroke: (d: any) => {
-          const sourceMatched = matchesSearch(d.source) && matchesGenderFilter(d.source);
-          const targetMatched = matchesSearch(d.target) && matchesGenderFilter(d.target);
+          // [吊线图调色板 2026-08-19] 妻子 → 子女边按 data.palette 上色
+          // （xianshi 模式专属；其余 5 种视图 mode 不会写入此字段，
+          //   自动 fallthrough 到下方原有主枝/普通父子边逻辑，零改动）
+          if (d.data?.kind !== 'spouse' && d.data?.palette) {
+            return d.data.palette;
+          }
+          const sourceMatched = matchesSearch(d.source) && matchesGenderFilter(d.source) && matchesPhotoFilter(d.source);
+          const targetMatched = matchesSearch(d.target) && matchesGenderFilter(d.target) && matchesPhotoFilter(d.target);
           // 配偶边：现任=粉红实线，历史=灰色虚线
           if (d.data?.kind === 'spouse') {
             return d.data?.is_current ? '#E91E63' : '#9E9E9E';
@@ -1511,6 +1751,8 @@ const initGraph = async (data: GenealogyNode) => {
           if (d.data?.kind === 'spouse') {
             return d.data?.is_current ? 3 : 2.5;
           }
+          // [吊线图调色板 2026-08-19] 妻子 → 子女边略加粗，强化分支视觉
+          if (d.data?.palette) return 2.5;
           const sourceOnMain = d.source?.data?.is_main_lineage;
           const targetOnMain = d.target?.data?.is_main_lineage;
           if (sourceOnMain && targetOnMain) return 3;
@@ -1520,6 +1762,7 @@ const initGraph = async (data: GenealogyNode) => {
           // 历史配偶边用虚线
           if (d.data?.kind === 'spouse' && !d.data?.is_current) return [6, 4];
           // [吊线图 2026-08-17] 过继/收养/继子女（child_type !== BIOLOGICAL）连线用虚线
+          // [吊线图调色板 2026-08-19] 与 palette 叠加：颜色变妻子色，样式仍是虚线
           const childType = d.target?.data?.child_type;
           if (childType && childType !== 'BIOLOGICAL') return [5, 4];
           return undefined;
@@ -1527,6 +1770,8 @@ const initGraph = async (data: GenealogyNode) => {
         endArrow: false,
         shadowColor: (d: any) => {
           if (d.data?.kind === 'spouse') return 'rgba(233, 30, 99, 0.08)';
+          // [吊线图调色板 2026-08-19] 妻子 → 子女边用同色低透明度阴影，与背景融合
+          if (d.data?.palette) return paletteShadow(d.data.palette, 0.22);
           const sourceOnMain = d.source?.data?.is_main_lineage;
           const targetOnMain = d.target?.data?.is_main_lineage;
           if (sourceOnMain && targetOnMain) return 'rgba(201, 169, 110, 0.25)';
@@ -1534,6 +1779,8 @@ const initGraph = async (data: GenealogyNode) => {
         },
         shadowBlur: (d: any) => {
           if (d.data?.kind === 'spouse') return 3;
+          // [吊线图调色板 2026-08-19] 妻子 → 子女边阴影略大，让分支更"浮起"
+          if (d.data?.palette) return 4;
           const sourceOnMain = d.source?.data?.is_main_lineage;
           const targetOnMain = d.target?.data?.is_main_lineage;
           if (sourceOnMain && targetOnMain) return 6;
@@ -2335,7 +2582,11 @@ onMounted(async () => {
   await nextTick();
   const rootId = props.rootPersonId || '1';
   try {
-    const data = await fetchTreeData(rootId);
+    // [渐进加载 2026-08-20] 首屏只拉取核心子集：
+    // 按屏幕大小计算卡片上限（最多 100 张），后端 limit 截断，
+    // 打开速度与首帧渲染都大幅提升；完整族谱由提示条按钮按需加载。
+    const limit = props.clanId ? computeInitialCardLimit() : undefined;
+    const data = await fetchTreeData(rootId, limit ? { limit } : undefined);
     if (data) {
       const treeData = (data as any).data || data;
       genealogyStore.setTreeData(treeData);
@@ -2494,7 +2745,7 @@ defineExpose({
       <el-divider direction="vertical" />
 
       <!-- View Mode -->
-      <el-button-group>
+      <el-button-group class="view-mode-group">
         <el-tooltip content="紧凑视图" placement="bottom">
           <el-button
             :type="genealogyStore.viewMode === 'compact' ? 'primary' : 'default'"
@@ -2669,8 +2920,12 @@ defineExpose({
         总人数: <strong>{{ genealogyStore.totalPersons || '-' }}</strong>
       </span>
       <span class="stat-divider">|</span>
+      <span class="stat-item" v-if="partialTree">
+        已加载: <strong>{{ shownPersons || '-' }} 人</strong>
+      </span>
+      <span class="stat-divider" v-if="partialTree">|</span>
       <span class="stat-item">
-        视图: <strong>{{ genealogyStore.viewMode === 'compact' ? '紧凑' : genealogyStore.viewMode === 'detailed' ? '详细' : genealogyStore.viewMode === 'xianshi' ? '吊线图' : genealogyStore.viewMode === 'su' ? '苏式' : genealogyStore.viewMode === 'zhe' ? '浙式' : '肖像' }}</strong>
+        视图: <strong>{{ viewModeLabel }}</strong>
       </span>
       <span class="stat-divider">|</span>
       <span class="stat-item">
@@ -2679,6 +2934,27 @@ defineExpose({
       <span class="stat-item lineage-hint" v-if="genealogyStore.mainLineage.length">
         <el-icon><Connection /></el-icon> 金色高亮为主传承线路
       </span>
+    </div>
+
+    <!-- [渐进加载 2026-08-20] 逐批加载提示条：大族谱首屏只渲染前 N 人，可逐批追加直至加载完毕 -->
+    <div v-if="partialTree && !loading" class="partial-tree-banner">
+      <div class="partial-tree-banner-text">
+        <el-icon class="partial-tree-banner-icon"><Warning /></el-icon>
+        <span>
+          已加载 {{ shownPersons || '-' }} /
+          <template v-if="genealogyStore.totalPersons">{{ genealogyStore.totalPersons }}</template>
+          <template v-else>-</template>
+          人 —— 逐批加载中，浏览更流畅
+        </span>
+      </div>
+      <el-button
+        size="small"
+        type="primary"
+        :loading="loadingMoreBatch"
+        @click="loadMoreBatch"
+      >
+        {{ loadMoreLabel }}
+      </el-button>
     </div>
 
     <!-- Performance overlay (dev only) -->
@@ -2816,9 +3092,9 @@ defineExpose({
 }
 .tree-toolbar::-webkit-scrollbar { display: none; }
 
-/* 折叠态：隐藏 divider 与次要按钮，只保留 toggle + 搜索 + 缩放 + 添加 */
+/* 折叠态：隐藏 divider 与次要按钮，只保留 toggle + 搜索 + 视图模式 + 缩放 + 添加 */
 .tree-toolbar.is-collapsed :deep(.el-divider),
-.tree-toolbar.is-collapsed .el-button-group:not(.zoom-controls),
+.tree-toolbar.is-collapsed .el-button-group:not(.zoom-controls):not(.view-mode-group),
 .tree-toolbar.is-collapsed > .el-checkbox,
 .tree-toolbar.is-collapsed > .el-select {
   display: none !important;
@@ -2923,6 +3199,45 @@ defineExpose({
   color: #7F8C8D;
   border: 1px solid rgba(201, 169, 110, 0.15);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* [渐进加载 2026-08-20] 核心子集提示条：悬浮于统计栏上方，不遮挡画布操作 */
+.partial-tree-banner {
+  position: absolute;
+  bottom: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(680px, calc(100% - 32px));
+  padding: 10px 16px;
+  background: rgba(255, 252, 248, 0.97);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(201, 169, 110, 0.4);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(93, 64, 55, 0.16);
+  font-size: 13px;
+  color: #5D4037;
+}
+
+.partial-tree-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.partial-tree-banner-icon {
+  color: #C9A96E;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.partial-tree-banner .el-button {
+  flex-shrink: 0;
 }
 
 /* 性能面板（dev only，右下角） */

@@ -44,7 +44,7 @@ if [ ! -d "$PROJECT_DIR/apps/server/dist" ]; then
     log_info "后端构建完成"
 fi
 
-# 上传项目文件
+# 上传项目文件（前端 dist 除外：单独走原子切换，避免覆盖过程中被 nginx 读到半成品）
 log_info "上传项目文件到服务器..."
 rsync -avz --progress \
     --exclude 'node_modules' \
@@ -60,8 +60,15 @@ rsync -avz --progress \
     --exclude 'create-schema.ps1' \
     --exclude 'run_pnpm.bat' \
     --exclude 'GraphicsMagick-*' \
+    --exclude 'apps/web/dist' \
     -e "ssh -p $SSH_PORT" \
     "$PROJECT_DIR/" "root@$SERVER_IP:$DEPLOY_DIR/"
+
+# 前端构建产物单独上传到 dist.new，由服务器端 deploy.sh 的 swap_web_dist 原子切换
+log_info "上传前端构建产物（dist.new）..."
+rsync -avz --delete \
+    -e "ssh -p $SSH_PORT" \
+    "$PROJECT_DIR/apps/web/dist/" "root@$SERVER_IP:$DEPLOY_DIR/apps/web/dist.new/"
 
 log_info "文件上传完成！"
 
