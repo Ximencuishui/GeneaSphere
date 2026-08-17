@@ -302,7 +302,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/layouts/UserCenterLayout.vue'),
     meta: { requiresAuth: true },
     children: [
-      { path: '', redirect: { name: 'user-profile' } },
+      {
+        path: '',
+        name: 'user-home',
+        component: () => import('@/views/user-center/HomePage.vue'),
+        meta: { title: '首页', requiresAuth: true },
+      },
       {
         path: 'profile',
         name: 'user-profile',

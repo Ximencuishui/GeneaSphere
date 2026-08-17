@@ -217,6 +217,8 @@ const userName = computed(() => {
 
     <!-- 实际内容：加载完成后渲染，加载中隐藏以避免空白骨架 -->
     <template v-if="!loading">
+    <!-- 修谱工作流（顶部一目了然） -->
+    <GenealogyWorkflowBar />
     <ElCard class="welcome-card">
       <template #header>
         <div class="card-header">

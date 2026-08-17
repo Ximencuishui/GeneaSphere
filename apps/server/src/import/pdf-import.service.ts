@@ -20,6 +20,8 @@ export interface PdfImportTask {
   extractedRecords: PdfPersonRecord[];
   metadata: Record<string, any>;
   errorMessage?: string;
+  // 持久化到 pdf_import_logs 的记录 ID（修谱工作流/导入管理页据此展示）
+  importLogId?: bigint;
   // ========== OCR 计费相关字段 ==========
   ocrProvider?: string;
   ocrEstimatedFee?: number;
@@ -92,6 +94,24 @@ export class PdfImportService {
 
     this.importTasks.set(taskId, task);
 
+    // 持久化导入记录（供导入管理页 / 修谱工作流读取；失败不阻塞主流程）
+    try {
+      const log = await this.prisma.pdfImportLog.create({
+        data: {
+          task_id: taskId,
+          user_id: userId,
+          clan_id: clanId,
+          file_name: fileName,
+          file_size: fileSize,
+          parse_mode: 'text',
+          status: 'pending',
+        },
+      });
+      task.importLogId = log.id;
+    } catch (err) {
+      this.logger.warn(`PdfImportLog 持久化失败（不影响解析）: ${(err as Error).message}`);
+    }
+
     // COS 模式：异步上传原始 PDF 到冷 Bucket
     if (this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true') {
       this.uploadOriginalPdfToCos(taskId, fileBuffer, userId, clanId).catch((err) => {
@@ -137,6 +157,43 @@ export class PdfImportService {
       task.extractedRecords = correctedRecords;
       task.status = 'correcting';
       this.logger.log(`任务 ${taskId} 已更新校对记录，共 ${correctedRecords.length} 条`);
+      // 持久化：标记临时记录已校对（左右对照编修证据，修谱工作流据此推进）
+      this.persistCorrection(task, correctedRecords).catch((err) =>
+        this.logger.warn(`校对结果持久化失败: ${(err as Error).message}`),
+      );
+    }
+  }
+
+  /**
+   * 持久化校对结果：更新临时记录字段并标记 is_corrected=true，导入记录进入 correcting。
+   */
+  private async persistCorrection(
+    task: PdfImportTask,
+    records: PdfPersonRecord[],
+  ): Promise<void> {
+    if (!task.importLogId) return;
+    await this.updateImportLog(task, { status: 'correcting' });
+    if (records.length === 0) return;
+
+    for (const r of records) {
+      await this.prisma.pdfParseTemp.updateMany({
+        where: { import_log_id: task.importLogId, row_number: r.rowNumber },
+        data: {
+          full_name: r.fullName,
+          gender: r.gender || 'UNKNOWN',
+          generation: r.generation ?? null,
+          birth_date: r.birthDate ? new Date(r.birthDate) : null,
+          death_date: r.deathDate ? new Date(r.deathDate) : null,
+          is_living: r.isLiving ?? true,
+          parent_name: r.parentName ?? null,
+          spouse_name: r.spouseName ?? null,
+          biography: r.biography ?? null,
+          burial_place: r.burialPlace ?? null,
+          notes: r.notes ?? null,
+          confidence_score: r.confidenceScore ?? null,
+          is_corrected: true,
+        },
+      });
     }
   }
 
@@ -184,10 +241,27 @@ export class PdfImportService {
         `任务 ${taskId} 导入完成: 成功 ${successCount} 条, 失败 ${failureCount} 条`
       );
 
+      // 持久化导入结果（保存数据表证据：success_records > 0）
+      await this.updateImportLog(task, {
+        status: 'completed',
+        total_records: task.extractedRecords.length,
+        success_records: successCount,
+        failed_records: failureCount,
+        completed_at: new Date(),
+      }).catch((err) =>
+        this.logger.warn(`PdfImportLog 完成状态回写失败: ${(err as Error).message}`),
+      );
+
       return { successCount, failureCount, errors };
     } catch (error) {
       task.status = 'failed';
       task.errorMessage = error.message;
+      await this.updateImportLog(task, {
+        status: 'failed',
+        error_message: error.message,
+      }).catch((err) =>
+        this.logger.warn(`PdfImportLog 失败状态回写失败: ${(err as Error).message}`),
+      );
       throw error;
     }
   }
@@ -282,11 +356,85 @@ export class PdfImportService {
       this.logger.log(
         `任务 ${taskId} 解析完成, 提取 ${extractedRecords.length} 条人员记录`
       );
+
+      // 持久化解析结果（pdf_import_logs + pdf_parse_temp，供左右对照编修 / 修谱工作流读取）
+      await this.persistParseResult(task, extractedRecords);
     } catch (error) {
       task.status = 'failed';
       task.errorMessage = error.message;
       this.logger.error(`任务 ${taskId} 解析失败: ${error.message}`);
+      // 同步导入记录状态
+      await this.updateImportLog(task, {
+        status: 'failed',
+        error_message: error.message,
+      }).catch((e) =>
+        this.logger.warn(`PdfImportLog 失败状态回写失败: ${(e as Error).message}`),
+      );
     }
+  }
+
+  /**
+   * 持久化解析结果：更新导入记录状态并写入临时数据表（pdf_parse_temp）。
+   * 失败仅告警，不阻塞导入主流程（与旧逻辑保持一致）。
+   */
+  private async persistParseResult(
+    task: PdfImportTask,
+    records: PdfPersonRecord[],
+  ): Promise<void> {
+    if (!task.importLogId) return;
+
+    try {
+      await this.prisma.pdfImportLog.update({
+        where: { id: task.importLogId },
+        data: {
+          parse_mode: task.parseMode,
+          total_pages: task.totalPages,
+          total_records: records.length,
+          status: 'preview',
+        },
+      });
+
+      // 全量重建临时记录（保持与最新解析/校对结果一致）
+      await this.prisma.pdfParseTemp.deleteMany({
+        where: { import_log_id: task.importLogId },
+      });
+      if (records.length > 0) {
+        await this.prisma.pdfParseTemp.createMany({
+          data: records.map((r) => ({
+            import_log_id: task.importLogId!,
+            row_number: r.rowNumber,
+            full_name: r.fullName,
+            gender: r.gender || 'UNKNOWN',
+            generation: r.generation ?? null,
+            birth_date: r.birthDate ? new Date(r.birthDate) : null,
+            death_date: r.deathDate ? new Date(r.deathDate) : null,
+            is_living: r.isLiving ?? true,
+            parent_name: r.parentName ?? null,
+            spouse_name: r.spouseName ?? null,
+            biography: r.biography ?? null,
+            burial_place: r.burialPlace ?? null,
+            notes: r.notes ?? null,
+            confidence_score: r.confidenceScore ?? null,
+            original_text: r.originalText ?? null,
+            is_corrected: false,
+          })),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`解析结果持久化失败: ${(err as Error).message}`);
+    }
+  }
+
+  /** 更新 pdf_import_logs 记录（失败仅告警） */
+  private async updateImportLog(
+    task: PdfImportTask,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    if (!task.importLogId) return;
+    await this.prisma.pdfImportLog.update({
+      where: { id: task.importLogId },
+      data: data as any,
+    });
   }
 
   /**

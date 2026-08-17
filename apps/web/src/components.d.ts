@@ -98,6 +98,7 @@ declare module 'vue' {
     FolderOpened: typeof import('@element-plus/icons-vue')['FolderOpened']
     FullScreen: typeof import('@element-plus/icons-vue')['FullScreen']
     GenealogyTree: typeof import('./components/GenealogyTree.vue')['default']
+    GenealogyWorkflowBar: typeof import('./components/admin/GenealogyWorkflowBar.vue')['default']
     HelloWorld: typeof import('./components/HelloWorld.vue')['default']
     HomeFilled: typeof import('@element-plus/icons-vue')['HomeFilled']
     ImagePreview: typeof import('./components/ImagePreview.vue')['default']

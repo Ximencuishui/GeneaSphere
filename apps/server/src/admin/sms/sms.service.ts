@@ -556,9 +556,16 @@ export class SmsService {
   }
 
   /**
-   * 权限校验
+   * 权限校验：家族创建人（admin_user_id）或 clan_members 中的 OWNER/ADMIN
+   * [修复 2026-08-17] 新建族谱后创建人不在 clan_members 表中，导致发短信权限校验误拒绝
    */
   private async requireAdmin(clanId: bigint, userId: string) {
+    const clan = await this.prisma.clan.findUnique({
+      where: { id: clanId },
+      select: { admin_user_id: true },
+    });
+    if (clan?.admin_user_id === userId) return;
+
     const member = await this.prisma.clanMember.findUnique({
       where: {
         clan_id_user_id: {

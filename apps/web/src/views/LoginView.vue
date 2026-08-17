@@ -150,8 +150,8 @@ const handleMemberDemoLogin = async () => {
         router.push('/clans')
       }
     } else {
-      // EDITOR / MEMBER → 用户中心
-      router.push('/user-center/profile')
+      // EDITOR / MEMBER → 用户中心首页（首页直接提供树谱/册谱入口）
+      router.push('/user-center')
     }
   } catch (error: any) {
     const msg = error.response?.data?.message || '演示服务暂不可用'

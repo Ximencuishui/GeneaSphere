@@ -3,7 +3,7 @@ import { nextTick, ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserCenterStore } from '@/stores/userCenter'
 import { useAuthStore } from '@/stores/auth'
-import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, Folder, SwitchButton, Search } from '@element-plus/icons-vue'
+import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, FolderOpened, Share, SwitchButton, Search } from '@element-plus/icons-vue'
 import PageLoader, { type PageLoaderLog } from '@/components/PageLoader.vue'
 
 const route = useRoute()
@@ -21,8 +21,8 @@ const menuKeyword = ref('')
 // 方案 B：菜单搜索过滤（空组隐藏）
 const filteredMenuGroups = computed(() => {
   const kw = menuKeyword.value.trim().toLowerCase()
-  if (!kw) return menuGroups
-  return menuGroups
+  if (!kw) return menuGroups.value
+  return menuGroups.value
     .map((g) => ({ ...g, children: g.children.filter((c) => c.title.toLowerCase().includes(kw)) }))
     .filter((g) => g.children.length > 0)
 })
@@ -48,51 +48,71 @@ const iconMap: Record<string, any> = {
   VideoPlay,
   House,
   Setting,
-  Folder,
+  FolderOpened,
+  Share,
 }
 
-const menuGroups = [
-  {
-    name: '个人管理',
-    icon: 'User',
-    children: [
-      { title: '个人资料', icon: 'User', path: '/user-center/profile' },
-      { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
-      { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
-      { title: '我的验证', icon: 'CircleCheck', path: '/user-center/verify' },
-      { title: '验证记录', icon: 'Tickets', path: '/user-center/verify/records' },
-    ],
-  },
-  {
-    name: '内容与空间',
-    icon: 'Folder',
-    children: [
-      { title: '我的时光', icon: 'PictureFilled', path: '/user-center/timeline' },
-      { title: '家庭图册', icon: 'Notebook', path: '/user-center/family-book' },
-      { title: '我的标注', icon: 'EditPen', path: '/user-center/annotations' },
-      { title: '我的记忆贡献', icon: 'Collection', path: '/user-center/memory-contributions' },
-      { title: '我的音像墙', icon: 'VideoCamera', path: '/user-center/videos' },
-      { title: '个人空间', icon: 'House', path: '/user-center/personal-space/albums' },
-    ],
-  },
-  {
-    name: '互动与工具',
-    icon: 'Tools',
-    children: [
-      { title: '我的工具箱', icon: 'Tools', path: '/user-center/toolbox' },
-      { title: '我的小组', icon: 'ChatLineRound', path: '/user-center/groups' },
-      { title: '寻找小伙伴', icon: 'UserFilled', path: '/user-center/buddies' },
-      { title: '直系血缘视频', icon: 'VideoPlay', path: '/user-center/lineage-video' },
-    ],
-  },
-  {
-    name: '交易',
-    icon: 'Tickets',
-    children: [
-      { title: '我的订单', icon: 'List', path: '/user-center/orders' },
-    ],
-  },
-]
+/**
+ * 侧边菜单（分类归拢）：
+ * - 族谱（树谱/册谱 + 家族相关）置顶，树谱/册谱路径按主家族动态生成；
+ * - 其余按"我的内容 / 互动与工具 / 账户与服务"归拢，避免菜单过多过散。
+ */
+const menuGroups = computed(() => {
+  const clan = userStore.profile?.primary_clan
+  const key = clan ? clan.slug || clan.id : ''
+  const genealogyChildren = clan
+    ? [
+        { title: '树谱', icon: 'Share', path: `/tree/${key}` },
+        { title: '册谱', icon: 'Notebook', path: `/cepu/${key}` },
+        { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
+        { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
+      ]
+    : [
+        { title: '浏览家族', icon: 'OfficeBuilding', path: '/clans' },
+        { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
+        { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
+      ]
+  return [
+    {
+      name: '族谱',
+      icon: 'Collection',
+      children: genealogyChildren,
+    },
+    {
+      name: '我的内容',
+      icon: 'FolderOpened',
+      children: [
+        { title: '我的时光', icon: 'PictureFilled', path: '/user-center/timeline' },
+        { title: '家庭图册', icon: 'Notebook', path: '/user-center/family-book' },
+        { title: '我的音像墙', icon: 'VideoCamera', path: '/user-center/videos' },
+        { title: '我的标注', icon: 'EditPen', path: '/user-center/annotations' },
+        { title: '我的记忆贡献', icon: 'Collection', path: '/user-center/memory-contributions' },
+        { title: '个人空间', icon: 'House', path: '/user-center/personal-space/albums' },
+      ],
+    },
+    {
+      name: '互动与工具',
+      icon: 'Tools',
+      children: [
+        { title: '我的工具箱', icon: 'Tools', path: '/user-center/toolbox' },
+        { title: '我的小组', icon: 'ChatLineRound', path: '/user-center/groups' },
+        { title: '寻找小伙伴', icon: 'UserFilled', path: '/user-center/buddies' },
+        { title: '直系血缘视频', icon: 'VideoPlay', path: '/user-center/lineage-video' },
+      ],
+    },
+    {
+      name: '账户与服务',
+      icon: 'User',
+      children: [
+        { title: '个人资料', icon: 'User', path: '/user-center/profile' },
+        { title: '我的验证', icon: 'CircleCheck', path: '/user-center/verify' },
+        { title: '验证记录', icon: 'Tickets', path: '/user-center/verify/records' },
+        { title: '我的订单', icon: 'List', path: '/user-center/orders' },
+        { title: '设置', icon: 'Setting', path: '/user-center/settings' },
+      ],
+    },
+  ]
+})
 
 // 子页面 → 所属菜单项（前缀匹配，用于详情页的高亮与面包屑）
 const subPageMap: [RegExp, string][] = [
@@ -117,16 +137,21 @@ const activeMenu = computed(() => {
 })
 
 const findMenuItem = (path: string) => {
-  for (const group of menuGroups) {
+  for (const group of menuGroups.value) {
     const item = group.children.find((m) => m.path === path)
     if (item) return item
   }
   return null
 }
 
+/** 首页（无对应菜单项时的回退/面包屑目标） */
+const HOME_MENU = { title: '首页', path: '/user-center' }
+
 const currentMenu = computed(() => {
+  // 首页本身没有子菜单项，直接回退到"首页"
+  if (route.path === '/user-center') return HOME_MENU
   // 以 activeMenu（含子页归类结果）为准
-  return findMenuItem(activeMenu.value) || menuGroups[0].children[0]
+  return findMenuItem(activeMenu.value) || HOME_MENU
 })
 
 const roleTagType = computed(() => {
@@ -148,7 +173,7 @@ const roleLabel = computed(() => {
 
 const breadcrumb = computed(() => {
   return [
-    { title: '用户中心', path: '/user-center/profile' },
+    { title: '用户中心', path: '/user-center' },
     { title: currentMenu.value.title },
   ]
 })
@@ -399,10 +424,15 @@ watch(
 
         <ElMenu
           :default-active="activeMenu"
+          :default-openeds="['族谱']"
           class="side-menu"
           @select="handleMenuSelect"
           mode="vertical"
         >
+          <ElMenuItem index="/user-center">
+            <ElIcon><HomeFilled /></ElIcon>
+            <span>首页</span>
+          </ElMenuItem>
           <ElSubMenu
             v-for="group in filteredMenuGroups"
             :key="group.name"
@@ -432,20 +462,6 @@ watch(
           >
             <ElIcon><Management /></ElIcon>
             <span>家族管理后台</span>
-          </ElButton>
-        </div>
-
-        <!-- 独立设置入口 -->
-        <div class="settings-entry">
-          <ElButton
-            text
-            style="width: 100%"
-            class="settings-btn"
-            :class="{ active: route.path === '/user-center/settings' }"
-            @click="handleMenuSelect('/user-center/settings')"
-          >
-            <ElIcon><Setting /></ElIcon>
-            <span>设置</span>
           </ElButton>
         </div>
       </aside>
@@ -499,10 +515,15 @@ watch(
           </div>
           <ElMenu
             :default-active="activeMenu"
+            :default-openeds="['族谱']"
             class="side-menu"
             @select="handleMenuSelect"
             mode="vertical"
           >
+            <ElMenuItem index="/user-center">
+              <ElIcon><HomeFilled /></ElIcon>
+              <span>首页</span>
+            </ElMenuItem>
             <ElSubMenu
               v-for="group in filteredMenuGroups"
               :key="group.name"
@@ -531,20 +552,6 @@ watch(
             >
               <ElIcon><Management /></ElIcon>
               <span>家族管理后台</span>
-            </ElButton>
-          </div>
-
-          <!-- 独立设置入口 -->
-          <div class="settings-entry">
-            <ElButton
-              text
-              style="width: 100%"
-              class="settings-btn"
-              :class="{ active: route.path === '/user-center/settings' }"
-              @click="handleMenuSelect('/user-center/settings')"
-            >
-              <ElIcon><Setting /></ElIcon>
-              <span>设置</span>
             </ElButton>
           </div>
         </aside>
@@ -837,35 +844,6 @@ watch(
 .admin-entry {
   padding: 16px 20px;
   border-top: 1px solid #f0f2f5;
-}
-
-.settings-entry {
-  padding: 12px 20px;
-  border-top: 1px solid #f0f2f5;
-  background-color: #fafafa;
-}
-
-.settings-btn {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  color: #606266;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-}
-
-.settings-btn:hover {
-  background-color: rgba(201, 169, 110, 0.1);
-  color: #5D4037;
-}
-
-.settings-btn.active {
-  background-color: rgba(201, 169, 110, 0.15);
-  color: #5D4037;
-  font-weight: 500;
 }
 
 .main-area {

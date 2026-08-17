@@ -4,7 +4,7 @@
       <p class="not-found-code">404</p>
       <h1>页面不存在</h1>
       <p class="not-found-message">你访问的用户中心页面不存在或已被移除。</p>
-      <el-button type="primary" @click="goProfile">返回个人资料</el-button>
+      <el-button type="primary" @click="goProfile">返回用户中心首页</el-button>
     </div>
   </div>
 </template>
@@ -15,7 +15,7 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 function goProfile() {
-  router.replace('/user-center/profile')
+  router.replace('/user-center')
 }
 </script>
 

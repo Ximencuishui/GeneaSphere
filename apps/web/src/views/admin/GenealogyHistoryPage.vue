@@ -114,6 +114,8 @@ onMounted(() => {
 
 <template>
   <div class="page-container">
+    <!-- 修谱工作流（顶部一目了然） -->
+    <GenealogyWorkflowBar />
     <h2 class="page-title">族谱历史版本</h2>
     <p class="page-desc">查看、下载、对比历史生成的族谱文档版本</p>
 
