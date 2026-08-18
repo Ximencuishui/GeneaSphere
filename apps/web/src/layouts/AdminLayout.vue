@@ -106,24 +106,28 @@ watch(
 const clanSlug = computed(() => (route.params.slug as string) || '')
 
 // 根据当前 slug 动态生成所有菜单路径（族谱管理员后台，按职责域重组）
+// 顶级分组：
+//   - 族谱：只读/查看类（数据概览、树谱、册谱、旧谱）+ 数据统计
+//   - 修谱：编辑/创作/分发全流程（族谱数据、众包修改、定谱、生成族谱、印刷）
 const menuItems = computed(() => [
   {
-    title: '族谱概况',
+    title: '族谱',
     icon: 'Monitor',
     children: [
       { title: '数据概览', path: `/zupu/${clanSlug.value}` },
       { title: '树谱', path: `/tree/${clanSlug.value}` },
       { title: '册谱', path: `/cepu/${clanSlug.value}` },
-      { title: '生成族谱', path: `/zupu/${clanSlug.value}/genealogy/generate` },
-      { title: '数据统计', path: `/zupu/${clanSlug.value}/statistics` },
+      { title: '旧谱', path: `/zupu/${clanSlug.value}/genealogy/old` },
     ],
   },
   {
     title: '修谱',
     icon: 'EditPen',
     children: [
-      { title: '历史版本', path: `/zupu/${clanSlug.value}/genealogy/history` },
-      { title: 'PDF 导入管理', path: `/zupu/${clanSlug.value}/import` },
+      { title: '族谱数据', path: `/zupu/${clanSlug.value}/genealogy/data` },
+      { title: '众包修改', path: `/zupu/${clanSlug.value}/genealogy/crowdsource` },
+      { title: '定谱', path: `/zupu/${clanSlug.value}/genealogy/finalize` },
+      { title: '印刷', path: `/zupu/${clanSlug.value}/print` },
     ],
   },
   {
@@ -169,13 +173,6 @@ const menuItems = computed(() => [
     children: [
       { title: '认亲申请', path: `/zupu/${clanSlug.value}/merge/applications` },
       { title: '寻亲帖管理', path: `/zupu/${clanSlug.value}/merge/posts` },
-    ],
-  },
-  {
-    title: '族谱印刷',
-    icon: 'Printer',
-    children: [
-      { title: '印刷订单', path: `/zupu/${clanSlug.value}/orders` },
     ],
   },
   {

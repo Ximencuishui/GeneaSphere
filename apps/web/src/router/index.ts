@@ -251,13 +251,15 @@ const routes: RouteRecordRaw[] = [
       { path: 'merge/wizard/:appId', name: 'admin-merge-wizard', component: () => import('@/views/admin/MergeWizardPage.vue'), meta: { title: '归宗合并', requiresAuth: true, requiresAdmin: true } },
       { path: 'merge/posts', name: 'admin-merge-posts', component: () => import('@/views/admin/SearchPostsPage.vue'), meta: { title: '寻亲帖管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'migration', name: 'admin-migration', component: () => import('@/views/admin/MigrationEventsPage.vue'), meta: { title: '迁徙管理', requiresAuth: true, requiresAdmin: true } },
-      { path: 'import', name: 'admin-import', component: () => import('@/views/admin/ImportManagementPage.vue'), meta: { title: 'PDF 导入管理', requiresAuth: true, requiresAdmin: true } },
+      // 'import' 路径已重定向到 'genealogy/data?tab=pdf-import'（见下方 redirect）；原 admin-import 路由移除以避免冲突。
       { path: 'settings/privacy', name: 'admin-privacy-settings', component: () => import('@/views/admin/PrivacySettingsPage.vue'), meta: { title: '隐私配置', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/xipai', name: 'admin-xipai-settings', component: () => import('@/views/admin/XipaiSettingsPage.vue'), meta: { title: '字辈管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/storage', name: 'admin-storage-settings', component: () => import('@/views/admin/StoragePage.vue'), meta: { title: '云存储', requiresAuth: true, requiresAdmin: true } },
-      { path: 'orders', name: 'admin-orders', component: () => import('@/views/admin/OrdersPage.vue'), meta: { title: '印刷订单', requiresAuth: true, requiresAdmin: true } },
-      { path: 'genealogy/generate', name: 'admin-genealogy-generate', component: () => import('@/views/admin/GenealogyGeneratePage.vue'), meta: { title: '生成族谱', requiresAuth: true, requiresAdmin: true } },
-      { path: 'genealogy/history', name: 'admin-genealogy-history', component: () => import('@/views/admin/GenealogyHistoryPage.vue'), meta: { title: '历史版本', requiresAuth: true, requiresAdmin: true } },
+      { path: 'print', name: 'admin-print', component: () => import('@/views/admin/OrdersPage.vue'), meta: { title: '印刷', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/data', name: 'admin-genealogy-data', component: () => import('@/views/admin/GenealogyDataPage.vue'), meta: { title: '族谱数据', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/crowdsource', name: 'admin-genealogy-crowdsource', component: () => import('@/views/admin/CrowdsourceEditPage.vue'), meta: { title: '众包修改', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/finalize', name: 'admin-genealogy-finalize', component: () => import('@/views/admin/GenealogyFinalizePage.vue'), meta: { title: '定谱', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/old', name: 'admin-genealogy-old', component: () => import('@/views/admin/GenealogyHistoryPage.vue'), meta: { title: '旧谱', requiresAuth: true, requiresAdmin: true } },
       { path: 'video/migration', name: 'admin-video-migration', component: () => import('@/views/admin/MigrationVideoPage.vue'), meta: { title: '迁徙历史视频', requiresAuth: true, requiresAdmin: true } },
       { path: 'video/event', name: 'admin-video-event', component: () => import('@/views/admin/EventVideoPage.vue'), meta: { title: '大事件视频', requiresAuth: true, requiresAdmin: true } },
       { path: 'family-events', name: 'admin-family-events', component: () => import('@/views/admin/FamilyEventPage.vue'), meta: { title: '大事件列表', requiresAuth: true, requiresAdmin: true } },
@@ -283,6 +285,15 @@ const routes: RouteRecordRaw[] = [
       { path: 'invite/reviews', name: 'admin-invite-reviews', component: () => import('@/views/admin/invite/ModificationReviewPage.vue'), meta: { title: '信息修改审核', requiresAuth: true, requiresAdmin: true } },
       // 兼容旧路径：/zupu/:slug/dashboard 与 /zupu/:slug/dashboard/* 全部归并到 /zupu/:slug
       { path: 'dashboard/:rest(.*)*', redirect: (to) => `/zupu/${to.params.slug}` },
+      // 旧路径重定向（菜单重构后旧链接仍可用，避免失效）
+      // - 历史版本 → 旧谱
+      { path: 'genealogy/history', redirect: (to) => `/zupu/${to.params.slug}/genealogy/old` },
+      // - PDF 导入管理 → 族谱数据（默认 PDF 导入管理 tab）
+      { path: 'import', redirect: (to) => `/zupu/${to.params.slug}/genealogy/data?tab=pdf-import` },
+      // - 印刷订单 → 印刷
+      { path: 'orders', redirect: (to) => `/zupu/${to.params.slug}/print` },
+      // - 生成族谱 → 定谱（默认 generate tab，原独立页面已合并到定谱的"生成族谱"子功能）
+      { path: 'genealogy/generate', redirect: (to) => `/zupu/${to.params.slug}/genealogy/finalize?tab=generate` },
     ],
   },
   // 全局 catch-all：未匹配的 /zupu/:slug/* 子路径 → 跳到 /zupu/:slug（默认子路由）
@@ -561,6 +572,13 @@ const routes: RouteRecordRaw[] = [
     name: 'h5-expired',
     component: () => import('@/views/h5/ExpiredPage.vue'),
     meta: { requiresAuth: false },
+  },
+  // 修谱众包修改 H5（族员手机号登录修改入口）
+  {
+    path: '/h5/genealogy-edit',
+    name: 'h5-genealogy-edit',
+    component: () => import('@/views/h5/GenealogyEditPage.vue'),
+    meta: { requiresAuth: false, title: '族谱信息修改' },
   },
 ]
 
