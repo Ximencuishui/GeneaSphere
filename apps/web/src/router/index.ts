@@ -243,7 +243,7 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: true },
     props: true,
     children: [
-      { path: '', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardPage.vue'), meta: { title: '控制面板', requiresAuth: true, requiresAdmin: true } },
+      { path: '', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardPage.vue'), meta: { title: '数据概览', requiresAuth: true, requiresAdmin: true } },
       { path: 'members', name: 'admin-members', component: () => import('@/views/admin/MembersPage.vue'), meta: { title: '族员管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/media', name: 'admin-media-reviews', component: () => import('@/views/admin/MediaReviewPage.vue'), meta: { title: '影像审核', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/bio', name: 'admin-bio-reviews', component: () => import('@/views/admin/BioReviewPage.vue'), meta: { title: '生平审核', requiresAuth: true, requiresAdmin: true } },

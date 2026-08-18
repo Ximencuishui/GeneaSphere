@@ -1,8 +1,20 @@
 <script setup lang="ts">
+/**
+ * 家族数据概览（控制面板 -> 数据概览）
+ *
+ * 结构：
+ *   1. 顶部 3 张统计卡（成员/在世/影像）—— 一眼看到家族概况
+ *   2. 下方集成 StatisticsPanel —— 完整的分列数据统计（概览/人口/影像/迁徙）
+ *
+ * 注意：
+ *   - 存储用量已下沉到 AdminLayout 顶部一行字高度的提示条，避免重复展示
+ *   - 修谱工作流已移除（按需求）
+ */
 import { nextTick, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import PageLoader, { type PageLoaderLog } from '@/components/PageLoader.vue'
+import StatisticsPanel from '@/components/admin/StatisticsPanel.vue'
 
 const route = useRoute()
 
@@ -17,7 +29,7 @@ const clanSlug = ref('')
  */
 type LoadStage = 'fetch' | 'parse' | 'render' | 'finalize'
 const STAGES: { key: LoadStage; label: string; desc: string }[] = [
-  { key: 'fetch', label: '拉取控制面板数据', desc: '请求 /api/admin/dashboard' },
+  { key: 'fetch', label: '拉取数据概览', desc: '请求 /api/admin/dashboard' },
   { key: 'parse', label: '解析统计数据', desc: '拆分成员/影像/存储' },
   { key: 'render', label: '渲染卡片', desc: '提交首帧 DOM' },
   { key: 'finalize', label: '完成加载', desc: '准备就绪' },
@@ -60,7 +72,7 @@ const fetchDashboard = async () => {
   loadErrorMessage.value = ''
   loadLogs.value = []
   loadStage.value = 'fetch'
-  pushLog('开始加载家族控制面板')
+  pushLog('开始加载家族数据概览')
   try {
     // ========== 阶段1：拉取 ==========
     pushLog(`调用 /api/admin/dashboard?clanSlug=${clanSlug.value}`)
@@ -94,7 +106,7 @@ const fetchDashboard = async () => {
 
     // ========== 阶段4：完成 ==========
     loadStage.value = 'finalize'
-    pushLog('控制面板加载完成', 'success')
+    pushLog('数据概览加载完成', 'success')
   } catch (error: any) {
     const status: number = error?.response?.status || error?.status || 0
     const message: string = error?.message || String(error)
@@ -128,7 +140,7 @@ onMounted(() => {
     <!-- 全屏加载占位：进度条 + 阶段列表 + 滚动日志 -->
     <PageLoader
       :visible="loading"
-      title="正在加载家族控制面板"
+      title="正在加载家族数据概览"
       :stages="STAGES"
       :current-stage="loadStage"
       :logs="loadLogs"
@@ -138,86 +150,53 @@ onMounted(() => {
 
     <!-- 实际内容：加载完成后渲染，加载中隐藏以避免空白骨架 -->
     <template v-if="!loading">
-    <!-- 修谱工作流（顶部一目了然） -->
-    <GenealogyWorkflowBar />
+      <!-- 家族概况（成员 / 在世 / 影像） -->
+      <ElRow :gutter="20" class="stats-row">
+        <ElCol :xs="12" :sm="8">
+          <ElCard class="stat-card" shadow="hover" @click="$router.push('/tree/' + clanSlug)">
+            <div class="stat-content">
+              <div class="stat-icon" style="background: linear-gradient(135deg, #409EFF, #337ECC);">
+                <ElIcon :size="28"><UserFilled /></ElIcon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-value">{{ statistics.total_members }}</div>
+                <div class="stat-label">家族成员</div>
+              </div>
+            </div>
+          </ElCard>
+        </ElCol>
+        <ElCol :xs="12" :sm="8">
+          <ElCard class="stat-card" shadow="hover">
+            <div class="stat-content">
+              <div class="stat-icon" style="background: linear-gradient(135deg, #67C23A, #529B2E);">
+                <ElIcon :size="28"><HomeFilled /></ElIcon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-value">{{ statistics.living_count }}</div>
+                <div class="stat-label">在世人数</div>
+              </div>
+            </div>
+          </ElCard>
+        </ElCol>
+        <ElCol :xs="12" :sm="8">
+          <ElCard class="stat-card" shadow="hover" @click="$router.push(`/zupu/${clanSlug}/media/library`)">
+            <div class="stat-content">
+              <div class="stat-icon" style="background: linear-gradient(135deg, #E6A23C, #C98A2E);">
+                <ElIcon :size="28"><PictureFilled /></ElIcon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-value">{{ statistics.photo_count }}</div>
+                <div class="stat-label">家族影像</div>
+              </div>
+            </div>
+          </ElCard>
+        </ElCol>
+      </ElRow>
 
-    <!-- 家族概况（合并：家族成员 / 在世人数 / 家族影像） -->
-    <ElRow :gutter="20" class="stats-row">
-      <ElCol :xs="12" :sm="8">
-        <ElCard class="stat-card" shadow="hover" @click="$router.push('/tree/' + clanSlug)">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: linear-gradient(135deg, #409EFF, #337ECC);">
-              <ElIcon :size="28"><UserFilled /></ElIcon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ statistics.total_members }}</div>
-              <div class="stat-label">家族成员</div>
-            </div>
-          </div>
-        </ElCard>
-      </ElCol>
-      <ElCol :xs="12" :sm="8">
-        <ElCard class="stat-card" shadow="hover">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: linear-gradient(135deg, #67C23A, #529B2E);">
-              <ElIcon :size="28"><HomeFilled /></ElIcon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ statistics.living_count }}</div>
-              <div class="stat-label">在世人数</div>
-            </div>
-          </div>
-        </ElCard>
-      </ElCol>
-      <ElCol :xs="12" :sm="8">
-        <ElCard class="stat-card" shadow="hover" @click="$router.push(`/zupu/${clanSlug}/media/library`)">
-          <div class="stat-content">
-            <div class="stat-icon" style="background: linear-gradient(135deg, #E6A23C, #C98A2E);">
-              <ElIcon :size="28"><PictureFilled /></ElIcon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ statistics.photo_count }}</div>
-              <div class="stat-label">家族影像</div>
-            </div>
-          </div>
-        </ElCard>
-      </ElCol>
-    </ElRow>
-
-    <!-- 存储用量（已整合原欢迎卡片的【已用存储】数值） -->
-    <ElRow :gutter="20" class="stats-row">
-      <ElCol :xs="24">
-        <ElCard class="section-card">
-          <template #header>
-            <div class="section-header">
-              <span>存储用量</span>
-              <ElTag :type="statistics.storage_percentage > 80 ? 'danger' : 'info'" size="small">
-                {{ statistics.storage_percentage }}%
-              </ElTag>
-            </div>
-          </template>
-          <ElProgress
-            :percentage="statistics.storage_percentage"
-            :stroke-width="12"
-            :color="statistics.storage_percentage > 80 ? '#F56C6C' : '#409EFF'"
-          />
-          <div class="storage-detail">
-            <div class="storage-item">
-              <span class="storage-label">已使用</span>
-              <span class="storage-value">{{ (statistics.storage_used / 1024 / 1024 / 1024).toFixed(2) }} GB</span>
-            </div>
-            <div class="storage-item">
-              <span class="storage-label">总容量</span>
-              <span class="storage-value">5 GB</span>
-            </div>
-            <div class="storage-item">
-              <span class="storage-label">剩余</span>
-              <span class="storage-value">{{ (5 - statistics.storage_used / 1024 / 1024 / 1024).toFixed(2) }} GB</span>
-            </div>
-          </div>
-        </ElCard>
-      </ElCol>
-    </ElRow>
+      <!-- 数据统计（原独立页面，已集成到本页面下方，保留 el-tabs 分列样式） -->
+      <div class="stats-panel-wrapper">
+        <StatisticsPanel />
+      </div>
     </template>
   </div>
 </template>
@@ -229,6 +208,10 @@ onMounted(() => {
 }
 
 .stats-row {
+  margin-top: 20px;
+}
+
+.stats-panel-wrapper {
   margin-top: 20px;
 }
 
@@ -274,40 +257,6 @@ onMounted(() => {
   font-size: 14px;
   color: #909399;
   margin-top: 2px;
-}
-
-.section-card {
-  height: 100%;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.storage-detail {
-  display: flex;
-  justify-content: space-around;
-  margin-top: 16px;
-  text-align: center;
-}
-
-.storage-item {
-  display: flex;
-  flex-direction: column;
-}
-
-.storage-label {
-  font-size: 12px;
-  color: #909399;
-}
-
-.storage-value {
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
-  margin-top: 4px;
 }
 
 /* 响应式调整 */

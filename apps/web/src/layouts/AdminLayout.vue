@@ -45,6 +45,10 @@ const capabilityStore = useCapabilityStore()
 
 const isCollapse = ref(false)
 const pendingCount = ref(0)
+// 存储用量（用于面包屑下方一行字提示）
+const storageUsed = ref(0) // 字节
+const storageTotal = ref(5 * 1024 * 1024 * 1024) // 5 GB（与 DashboardPage 一致）
+const storagePercentage = ref(0)
 // 通知面板显示状态
 const notifyVisible = ref(false)
 // 移动端侧边栏显示状态
@@ -78,6 +82,9 @@ const fetchPendingCount = async () => {
       bio_count: stats.pending_bio_reviews || 0,
       merge_count: stats.pending_applications || 0,
     }
+    // 同步存储用量（面包屑下方提示条使用）
+    storageUsed.value = stats.storage_used || 0
+    storagePercentage.value = stats.storage_percentage || 0
   } catch (err: any) {
     pendingCount.value = 0
     // 家族 slug 不存在（404）：提示用户并跳回家族选择页，
@@ -104,7 +111,7 @@ const menuItems = computed(() => [
     title: '族谱概况',
     icon: 'Monitor',
     children: [
-      { title: '控制面板', path: `/zupu/${clanSlug.value}` },
+      { title: '数据概览', path: `/zupu/${clanSlug.value}` },
       { title: '树谱', path: `/tree/${clanSlug.value}` },
       { title: '册谱', path: `/cepu/${clanSlug.value}` },
       { title: '生成族谱', path: `/zupu/${clanSlug.value}/genealogy/generate` },
@@ -259,6 +266,16 @@ const filteredMenuItems = computed(() => {
     })
     .filter((item) => item.children.length > 0)
 })
+
+// 存储用量显示文案（面包屑下方一行字提示）
+const storageText = computed(() => {
+  const usedGB = storageUsed.value / 1024 / 1024 / 1024
+  return `存储已用 ${usedGB.toFixed(2)} GB / 5 GB（${storagePercentage.value}%）`
+})
+const storageTagType = computed(() => (storagePercentage.value > 80 ? 'danger' : 'info'))
+const storageHint = computed(() =>
+  storagePercentage.value > 80 ? '存储紧张，建议清理或扩容' : '存储正常',
+)
 </script>
 
 <template>
@@ -408,6 +425,14 @@ const filteredMenuItems = computed(() => {
 
       <!-- 内容区 -->
       <ElMain class="content-area">
+        <!-- 面包屑下方一行字高度的存储用量提示 -->
+        <div class="storage-hint">
+          <ElIcon class="storage-hint-icon"><Document /></ElIcon>
+          <span class="storage-hint-text">{{ storageText }}</span>
+          <ElTag :type="storageTagType" size="small" effect="light" class="storage-hint-tag">
+            {{ storageHint }}
+          </ElTag>
+        </div>
         <router-view v-slot="{ Component, route: r }">
           <transition name="fade" mode="out-in">
             <component :is="Component" :key="r.fullPath" />
@@ -595,6 +620,38 @@ const filteredMenuItems = computed(() => {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
+}
+
+/* 面包屑下方一行字高度的存储用量提示条 */
+.storage-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-bottom: 14px;
+  background-color: #F5F7FA;
+  border: 1px solid #E4E7ED;
+  border-radius: 6px;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.storage-hint-icon {
+  color: #909399;
+  font-size: 14px;
+}
+
+.storage-hint-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.storage-hint-tag {
+  flex-shrink: 0;
 }
 
 .collapse-btn {

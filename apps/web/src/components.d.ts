@@ -128,6 +128,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     Search: typeof import('@element-plus/icons-vue')['Search']
     Share: typeof import('@element-plus/icons-vue')['Share']
+    StatisticsPanel: typeof import('./components/admin/StatisticsPanel.vue')['default']
     SurnameLegend: typeof import('./components/home/SurnameLegend.vue')['default']
     TimelineControl: typeof import('./components/migration/TimelineControl.vue')['default']
     TreeCompare: typeof import('./components/TreeCompare.vue')['default']
