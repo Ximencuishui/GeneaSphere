@@ -47,6 +47,11 @@ function handleTabClick(tab: any) {
   router.replace({ query: { ...route.query, tab: name } })
 }
 
+// 定谱页面（包含定谱 + 生成族谱两个 tab）统一关联工作流中的"新谱建成"节点。
+// - finalize tab：重点是“定稿出新谱”
+// - generate tab：重点是“生成可发布的族谱文档”（仍屈于"新谱建成"阶段）
+const workflowHighlight = computed<string[]>(() => ['new_book'])
+
 // =========================================================================
 // Tab 1：定谱
 // =========================================================================
@@ -62,12 +67,31 @@ interface DraftInfo {
 }
 
 const currentDraft = ref<DraftInfo>({
-  name: '朱氏宗谱·2026版（草稿）',
-  version: 'draft',
-  generation_range: '1—18 世',
-  member_count: 1284,
-  updated_at: new Date().toISOString(),
+  name: '暂无草稿',
+  version: '—',
+  generation_range: '—',
+  member_count: 0,
+  updated_at: '',
 })
+
+async function loadCurrentDraft() {
+  try {
+    const { data } = await axios.get(`/api/genealogy/${clanSlug.value}/drafts`)
+    const draft = (data?.data ?? data ?? [])[0]
+    if (!draft) return
+    currentDraft.value = {
+      ...draft,
+      member_count: draft.member_count ?? 0,
+      updated_at: draft.updated_at ? new Date(draft.updated_at).toLocaleString('zh-CN') : '尚未保存',
+      generation_range: draft.generation_start && draft.generation_end
+        ? `${draft.generation_start}—${draft.generation_end} 世`
+        : '未设置',
+    }
+    if (!finalizeForm.value.version_name) finalizeForm.value.version_name = draft.version || draft.name
+  } catch (err: any) {
+    console.warn('加载当前草稿失败：', err?.response?.data?.message || err?.message)
+  }
+}
 
 // ===== 定谱表单 =====
 const finalizeForm = ref({
@@ -119,10 +143,10 @@ async function handleFinalize() {
   }
   finalizing.value = true
   try {
-    // TODO: 待后端 API  POST /api/genealogy/${slug}/finalize
-    ElMessage.warning('TODO: 定谱固化 API 待接入；接入后会调用并刷新版本列表')
-    ElMessage.success('（占位）定谱成功')
-    loadVersionList()
+    const { editorInput: _editorInput, ...payload } = finalizeForm.value
+    await axios.post(`/api/genealogy/${clanSlug.value}/finalize`, payload)
+    ElMessage.success('定谱成功，版本已固化')
+    await loadVersionList()
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '定谱失败')
   } finally {
@@ -137,6 +161,7 @@ async function handleFinalize() {
 const generateForm = reactive({
   version_name: '族谱·2026版',
   style: 'traditional' as 'traditional' | 'modern' | 'simple',
+  layout: 'su' as 'su' | 'ou' | 'shixi_table',
   branch: '',
   generation_start: undefined as number | undefined,
   generation_end: undefined as number | undefined,
@@ -247,20 +272,19 @@ const versionLoading = ref(false)
 async function loadVersionList() {
   versionLoading.value = true
   try {
-    // TODO: 待后端 API  GET /api/genealogy/${slug}/versions
-    // 这里复用 genealogy-documents 列表近似展示（API 已存在）
-    const res = await axios.get(`/api/genealogy-documents/${clanSlug.value}`, {
-      params: { page: 1, pageSize: 5 },
+    const res = await axios.get(`/api/genealogy/${clanSlug.value}/versions`)
+    versionList.value = (res.data?.data ?? res.data ?? []).slice(0, 5).map((it: any) => {
+      const summary = it.scope_summary || {}
+      return {
+        id: it.id,
+        version_number: it.version_number ?? 0,
+        version_name: it.version_name ?? '',
+        finalized_at: summary.finalized_at || it.created_at || '',
+        editors: summary.editors ?? [],
+        description: summary.description ?? '',
+        file_url: it.file_url,
+      }
     })
-    versionList.value = (res.data?.items ?? []).map((it: any) => ({
-      id: it.id,
-      version_number: it.version_number ?? 0,
-      version_name: it.version_name ?? '',
-      finalized_at: it.created_at ?? '',
-      editors: it.editors ?? [],
-      description: it.description ?? '',
-      file_url: it.file_url,
-    }))
   } catch (err: any) {
     versionList.value = []
     console.warn('加载已定谱版本失败：', err?.response?.data?.message || err?.message)
@@ -269,7 +293,7 @@ async function loadVersionList() {
   }
 }
 
-function handleDownloadPdf(row: FinalizedVersion) {
+function handleDownloadPdf(row: any) {
   if (!row.file_url) {
     ElMessage.warning('文件 URL 不可用')
     return
@@ -280,7 +304,7 @@ function handleDownloadPdf(row: FinalizedVersion) {
   link.click()
 }
 
-function handleViewPdf(row: FinalizedVersion) {
+function handleViewPdf(row: any) {
   if (row.file_url) {
     window.open(row.file_url, '_blank')
   } else {
@@ -288,7 +312,7 @@ function handleViewPdf(row: FinalizedVersion) {
   }
 }
 
-async function handleShare(row: FinalizedVersion) {
+async function handleShare(row: any) {
   if (!row.file_url) {
     ElMessage.warning('文件 URL 不可用')
     return
@@ -302,6 +326,7 @@ async function handleShare(row: FinalizedVersion) {
 }
 
 onMounted(() => {
+  loadCurrentDraft()
   loadVersionList()
   if (activeTab.value === 'generate') loadBranches()
 })
@@ -312,6 +337,8 @@ watch(activeTab, (v) => {
 
 <template>
   <div class="finalize-page">
+    <!-- 修谱工作流（顶部一目了然，并凸显与本页相关的"新谱建成"节点） -->
+    <GenealogyWorkflowBar :highlight="workflowHighlight" />
     <ElTabs :model-value="activeTab" @tab-click="handleTabClick" class="finalize-tabs">
       <ElTabPane label="定谱" name="finalize">
         <!-- ===== Tab 1：定谱 ===== -->
@@ -582,15 +609,46 @@ watch(activeTab, (v) => {
             </ElCard>
 
             <ElCard class="form-card">
+              <template #header>
+                <div class="card-header">
+                  <span>谱式（世录排版）</span>
+                  <span class="card-tip">选择族谱世系录的排版格式</span>
+                </div>
+              </template>
+              <div class="layout-options">
+                <el-radio-group v-model="generateForm.layout" size="default">
+                  <el-radio-button value="su">
+                    <div class="layout-option">
+                      <span class="layout-label">苏式</span>
+                      <span class="layout-desc">竖排条目，窄高卡片，仿古谱「世系条」，适合纵向长卷</span>
+                    </div>
+                  </el-radio-button>
+                  <el-radio-button value="ou">
+                    <div class="layout-option">
+                      <span class="layout-label">欧式</span>
+                      <span class="layout-desc">世代分格，同辈横排对齐，利于横向比对世系</span>
+                    </div>
+                  </el-radio-button>
+                  <el-radio-button value="shixi_table">
+                    <div class="layout-option">
+                      <span class="layout-label">世系表</span>
+                      <span class="layout-desc">格子化世系图，带详细人物信息，兼具美观与可读性</span>
+                    </div>
+                  </el-radio-button>
+                </el-radio-group>
+              </div>
+            </ElCard>
+
+            <ElCard class="form-card">
               <template #header>内容包含</template>
-              <ElCheckboxGroup v-model="generateForm.include_options">
-                <ElCheckbox :label="true" :value="true">人物基本信息（姓名、生卒、字辈）</ElCheckbox>
-                <ElCheckbox :value="false" label="spouse_info">配偶信息</ElCheckbox>
-                <ElCheckbox :value="false" label="children_list">子女列表</ElCheckbox>
-                <ElCheckbox label="bio_text">生平简介</ElCheckbox>
-                <ElCheckbox label="photo">照片（优先使用正式肖像）</ElCheckbox>
-                <ElCheckbox label="migration">迁徙记录</ElCheckbox>
-              </ElCheckboxGroup>
+              <div class="include-options">
+                <label><input v-model="generateForm.include_options.basic_info" type="checkbox" /> 人物基本信息（姓名、生卒、字辈）</label>
+                <label><input v-model="generateForm.include_options.spouse_info" type="checkbox" /> 配偶信息</label>
+                <label><input v-model="generateForm.include_options.children_list" type="checkbox" /> 子女列表</label>
+                <label><input v-model="generateForm.include_options.bio_text" type="checkbox" /> 生平简介</label>
+                <label><input v-model="generateForm.include_options.photo" type="checkbox" /> 照片（优先使用正式肖像）</label>
+                <label><input v-model="generateForm.include_options.migration" type="checkbox" /> 迁徙记录</label>
+              </div>
             </ElCard>
 
             <ElCard class="action-card">
@@ -652,7 +710,7 @@ watch(activeTab, (v) => {
         </div>
       </template>
 
-      <ElTable v-loading="versionLoading" :data="versionList" empty-text="暂无已定谱版本（TODO: 待后端 API）">
+      <ElTable v-loading="versionLoading" :data="versionList" empty-text="暂无已定谱版本">
         <ElTableColumn label="版本号" prop="version_number" width="80" />
         <ElTableColumn label="版本名称" prop="version_name" />
         <ElTableColumn label="修谱成员" width="200">
@@ -896,9 +954,61 @@ watch(activeTab, (v) => {
   display: flex;
 }
 
+/* ===== 谱式选择样式 ===== */
+.layout-options {
+  display: flex;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.layout-options :deep(.el-radio-button) {
+  flex: 1;
+}
+
+.layout-options :deep(.el-radio-button__inner) {
+  width: 100%;
+  height: auto;
+  padding: 12px 16px;
+  white-space: normal;
+  text-align: left;
+  border-radius: 4px;
+  border-left: 1px solid #DCDFE6;
+}
+
+.layout-options :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  background-color: #5D4037;
+  border-color: #5D4037;
+  box-shadow: none;
+}
+
+.layout-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layout-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.layout-desc {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.4;
+}
+
+.layout-options :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) .layout-desc {
+  color: rgba(255, 255, 255, 0.8);
+}
+
 @media (max-width: 992px) {
   .style-grid {
     grid-template-columns: 1fr;
+  }
+  .layout-options {
+    flex-direction: column;
   }
 }
 </style>

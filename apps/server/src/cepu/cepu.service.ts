@@ -856,6 +856,7 @@ ${sections.join('')}
           </div>`;
       })
       .join('');
+    const connector = showConnector ? `<div class="shixi-connector"></div>` : '';
     const classes = ['shixi-page'];
     if (density === 'condense') classes.push('condense');
     if (density === 'condense-strong') classes.push('condense-strong');
@@ -863,6 +864,7 @@ ${sections.join('')}
     return `<section class="${classes.join(' ')}">
         <div class="shixi-page-dot"></div>
         <div class="shixi-title">${this.esc(p.title)}</div>
+        ${connector}
         <div class="shixi-grid">${cols}</div>
       </section>`;
   }
@@ -891,9 +893,11 @@ ${sections.join('')}
     const classes = ['shixi-page', 'condense-strong'];
     if (!showConnector) classes.push('no-connector');
     const title = `族谱第${p.gen + 1}世世系表(${total}人)`;
+    const connector = showConnector ? `<div class="shixi-connector"></div>` : '';
     return `<section class="${classes.join(' ')}">
         <div class="shixi-page-dot"></div>
         <div class="shixi-title">${this.esc(title)}</div>
+        ${connector}
         <div class="shixi-grid">
           ${renderCol(rightArr, '前半')}
           ${renderCol(leftArr, '后半')}
@@ -901,42 +905,51 @@ ${sections.join('')}
       </section>`;
   }
 
-  /** 单个人物的 HTML 块:红色姓名 + 竖排生平 */
+  /** 单个人物的 HTML 块：姓名块(最右,红字楷体大字) + 说明块(姓名左侧,多列布局)。
+   * 【说明块】采用多列结构：每个信息字段(生卒/字号/籍贯/葬地/配偶/子女/功名)各自独立成一列,
+   * 从右向左依次排列,符合传统中式族谱"古籍附录"式从右向左读排版。
+   * 与前端 CepuPage.vue 的 shixiEntryHtml 同构,保证预览与导出 PDF 一致。 */
   private renderShixiPersonHtml(e: ShiluEntry, surnameColor: string): string {
-    const lines: string[] = [];
-    // 姓名
-    lines.push(`<div class="shixi-name" style="color:${surnameColor}">${this.esc(e.full_name)}</div>`);
-    // 生卒
+    const fieldSpans: string[] = [];
+    // 生卒(深灰)
     if (e.birth_year || e.death_year || e.is_living) {
       const birth = e.birth_year ? `${e.birth_year}` : '？';
       const death = e.is_living ? '今' : e.death_year ? `${e.death_year}` : '？';
-      lines.push(`<div class="shixi-line">${birth}-${death}</div>`);
+      fieldSpans.push(`<div class="shixi-year">${birth}—${death}</div>`);
     }
     // 字号
-    if (e.courtesy_name) lines.push(`<div class="shixi-line">字${this.esc(e.courtesy_name)}</div>`);
+    if (e.courtesy_name) fieldSpans.push(`<div class="shixi-line">字${this.esc(e.courtesy_name)}</div>`);
     // 籍贯
-    if (e.native_place) lines.push(`<div class="shixi-line">籍${this.esc(e.native_place)}</div>`);
+    if (e.native_place) fieldSpans.push(`<div class="shixi-line">籍${this.esc(e.native_place)}</div>`);
     // 葬地
-    if (e.burial_place) lines.push(`<div class="shixi-line">葬${this.esc(e.burial_place)}</div>`);
-    // 配偶
+    if (e.burial_place) fieldSpans.push(`<div class="shixi-line">葬${this.esc(e.burial_place)}</div>`);
+    // 配偶(深蓝)
     if (e.spouses.length) {
       const sStr = e.spouses
         .map((s) => this.esc(s.name) + (s.native_place ? `（${this.esc(s.native_place)}）` : ''))
         .join('、');
-      lines.push(`<div class="shixi-line">配${sStr}</div>`);
+      fieldSpans.push(`<div class="shixi-spouse">配${sStr}</div>`);
     }
-    // 子女
+    // 子女(深蓝)
     if (e.children.length) {
       const cStr = e.children
         .map((c) => this.esc(c.name) + (c.child_type && c.child_type !== 'BIOLOGICAL' ? '（继）' : ''))
         .join('、');
-      lines.push(`<div class="shixi-line">子女:${cStr}</div>`);
+      fieldSpans.push(`<div class="shixi-children">子:${cStr}</div>`);
     }
-    // 功名
-    if (e.achievements) lines.push(`<div class="shixi-line">${this.esc(e.achievements)}</div>`);
-    // 传记
-    if (e.biography) lines.push(`<div class="shixi-bio">${this.esc(e.biography)}</div>`);
-    return `<div class="shixi-person">${lines.join('')}</div>`;
+    // 功名(棕褐加粗)
+    if (e.achievements) fieldSpans.push(`<div class="shixi-achievement">${this.esc(e.achievements)}</div>`);
+    // 轶事(棕褐)
+    if (e.anecdotes) fieldSpans.push(`<div class="shixi-achievement">${this.esc(e.anecdotes)}</div>`);
+    // 传记(独立列,可能较长)
+    if (e.biography) fieldSpans.push(`<div class="shixi-bio">${this.esc(e.biography)}</div>`);
+    const infoHtml = fieldSpans.length > 0
+      ? `<div class="shixi-info">${fieldSpans.join('')}</div>`
+      : '';
+    return `<div class="shixi-person">`
+      + `<div class="shixi-name" style="color:${surnameColor}">${this.esc(e.full_name)}</div>`
+      + infoHtml
+      + `</div>`;
   }
 
   /** 世系表卷分页:每 <pageGenCount> 个世代一页;单代人数过多时自动左右双列分页 */
@@ -1022,13 +1035,16 @@ ${sections.join('')}
     return 'normal';
   }
 
-  /** 世系表 CSS(Puppeteer 渲染用) */
+  /** 世系表 CSS(Puppeteer 渲染用)
+   * 与前端 CepuPage.vue 中 .shixi-* 同构(同语义、同字号、同颜色);语义化类名:
+   * .shixi-name/.shixi-year/.shixi-line/.shixi-spouse/.shixi-children/
+   * .shixi-achievement/.shixi-bio */
   private shixiTableCss(): string {
     return `
       .shixi-page{
         width:180mm; height:260mm;
         margin:0 auto 8mm;
-        padding:16mm 12mm 14mm;
+        padding:24mm 12mm 14mm;
         box-sizing:border-box;
         position:relative;
         border:3px double #333;
@@ -1039,35 +1055,57 @@ ${sections.join('')}
         break-after:page;
         overflow:hidden;
       }
-      .shixi-page .shixi-page-dot{position:absolute; top:6mm; right:6mm; width:5mm; height:5mm; border:1.5px solid #333; border-radius:50%; background:#fffdf6;}
-      .shixi-page .shixi-title{position:absolute; bottom:6mm; left:6mm; writing-mode:vertical-rl; font-family:'KaiTi','Songti SC',serif; color:#b22222; font-size:13pt; letter-spacing:6px; line-height:1.4;}
-      .shixi-grid{display:flex; flex-direction:row-reverse; height:100%; gap:3mm; align-items:stretch;}
-      .shixi-col{flex:1; position:relative; padding:14mm 3mm 4mm; border-left:1px solid #888; display:flex; flex-direction:column; align-items:center; writing-mode:vertical-rl; min-height:0;}
+      .shixi-page .shixi-page-dot{position:absolute; top:6mm; right:6mm; width:6mm; height:6mm; border:1.5px solid #333; border-radius:50%; background:#fffdf6; z-index:3;}
+      .shixi-page .shixi-title{position:absolute; bottom:6mm; left:6mm; writing-mode:vertical-rl; font-family:'KaiTi','Songti SC',serif; color:#b22222; font-size:14pt; letter-spacing:8px; line-height:1.4; font-weight:600;}
+      /* 顶端连接线：贯穿所有列顶端的水平线,被每列圆圈“穿过” */
+      .shixi-connector{position:absolute; top:27mm; left:0; right:0; height:0; border-top:1.5px solid #333; writing-mode:horizontal-tb; pointer-events:none; z-index:2;}
+      .shixi-page.no-connector .shixi-connector{display:none;}
+      .shixi-grid{display:flex; flex-direction:row-reverse; height:100%; gap:3mm; align-items:stretch; position:relative;}
+      /* 列：顶部留出空间给圆圈+列头,人物从下方纵向堆叠 */
+      .shixi-col{flex:1 1 0; position:relative; padding:32mm 2mm 4mm; border-left:1px solid #888; display:flex; flex-direction:column; align-items:flex-end; justify-content:flex-start; gap:2mm; writing-mode:horizontal-tb; min-height:0;}
       .shixi-col:last-child{border-left:1px solid #888;}
-      .shixi-col-header{position:absolute; top:0; right:0; background:#d9d9d9; border:1px solid #333; writing-mode:horizontal-tb; font-family:'KaiTi','Songti SC',serif; color:#b22222; font-size:13pt; font-weight:bold; padding:4px 10px; letter-spacing:4px;}
-      .shixi-col::before{content:''; position:absolute; top:-6px; left:50%; transform:translateX(-50%); width:10px; height:10px; border:2px solid #333; border-radius:50%; background:#fffdf6;}
-      .shixi-col::after{content:''; position:absolute; top:-1px; left:50%; width:100%; height:0; border-top:1px solid #333;}
-      .shixi-page.no-connector .shixi-col::before, .shixi-page.no-connector .shixi-col::after{display:none;}
-      .shixi-person{margin:3mm 0; text-align:center; max-width:30mm; writing-mode:vertical-rl; line-height:1.7; flex-shrink:0;}
-      .shixi-name{font-family:'KaiTi','Songti SC',serif; font-size:13pt; font-weight:bold; margin-bottom:3px; letter-spacing:2px; color:#b22222;}
-      .shixi-line{font-size:8.5pt; color:#1a1a1a; margin:1px 0; line-height:1.6;}
-      .shixi-bio{font-size:8.5pt; color:#1a1a1a; margin-top:4px; line-height:1.7; text-align:justify;}
+      .shixi-col-header{position:absolute; top:17mm; left:50%; transform:translateX(-50%); background:#d9d9d9; border:1px solid #333; writing-mode:horizontal-tb; font-family:'KaiTi','Songti SC',serif; color:#b22222; font-size:14pt; font-weight:bold; padding:5px 12px; letter-spacing:6px; z-index:4;}
+      /* 列顶端小圆圈：与上方的连接线交叉,形成传统吊线图 */
+      .shixi-col::before{content:''; position:absolute; top:5mm; left:50%; transform:translateX(-50%); width:6mm; height:6mm; border:1.5px solid #333; border-radius:50%; background:#fffdf6; z-index:6; writing-mode:horizontal-tb; box-sizing:border-box;}
+      .shixi-page.no-connector .shixi-col::before{display:none;}
+      /* 人物：姓名块 + 说明块(多列布局)
+       【说明块】是水平 flex + row-reverse,内部每个字段(div)是独立一列。
+       姓名块(最右)与说明块(姓名左侧)各自走 vertical-rl。 */
+      .shixi-person{display:flex; flex-direction:row-reverse; writing-mode:horizontal-tb; align-items:flex-start; min-height:50mm; max-height:170mm; flex-shrink:0; font-family:'KaiTi','Songti SC','SimSun','Microsoft YaHei',serif; overflow:hidden; gap:0;}
+      /* 姓名块：独立列,红字楷体大字 */
+      .shixi-person .shixi-name{writing-mode:vertical-rl; text-orientation:upright; text-align:center; font-family:'KaiTi','Songti SC',serif; font-size:20pt; font-weight:bold; line-height:1.05; flex-shrink:0; width:20pt; letter-spacing:0;}
+      /* 说明块：水平 flex + row-reverse,内部字段各自独立成列
+       * 横向空间不够时,字段自动向左换列(列方向),防止挤压字段 */
+      .shixi-person .shixi-info{display:flex; flex-direction:row-reverse; writing-mode:horizontal-tb; align-items:flex-start; align-content:flex-start; flex-wrap:wrap-reverse; column-gap:2pt; row-gap:1pt; max-width:110pt; min-width:0; color:#1a1a1a;}
+      /* 说明块内每个字段：vertical-rl,独立一列(字符宽 = 字号) */
+      .shixi-person .shixi-info > div{writing-mode:vertical-rl; text-orientation:upright; text-align:center; font-size:9.5pt; line-height:1.6; letter-spacing:1px; flex-shrink:0; width:9.5pt; padding:0; margin:0 0.5pt; color:inherit;}
+      /* 字段类型区分(类名同构) */
+      .shixi-person .shixi-info .shixi-year{color:#1a1a1a; font-family:'Songti SC','SimSun',serif;}
+      .shixi-person .shixi-info .shixi-line{color:#4a453e;}
+      .shixi-person .shixi-info .shixi-spouse{color:#2c5282;}
+      .shixi-person .shixi-info .shixi-children{color:#2c5282;}
+      .shixi-person .shixi-info .shixi-achievement{color:#8b4513; font-weight:600;}
+      .shixi-person .shixi-info .shixi-bio{color:#1a1a1a; font-size:9pt; line-height:1.9; letter-spacing:0.5px;}
 
       /* 中等密集模式: 7-12 人/代 */
-      .shixi-page.condense .shixi-person{margin:2mm 0; line-height:1.5;}
-      .shixi-page.condense .shixi-name{font-size:11pt; margin-bottom:2px;}
-      .shixi-page.condense .shixi-line{font-size:8pt; margin:1px 0; line-height:1.45;}
-      .shixi-page.condense .shixi-bio{font-size:8pt; margin-top:3px; line-height:1.55;}
-      .shixi-page.condense .shixi-col-header{font-size:11pt; padding:3px 8px; letter-spacing:3px;}
-      .shixi-page.condense .shixi-title{font-size:12pt; letter-spacing:4px;}
+      .shixi-page.condense .shixi-person{min-height:40mm; max-height:155mm;}
+      .shixi-page.condense .shixi-person .shixi-name{font-size:17pt; width:17pt; line-height:1.05;}
+      .shixi-page.condense .shixi-person .shixi-info{max-width:90pt; column-gap:2pt; row-gap:1pt;}
+      .shixi-page.condense .shixi-person .shixi-info > div{font-size:9pt; width:9pt; line-height:1.5; margin:0 0.5pt;}
+      .shixi-page.condense .shixi-person .shixi-info .shixi-bio{font-size:8pt; line-height:1.8;}
+      .shixi-page.condense .shixi-col-header{font-size:12pt; padding:4px 10px; letter-spacing:4px;}
+      .shixi-page.condense .shixi-title{font-size:12pt; letter-spacing:6px;}
+      .shixi-page.condense .shixi-col{padding:28mm 2mm 4mm;}
 
       /* 强密集模式: >12 人/代 */
-      .shixi-page.condense-strong .shixi-person{margin:1.5mm 0; line-height:1.3;}
-      .shixi-page.condense-strong .shixi-name{font-size:10pt; margin-bottom:1px;}
-      .shixi-page.condense-strong .shixi-line{font-size:7.5pt; margin:0; line-height:1.3;}
-      .shixi-page.condense-strong .shixi-bio{font-size:7.5pt; margin-top:2px; line-height:1.4;}
-      .shixi-page.condense-strong .shixi-col-header{font-size:10pt; padding:2px 6px; letter-spacing:2px;}
-      .shixi-page.condense-strong .shixi-title{font-size:11pt; letter-spacing:3px;}
+      .shixi-page.condense-strong .shixi-person{min-height:30mm; max-height:130mm;}
+      .shixi-page.condense-strong .shixi-person .shixi-name{font-size:15pt; width:15pt;}
+      .shixi-page.condense-strong .shixi-person .shixi-info{max-width:75pt; column-gap:1.5pt; row-gap:0.8pt;}
+      .shixi-page.condense-strong .shixi-person .shixi-info > div{font-size:8pt; width:8pt; line-height:1.4; margin:0 0.3pt;}
+      .shixi-page.condense-strong .shixi-person .shixi-info .shixi-bio{font-size:7pt; line-height:1.5;}
+      .shixi-page.condense-strong .shixi-col-header{font-size:11pt; padding:3px 8px; letter-spacing:3px;}
+      .shixi-page.condense-strong .shixi-col{padding:25mm 2mm 4mm;}
+      .shixi-page.condense-strong .shixi-title{font-size:11pt; letter-spacing:4px;}
     `;
   }
 

@@ -264,11 +264,15 @@ export class InviteService {
     id: bigint,
     reviewerId: string,
     decision: { status: ModificationStatus; reject_reason?: string },
+    expectedClanId?: bigint,
   ) {
     const record = await this.prisma.personModificationRequest.findUnique({
       where: { id },
     });
     if (!record) throw new NotFoundException('信息修改申请不存在');
+    if (expectedClanId !== undefined && record.clan_id !== expectedClanId) {
+      throw new ForbiddenException('修改申请不属于当前家族');
+    }
     if (record.status !== ModificationStatus.PENDING) {
       throw new BadRequestException('该申请已处理');
     }

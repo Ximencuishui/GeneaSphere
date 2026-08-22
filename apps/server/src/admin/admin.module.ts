@@ -30,6 +30,7 @@ import { AdminFamilyAlbumController } from './family-album/admin-family-album.co
 import { AdminAlertController } from './alert/admin-alert.controller';
 import { AdminBackupController } from './backup/admin-backup.controller';
 import { StorageUpgradeController } from './storage/storage-upgrade.controller';
+import { ClanOverviewController } from './overview/clan-overview.controller';
 import { AlertService } from '../common/alert.service';
 import { CosModule } from '../cos/cos.module';
 import { PlatformAuthModule } from '../platform/auth/platform-auth.module';
@@ -61,6 +62,7 @@ import { PlatformAuthModule } from '../platform/auth/platform-auth.module';
     AdminAlertController,
     AdminBackupController,
     StorageUpgradeController,
+    ClanOverviewController,
   ],
   providers: [AdminService, MergeService, SmsService, AdminFamilyRelationService, NotificationService, ClanResolverService, AlertService],
   exports: [AdminService, MergeService, NotificationService, ClanResolverService, AlertService],

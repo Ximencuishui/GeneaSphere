@@ -243,7 +243,9 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: true },
     props: true,
     children: [
-      { path: '', name: 'admin-dashboard', component: () => import('@/views/admin/DashboardPage.vue'), meta: { title: '数据概览', requiresAuth: true, requiresAdmin: true } },
+      { path: '', name: 'admin-dashboard', component: () => import('@/views/admin/FamilyOverviewPage.vue'), meta: { title: '家族概况', requiresAuth: true, requiresAdmin: true } },
+      { path: 'council', name: 'admin-council', component: () => import('@/views/admin/CouncilPage.vue'), meta: { title: '家族理事会', requiresAuth: true, requiresAdmin: true } },
+      { path: 'revision-team', name: 'admin-revision-team', component: () => import('@/views/admin/RevisionTeamPage.vue'), meta: { title: '修谱小组', requiresAuth: true, requiresAdmin: true } },
       { path: 'members', name: 'admin-members', component: () => import('@/views/admin/MembersPage.vue'), meta: { title: '族员管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/media', name: 'admin-media-reviews', component: () => import('@/views/admin/MediaReviewPage.vue'), meta: { title: '影像审核', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/bio', name: 'admin-bio-reviews', component: () => import('@/views/admin/BioReviewPage.vue'), meta: { title: '生平审核', requiresAuth: true, requiresAdmin: true } },
@@ -259,6 +261,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'genealogy/data', name: 'admin-genealogy-data', component: () => import('@/views/admin/GenealogyDataPage.vue'), meta: { title: '族谱数据', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/crowdsource', name: 'admin-genealogy-crowdsource', component: () => import('@/views/admin/CrowdsourceEditPage.vue'), meta: { title: '众包修改', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/finalize', name: 'admin-genealogy-finalize', component: () => import('@/views/admin/GenealogyFinalizePage.vue'), meta: { title: '定谱', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/h5-entry', name: 'admin-genealogy-h5-entry', component: () => import('@/views/admin/H5EntryPage.vue'), meta: { title: '族员入口', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/old', name: 'admin-genealogy-old', component: () => import('@/views/admin/GenealogyHistoryPage.vue'), meta: { title: '旧谱', requiresAuth: true, requiresAdmin: true } },
       { path: 'video/migration', name: 'admin-video-migration', component: () => import('@/views/admin/MigrationVideoPage.vue'), meta: { title: '迁徙历史视频', requiresAuth: true, requiresAdmin: true } },
       { path: 'video/event', name: 'admin-video-event', component: () => import('@/views/admin/EventVideoPage.vue'), meta: { title: '大事件视频', requiresAuth: true, requiresAdmin: true } },
@@ -280,9 +283,13 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings/clan-info', name: 'admin-clan-info', component: () => import('@/views/admin/ClanInfoPage.vue'), meta: { title: '家族信息', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/export', name: 'admin-export', component: () => import('@/views/admin/DataExportPage.vue'), meta: { title: '数据导出', requiresAuth: true, requiresAdmin: true } },
       { path: 'invite/qrcodes', name: 'admin-invite-qrcodes', component: () => import('@/views/admin/invite/QrcodeListPage.vue'), meta: { title: '邀请二维码', requiresAuth: true, requiresAdmin: true } },
-      { path: 'invite/records', name: 'admin-invite-records', component: () => import('@/views/admin/invite/VerificationRecordsPage.vue'), meta: { title: '验证记录', requiresAuth: true, requiresAdmin: true } },
+      // 验证记录：菜单调整后已合并到【邀请二维码】的“验证记录” tab；保留旧路径直连以防外链失效
+      { path: 'invite/records', redirect: (to) => `/zupu/${to.params.slug}/invite/qrcodes?tab=verification` },
       { path: 'invite/records/:id', name: 'admin-invite-record-detail', component: () => import('@/views/admin/invite/VerificationRecordDetailPage.vue'), meta: { title: '验证详情', requiresAuth: true, requiresAdmin: true } },
-      { path: 'invite/reviews', name: 'admin-invite-reviews', component: () => import('@/views/admin/invite/ModificationReviewPage.vue'), meta: { title: '信息修改审核', requiresAuth: true, requiresAdmin: true } },
+      { path: 'invite/reviews', name: 'admin-invite-reviews', component: () => import('@/views/admin/invite/ModificationReviewPage.vue'), meta: { title: '族员信息审核', requiresAuth: true, requiresAdmin: true } },
+      // 家族公众号（2026-08-18 菜单调整后新增）
+      { path: 'wechat/config', name: 'admin-wechat-config', component: () => import('@/views/admin/WechatConfigPage.vue'), meta: { title: '公众号配置', requiresAuth: true, requiresAdmin: true } },
+      { path: 'wechat/content', name: 'admin-wechat-content', component: () => import('@/views/admin/WechatContentPage.vue'), meta: { title: '内容管理', requiresAuth: true, requiresAdmin: true } },
       // 兼容旧路径：/zupu/:slug/dashboard 与 /zupu/:slug/dashboard/* 全部归并到 /zupu/:slug
       { path: 'dashboard/:rest(.*)*', redirect: (to) => `/zupu/${to.params.slug}` },
       // 旧路径重定向（菜单重构后旧链接仍可用，避免失效）
@@ -330,6 +337,12 @@ const routes: RouteRecordRaw[] = [
         name: 'user-families',
         component: () => import('@/views/user-center/FamiliesPage.vue'),
         meta: { title: '我的家族', requiresAuth: true },
+      },
+      {
+        path: 'clan-overview',
+        name: 'user-clan-overview',
+        component: () => import('@/views/user-center/ClanOverviewPage.vue'),
+        meta: { title: '家族概况', requiresAuth: true },
       },
       {
         path: 'timeline',

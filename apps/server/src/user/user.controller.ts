@@ -20,13 +20,17 @@ import { UserService } from './user.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { PrismaService } from '@geneasphere/db';
 
 @ApiTags('user')
 @Controller('api/user')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   // ==================== 资料 ====================
 
@@ -236,5 +240,87 @@ export class UserController {
   @ApiOperation({ summary: '标记通知已读' })
   async markRead(@Request() req, @Param('id') notificationId: string) {
     return this.userService.markNotificationRead(req.user.userId, notificationId);
+  }
+
+  // ==================== 家族概况（只读） ====================
+
+  @Get('clan-overview')
+  @ApiOperation({ summary: '获取当前用户所属家族的概况（只读）' })
+  async getClanOverview(@Request() req) {
+    const userId = req.user.userId;
+    const profile = await this.userService.getProfile(userId);
+    const primaryClan = profile?.primary_clan;
+    if (!primaryClan?.slug) {
+      return null;
+    }
+
+    // 通过 clan slug 查询家族详细信息
+    const clan = await this.prisma.clan.findFirst({
+      where: { slug: primaryClan.slug },
+      include: {
+        admin_user: { select: { id: true, phone: true, nickname: true } },
+      },
+    });
+
+    if (!clan) {
+      return null;
+    }
+
+    const [councilMembers, revisionTeamMembers] = await Promise.all([
+      this.prisma.clanCouncilMember.findMany({
+        where: { clan_id: clan.id },
+        orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+      }),
+      this.prisma.clanRevisionTeamMember.findMany({
+        where: { clan_id: clan.id },
+        orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
+      }),
+    ]);
+
+    const settings = (clan.settings_json as Record<string, any>) || {};
+
+    return {
+      clan: {
+        id: clan.id.toString(),
+        name: clan.name,
+        description: clan.description,
+        slogan: clan.slogan,
+        origin_place: clan.origin_place,
+        logo_url: clan.logo_url,
+        cover_url: clan.cover_url,
+        spirit: clan.spirit,
+        rules: clan.rules,
+        created_at: clan.created_at,
+        updated_at: clan.updated_at,
+        admin_user: clan.admin_user
+          ? {
+              id: clan.admin_user.id,
+              name: clan.admin_user.nickname || clan.admin_user.phone,
+            }
+          : null,
+      },
+      extra: {
+        contact_email: settings.contact_email || '',
+        contact_phone: settings.contact_phone || '',
+        website: settings.website || '',
+        established_year: settings.established_year || '',
+        cultural_heritage: settings.cultural_heritage || '',
+        notable_figures: settings.notable_figures || '',
+      },
+      council: councilMembers.map((m) => ({
+        id: m.id.toString(),
+        name: m.name,
+        contact: m.contact,
+        position: m.position,
+        remark: m.remark,
+      })),
+      revision_team: revisionTeamMembers.map((m) => ({
+        id: m.id.toString(),
+        name: m.name,
+        contact: m.contact,
+        duty: m.duty,
+        remark: m.remark,
+      })),
+    };
   }
 }

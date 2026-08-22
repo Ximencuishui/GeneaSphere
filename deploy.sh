@@ -6,6 +6,7 @@
 #  或:   在服务器上直接执行 bash deploy.sh
 # ============================================================
 set -euo pipefail
+IFS=$'\n'
 
 # ==================== 配置区（按需修改）====================
 # 项目目录
@@ -13,7 +14,7 @@ PROJECT_DIR="${PROJECT_DIR:-/opt/geneasphere}"
 
 # 端口配置
 WEB_PORT="${WEB_PORT:-80}"
-API_PORT="${API_PORT:-3001}"
+API_PORT="${API_PORT:-3101}"
 
 # Node.js 版本
 NODE_VERSION="${NODE_VERSION:-20}"

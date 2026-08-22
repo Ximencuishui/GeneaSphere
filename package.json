@@ -12,6 +12,8 @@
     "dev": "pnpm -r --parallel dev",
     "check:encoding": "node scripts/check-encoding.mjs",
     "lint:encoding": "node scripts/check-encoding.mjs",
+    "refresh:demo": "powershell -ExecutionPolicy Bypass -File scripts/refresh-demo.ps1",
+    "refresh:demo:keep": "powershell -ExecutionPolicy Bypass -File scripts/refresh-demo.ps1 -KeepServerRunning",
     "postinstall": "prisma generate --schema=packages/db/prisma/schema.prisma"
   },
   "devDependencies": {

@@ -50,14 +50,15 @@ const newForm = ref({
 })
 
 const draftSaving = ref(false)
+const editingDraftId = ref<string | null>(null)
 const draftList = ref<any[]>([])
 const draftLoading = ref(false)
 
 async function loadDraftList() {
   draftLoading.value = true
   try {
-    // TODO: 待后端 API  GET /api/genealogy/${slug}/drafts
-    draftList.value = []
+    const { data } = await axios.get(`/api/genealogy/${clanSlug.value}/drafts`)
+    draftList.value = data?.data ?? data ?? []
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '加载草稿失败')
   } finally {
@@ -72,8 +73,14 @@ async function handleSaveDraft() {
   }
   draftSaving.value = true
   try {
-    // TODO: 待后端 API  POST /api/genealogy/${slug}/drafts
-    ElMessage.warning('TODO: 保存草稿 API 待接入')
+    if (editingDraftId.value) {
+      await axios.put(`/api/genealogy/${clanSlug.value}/drafts/${editingDraftId.value}`, newForm.value)
+    } else {
+      await axios.post(`/api/genealogy/${clanSlug.value}/drafts`, newForm.value)
+    }
+    ElMessage.success(editingDraftId.value ? '草稿已更新' : '草稿已保存')
+    editingDraftId.value = null
+    await loadDraftList()
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '保存失败')
   } finally {
@@ -88,16 +95,59 @@ async function handleBackup() {
       '备份族谱数据',
       { type: 'info', confirmButtonText: '开始备份', cancelButtonText: '取消' },
     )
-    // TODO: 待后端 API  GET /api/genealogy/${slug}/export?format=json
-    ElMessage.warning('TODO: 备份 API 待接入')
+    const response = await axios.get(`/api/genealogy/${clanSlug.value}/export`, {
+      params: { format: 'json' },
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${clanSlug.value}-genealogy-backup-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('族谱备份已下载')
   } catch {
     /* 用户取消 */
+  }
+}
+
+function loadDraft(row: any) {
+  editingDraftId.value = row.id
+  newForm.value = {
+    name: row.name || '',
+    version: row.version || '',
+    generation_start: row.generation_start ?? undefined,
+    generation_end: row.generation_end ?? undefined,
+    description: row.description || '',
+    cover_image_url: row.cover_image_url || '',
+  }
+}
+
+async function removeDraft(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认删除草稿“${row.name}”？`, '删除确认', { type: 'warning' })
+    await axios.delete(`/api/genealogy/${clanSlug.value}/drafts/${row.id}`)
+    if (editingDraftId.value === row.id) editingDraftId.value = null
+    ElMessage.success('草稿已删除')
+    await loadDraftList()
+  } catch (err: any) {
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(err?.response?.data?.message || '删除失败')
   }
 }
 
 function handleGoFinalize() {
   router.push(`/zupu/${clanSlug.value}/genealogy/finalize`)
 }
+
+// 根据当前 tab 决定修谱工作流条上要凸显的节点：
+//   - 新建族谱 tab → 高亮 "新建族谱" 节点
+//   - 旧谱电子化 / PDF 导入管理 tab → 高亮 "旧谱电子化" 主阶段及其子步骤（OCR/对照/保存）
+const workflowHighlight = computed<string[]>(() => {
+  if (activeTab.value === 'new') return ['clan_created']
+  if (activeTab.value === 'digitize') return ['digitize', 'import_photo', 'compare_edit', 'save_table']
+  if (activeTab.value === 'pdf-import') return ['digitize', 'ocr', 'compare_edit', 'save_table']
+  return ['digitize']
+})
 
 // ===== Tab 2：旧谱电子化 =====
 const digitizeList = ref<any[]>([])
@@ -106,8 +156,8 @@ const digitizeLoading = ref(false)
 async function loadDigitizeList() {
   digitizeLoading.value = true
   try {
-    // TODO: 待后端 API  GET /api/genealogy/${slug}/digitize-tasks
-    digitizeList.value = []
+    const { data } = await axios.get(`/api/genealogy/${clanSlug.value}/digitize-tasks`)
+    digitizeList.value = data?.data ?? data ?? []
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '加载旧谱电子化列表失败')
   } finally {
@@ -116,10 +166,10 @@ async function loadDigitizeList() {
 }
 
 function handleDigitizeDetail(row: any) {
-  ElMessage.info(`TODO: 查看旧谱电子化详情 ${row?.id ?? ''}`)
+  router.push({ path: `/zupu/${clanSlug.value}/genealogy/data`, query: { tab: 'pdf-import', taskId: row?.id } })
 }
 function handleDigitizeContinue(row: any) {
-  ElMessage.info(`TODO: 继续编辑旧谱电子化 ${row?.id ?? ''}`)
+  router.push({ path: `/zupu/${clanSlug.value}/genealogy/data`, query: { tab: 'pdf-import', taskId: row?.id, action: 'continue' } })
 }
 
 // ===== Tab 3：PDF 导入管理（直接渲染 ImportManagementPage）=====
@@ -141,6 +191,8 @@ onMounted(() => {
 
 <template>
   <div class="genealogy-data-page">
+    <!-- 修谱工作流（顶部一目了然，并凸显与本页相关的节点：随当前 tab 联动） -->
+    <GenealogyWorkflowBar :highlight="workflowHighlight" />
     <ElCard>
       <template #header>
         <div class="page-header">
@@ -191,15 +243,15 @@ onMounted(() => {
           </ElForm>
 
           <ElDivider content-position="left">已保存的草稿</ElDivider>
-          <ElTable v-loading="draftLoading" :data="draftList" empty-text="暂无草稿（TODO: 待后端 API）">
+          <ElTable v-loading="draftLoading" :data="draftList" empty-text="暂无草稿">
             <ElTableColumn label="族谱名称" prop="name" />
             <ElTableColumn label="版本号" prop="version" width="120" />
             <ElTableColumn label="更新时间" prop="updated_at" width="180" />
-            <ElTableColumn label="操作" width="220">
-              <template #default>
-                <ElButton size="small" link type="primary">编辑</ElButton>
-                <ElButton size="small" link type="success">定谱</ElButton>
-                <ElButton size="small" link type="danger">删除</ElButton>
+            <ElTableColumn label="操作" width="180">
+              <template #default="{ row }">
+                <ElButton size="small" link type="primary" @click="loadDraft(row)">编辑</ElButton>
+                <ElButton size="small" link type="success" @click="handleGoFinalize">定谱</ElButton>
+                <ElButton size="small" link type="danger" @click="removeDraft(row)">删除</ElButton>
               </template>
             </ElTableColumn>
           </ElTable>
@@ -208,15 +260,15 @@ onMounted(() => {
         <!-- Tab 2：旧谱电子化 -->
         <ElTabPane label="旧谱电子化" name="digitize">
           <div class="tab-toolbar">
-            <ElButton type="primary">新建旧谱电子化</ElButton>
+            <ElButton type="primary" @click="router.push({ query: { ...route.query, tab: 'pdf-import' } })">新建旧谱电子化</ElButton>
             <ElButton @click="loadDigitizeList">刷新</ElButton>
           </div>
-          <ElTable v-loading="digitizeLoading" :data="digitizeList" empty-text="暂无旧谱电子化项目（TODO: 待后端 API）">
+          <ElTable v-loading="digitizeLoading" :data="digitizeList" empty-text="暂无旧谱电子化项目">
             <ElTableColumn label="项目名称" prop="name" />
             <ElTableColumn label="原始文件" prop="source_file" width="200" />
             <ElTableColumn label="状态" prop="status" width="120">
               <template #default="{ row }">
-                <ElTag :type="row.status === 'DONE' ? 'success' : 'warning'">
+                <ElTag :type="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'danger' : 'warning'">
                   {{ row.status_label || row.status || '—' }}
                 </ElTag>
               </template>

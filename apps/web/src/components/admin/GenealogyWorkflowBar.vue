@@ -43,11 +43,37 @@ const clanSlug = computed(() => String(route.params.slug ?? ''))
 const workflow = ref<WorkflowStatus | null>(null)
 const loading = ref(false)
 const error = ref('')
+const errorType = ref<'auth' | 'forbidden' | 'notFound' | 'network'>('network')
+
+/**
+ * 凸显的工作流节点 key 列表（与 workflow.stages[].key 对应）。
+ * 例如 ['digitize'] 或 ['notify', 'member_edit', 'review']。
+ * 默认空数组：与现有行为一致，不凸显任何节点。
+ *
+ * 设计意图：在【修谱】菜单下的子页面顶部展示完整工作流条的同时，
+ * 凸显与该页面相关的节点（更大、更亮、加发光/边框），让管理员一眼看到
+ * "我目前在做什么、还差几步"。
+ */
+const props = defineProps<{
+  highlight?: string[]
+}>()
+const highlightKeys = computed<Set<string>>(() => new Set(props.highlight ?? []))
+
+/** 主阶段是否被凸显 */
+function isStageHighlighted(key: string): boolean {
+  return highlightKeys.value.has(key)
+}
+
+/** 子阶段是否被凸显（属于 digitize 的子阶段） */
+function isSubHighlighted(key: string): boolean {
+  return highlightKeys.value.has(key)
+}
 
 async function load() {
   if (!clanSlug.value) return
   loading.value = true
   error.value = ''
+  errorType.value = 'network'
   try {
     const res = await axios.get('/api/genealogy-workflow/status', {
       params: { clanId: clanSlug.value },
@@ -55,10 +81,32 @@ async function load() {
     workflow.value = res.data
   } catch (e: any) {
     const status: number = e?.response?.status || 0
-    error.value =
-      status === 404 ? '未找到该家族，无法获取修谱工作流' : '修谱工作流加载失败，请稍后重试'
+    const message = e?.response?.data?.message || ''
+    if (status === 401 || message.includes('Unauthorized') || message.includes('未授权')) {
+      error.value = '登录已过期，请重新登录'
+      errorType.value = 'auth'
+    } else if (status === 403 || message.includes('Forbidden') || message.includes('Admin access')) {
+      error.value = '需要家族管理员权限才能查看修谱工作流'
+      errorType.value = 'forbidden'
+    } else if (status === 404) {
+      error.value = '未找到该家族，无法获取修谱工作流'
+      errorType.value = 'notFound'
+    } else {
+      error.value = '修谱工作流加载失败，请稍后重试'
+      errorType.value = 'network'
+    }
   } finally {
     loading.value = false
+  }
+}
+
+function handleRetry() {
+  if (errorType.value === 'auth') {
+    // 清除过期的 token 并跳转登录
+    localStorage.removeItem('geneasphere_token')
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+  } else {
+    load()
   }
 }
 
@@ -81,7 +129,9 @@ onMounted(load)
     <!-- 错误兜底：不阻塞页面其他内容 -->
     <div v-else-if="error" class="wf-card wf-error">
       <span class="wf-error-text">{{ error }}</span>
-      <el-button size="small" text type="primary" @click="load">重试</el-button>
+      <el-button size="small" text type="primary" @click="handleRetry">
+        {{ errorType === 'auth' ? '重新登录' : '重试' }}
+      </el-button>
     </div>
 
     <div v-else-if="workflow" class="wf-card">
@@ -115,7 +165,7 @@ onMounted(load)
         <template v-for="(stage, i) in workflow.stages" :key="stage.key">
           <div
             class="wf-step"
-            :class="stage.status"
+            :class="[stage.status, { highlighted: isStageHighlighted(stage.key) }]"
             :title="stage.detail"
             @click="go(stage.link)"
           >
@@ -142,7 +192,7 @@ onMounted(load)
           v-for="sub in digitizeStage.sub_stages"
           :key="sub.key"
           class="wf-substep"
-          :class="sub.status"
+          :class="[sub.status, { highlighted: isSubHighlighted(sub.key) }]"
           :title="sub.detail"
           @click="go(sub.link)"
         >
@@ -363,6 +413,52 @@ onMounted(load)
 
 .wf-step:hover .wf-node {
   transform: translateY(-2px);
+}
+
+/* ===== 高亮（与当前页面相关的节点） ===== */
+.wf-step.highlighted .wf-node {
+  box-shadow:
+    0 0 0 4px rgba(201, 169, 110, 0.30),
+    0 4px 14px rgba(93, 64, 55, 0.28);
+  transform: scale(1.12);
+}
+
+.wf-step.highlighted .wf-label {
+  color: #5d4037;
+  font-weight: 700;
+}
+
+.wf-step.highlighted .wf-label.strong {
+  color: #c97c1a;
+}
+
+.wf-step.highlighted.done .wf-label {
+  color: #3f8526;
+}
+
+.wf-step.highlighted .wf-count {
+  background: linear-gradient(135deg, #c9a96e, #8d5b3c);
+  color: #fff;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.wf-substep.highlighted {
+  font-weight: 700;
+  border-width: 2px;
+  border-style: solid;
+  background: linear-gradient(135deg, #fff8ec, #fffdf8);
+  box-shadow: 0 2px 6px rgba(201, 169, 110, 0.25);
+}
+
+.wf-substep.highlighted.done {
+  border-color: #67c23a;
+}
+
+.wf-substep.highlighted.current {
+  border-color: #e6a23c;
+  color: #c97c1a;
 }
 
 /* ===== 子步骤 ===== */

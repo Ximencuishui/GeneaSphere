@@ -62,6 +62,7 @@ const menuGroups = computed(() => {
   const key = clan ? clan.slug || clan.id : ''
   const genealogyChildren = clan
     ? [
+        { title: '家族概况', icon: 'OfficeBuilding', path: '/user-center/clan-overview' },
         { title: '树谱', icon: 'Share', path: `/tree/${key}` },
         { title: '册谱', icon: 'Notebook', path: `/cepu/${key}` },
         { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },

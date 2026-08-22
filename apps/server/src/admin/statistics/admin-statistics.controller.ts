@@ -30,7 +30,8 @@ export class AdminStatisticsController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     const [
       totalMembers,
@@ -129,21 +130,59 @@ export class AdminStatisticsController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    // 世代分布
-    const generationStats = await this.prisma.$queryRaw<any[]>`
-      SELECT 
-        COALESCE(migration_branch, '未知') as generation,
-        COUNT(*) as total,
-        SUM(CASE WHEN is_living THEN 1 ELSE 0 END) as living,
-        SUM(CASE WHEN NOT is_living THEN 1 ELSE 0 END) as deceased,
-        SUM(CASE WHEN gender = 'male' THEN 1 ELSE 0 END) as male,
-        SUM(CASE WHEN gender = 'female' THEN 1 ELSE 0 END) as female
+
+    // 定位族根：取无 depth=1 父链（自身为始祖）的最早一个 person，
+    // 与 cepu.service.findClanRoot 同口径（保证世代起点一致）。
+    // 找不到则按 0 世兜底，下方 ancestry 分组会自然退化为空。
+    const root = await this.prisma.person.findFirst({
+      where: {
+        clan_id: clanId,
+        deleted_at: null,
+        descendant_links: { none: { depth: 1 } },
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+
+    // 世代分布：以族根 depth=0 对应「第 1 世」，depth+1 即世系数。
+    // （Person 表无 generation 列，世代从 person_ancestry 闭包表的 depth 反推，
+    //  与 cepu.service.generateShilu 计算 generation 的口径一致。）
+    const generationStats = root
+      ? await this.prisma.$queryRaw<any[]>`
+          SELECT
+            pa.depth + 1 AS generation,
+            COUNT(*) AS total,
+            SUM(CASE WHEN p.is_living THEN 1 ELSE 0 END) AS living,
+            SUM(CASE WHEN NOT p.is_living THEN 1 ELSE 0 END) AS deceased,
+            SUM(CASE WHEN p.gender = 'male' THEN 1 ELSE 0 END) AS male,
+            SUM(CASE WHEN p.gender = 'female' THEN 1 ELSE 0 END) AS female
+          FROM persons p
+          JOIN person_ancestry pa ON pa.descendant_id = p.id
+          WHERE p.clan_id = ${clanId}
+            AND p.deleted_at IS NULL
+            AND pa.ancestor_id = ${root.id}
+            AND pa.depth >= 0
+          GROUP BY pa.depth
+          ORDER BY pa.depth
+        `
+      : [];
+
+    // 房支分布：A/B/C 房支（朱熹长子=朱塾=A、次子=朱埜=B、三子=朱在=C）。
+    // 保留原口径数据，供「按房支分布」分列展示。
+    const branchStats = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        COALESCE(migration_branch, '未知') AS branch,
+        COUNT(*) AS total,
+        SUM(CASE WHEN is_living THEN 1 ELSE 0 END) AS living,
+        SUM(CASE WHEN NOT is_living THEN 1 ELSE 0 END) AS deceased,
+        SUM(CASE WHEN gender = 'male' THEN 1 ELSE 0 END) AS male,
+        SUM(CASE WHEN gender = 'female' THEN 1 ELSE 0 END) AS female
       FROM persons
       WHERE clan_id = ${clanId} AND deleted_at IS NULL
       GROUP BY migration_branch
-      ORDER BY generation
+      ORDER BY branch
     `;
 
     // 性别分布
@@ -176,12 +215,20 @@ export class AdminStatisticsController {
 
     return {
       by_generation: generationStats.map((g) => ({
-        generation: g.generation,
+        generation: Number(g.generation),
         total: Number(g.total),
         living: Number(g.living),
         deceased: Number(g.deceased),
         male: Number(g.male),
         female: Number(g.female),
+      })),
+      by_branch: branchStats.map((b) => ({
+        branch: b.branch,
+        total: Number(b.total),
+        living: Number(b.living),
+        deceased: Number(b.deceased),
+        male: Number(b.male),
+        female: Number(b.female),
       })),
       by_gender: genderStats.map((g) => ({
         gender: g.gender,
@@ -204,7 +251,8 @@ export class AdminStatisticsController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     // 按年份分布
     const yearStats = await this.prisma.$queryRaw<any[]>`
@@ -280,7 +328,8 @@ export class AdminStatisticsController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
 
     // 迁徙事件统计
     const totalEvents = await this.prisma.migrationEvent.count({

@@ -3,7 +3,9 @@
     <!-- 通知文案（来自 CrowdsourceEditPage 创建并通过链接携带 token） -->
     <div v-if="step === 'login'" class="h5-card">
       <h1 class="h5-title">族谱信息核验</h1>
-      <p class="h5-subtitle">
+      <p v-if="noticeTitle" class="h5-subtitle">{{ noticeTitle }}</p>
+      <p v-if="noticeContent" class="h5-notice">{{ noticeContent }}</p>
+      <p v-else class="h5-subtitle">
         请使用您的手机号登录，核验/修改您的族谱信息。提交后由家族管理员审核。
       </p>
 
@@ -36,7 +38,7 @@
         </button>
       </div>
 
-      <button class="h5-btn" :disabled="loggingIn" type="button" @click="handleLogin">
+      <button class="h5-btn" :disabled="loggingIn || !noticeValid" type="button" @click="handleLogin">
         {{ loggingIn ? '登录中…' : '登录并继续' }}
       </button>
 
@@ -51,7 +53,7 @@
       <p v-if="noticeTitle" class="h5-subtitle">{{ noticeTitle }}</p>
       <p v-if="noticeContent" class="h5-notice">{{ noticeContent }}</p>
 
-      <label class="h5-label">姓名</label>
+      <label class="h5-label">姓名 *</label>
       <input v-model="form.full_name" class="h5-input" placeholder="您的姓名" />
 
       <label class="h5-label">性别</label>
@@ -72,7 +74,7 @@
       <input v-model="form.xipai" class="h5-input" placeholder="选填" />
 
       <label class="h5-label">联系电话</label>
-      <input v-model="form.phone" class="h5-input" type="tel" placeholder="选填" />
+      <input v-model="form.contact_phone" class="h5-input" type="tel" placeholder="选填" />
 
       <label class="h5-label">生平简介</label>
       <textarea
@@ -94,7 +96,9 @@
     <!-- 步骤 3：完成 -->
     <div v-else-if="step === 'done'" class="h5-card">
       <h1 class="h5-title">提交成功</h1>
-      <p class="h5-subtitle">您的修改已提交，请等待管理员审核。</p>
+      <p class="h5-subtitle">
+        已提交 {{ submittedCount }} 条修改记录，请等待管理员审核。
+      </p>
       <button class="h5-btn h5-btn--secondary" type="button" @click="onClose">关闭</button>
     </div>
   </div>
@@ -123,18 +127,24 @@ const loggingIn = ref(false)
 
 const noticeTitle = ref('')
 const noticeContent = ref('')
+const noticeValid = ref(false)
 
 const form = ref({
   full_name: '',
   gender: 'male' as 'male' | 'female',
   birth_year: undefined as number | undefined,
   xipai: '',
-  phone: '',
+  contact_phone: '',
   bio: '',
 })
 
 const submitting = ref(false)
+const submittedCount = ref(0)
 
+/**
+ * 调用 /api/auth/send-sms-code，purpose 固定为 LOGIN（族员身份验证）。
+ * 后端在开发模式下会把验证码打到日志，前端如返回 devCode 则自动填充方便测试。
+ */
 async function handleSendSms() {
   if (!/^1\d{10}$/.test(phone.value)) {
     showToast('请输入正确的 11 位手机号')
@@ -142,8 +152,16 @@ async function handleSendSms() {
   }
   sendingSms.value = true
   try {
-    // TODO: 待后端 API  POST /api/auth/sms-send  { phone, purpose: 'genealogy-edit' }
-    showToast('（TODO）验证码接口待接入')
+    const { data } = await axios.post('/api/auth/send-sms-code', {
+      phone: phone.value,
+      purpose: 'LOGIN',
+    })
+    showToast('验证码已发送')
+    // 开发模式：后端会把验证码一并返回（仅未配置 TENCENT_SMS_* 时），方便前端联调
+    const devCode = data?.data?.code ?? data?.code
+    if (devCode && /^\d{6}$/.test(String(devCode))) {
+      smsCode.value = String(devCode)
+    }
     smsCountdown.value = 60
     const t = setInterval(() => {
       smsCountdown.value -= 1
@@ -156,6 +174,10 @@ async function handleSendSms() {
   }
 }
 
+/**
+ * 调用 /api/auth/login，使用短信验证码登录。
+ * 登录成功后进入编辑步骤；如果后端没返回手机号，预填本步骤输入的手机号。
+ */
 async function handleLogin() {
   if (!/^1\d{10}$/.test(phone.value)) {
     showToast('请输入正确的手机号')
@@ -167,16 +189,15 @@ async function handleLogin() {
   }
   loggingIn.value = true
   try {
-    // TODO: 待后端 API  POST /api/auth/sms-login  { phone, code }
-    // 成功后保存 token，拉取通知文案 + 当前可修改字段
-    showToast('（TODO）登录接口待接入；模拟进入编辑步骤')
-    // 模拟：从 query 读取展示数据（如管理员在通知中携带了 title/content）
-    noticeTitle.value = String(route.query.title || '请各位族亲核实个人信息')
-    noticeContent.value = String(
-      route.query.content ||
-        '本次修谱期间，请点击下方表单核实/修改您的姓名、出生年份、字辈、联系电话与生平简介，提交后由家族管理员审核。',
-    )
-    form.value.phone = phone.value
+    await axios.post('/api/auth/login', {
+      phone: phone.value,
+      smsCode: smsCode.value,
+    })
+    if (!noticeTitle.value) noticeTitle.value = '请各位族亲核实个人信息'
+    if (!noticeContent.value) {
+      noticeContent.value = '本次修谱期间，请核实或修改您的族谱信息，提交后由家族管理员审核。'
+    }
+    form.value.contact_phone = phone.value
     step.value = 'edit'
   } catch (e: any) {
     showToast(e?.response?.data?.message || '登录失败')
@@ -185,16 +206,41 @@ async function handleLogin() {
   }
 }
 
+/**
+ * 提交族谱信息修改申请：调用 /api/genealogy/{slug}/crowdsource/submissions。
+ * 后端会把姓名 / 性别 / 出生年的差异写入 PersonModificationRequest，
+ * 字辈 / 联系电话 / 生平简介作为附加信息一并提交，供管理员人工补充。
+ */
 async function handleSubmit() {
   if (!form.value.full_name.trim()) {
     showToast('请填写姓名')
     return
   }
+  if (!clanSlug || !token) {
+    showToast('通知链接不完整，无法提交')
+    return
+  }
   submitting.value = true
   try {
-    // TODO: 待后端 API  POST /api/genealogy/${clanSlug}/crowdsource/submissions
-    // body: { token, phone, ...form }
-    showToast('（TODO）提交接口待接入；模拟成功')
+    const payload: Record<string, unknown> = {
+      token,
+      phone: phone.value,
+      full_name: form.value.full_name.trim(),
+      gender: form.value.gender,
+    }
+    if (form.value.birth_year !== undefined && Number.isFinite(form.value.birth_year)) {
+      payload.birth_year = form.value.birth_year
+    }
+    if (form.value.xipai.trim()) payload.xipai = form.value.xipai.trim()
+    if (form.value.contact_phone.trim()) payload.contact_phone = form.value.contact_phone.trim()
+    if (form.value.bio.trim()) payload.bio = form.value.bio.trim()
+
+    const { data } = await axios.post(
+      `/api/genealogy/${clanSlug}/crowdsource/submissions`,
+      payload,
+    )
+    const result = data?.data ?? data
+    submittedCount.value = Number(result?.request_count ?? 0)
     step.value = 'done'
   } catch (e: any) {
     showToast(e?.response?.data?.message || '提交失败')
@@ -213,10 +259,22 @@ function onClose() {
   }
 }
 
-onMounted(() => {
-  if (!clanSlug && !token) {
-    // 允许直接打开页面（演示用）；真实场景应校验 token
-    console.warn('[H5 genealogy-edit] 未携带 clanSlug/token，按预览模式加载')
+onMounted(async () => {
+  if (!clanSlug || !token) {
+    showToast('通知链接不完整')
+    return
+  }
+  try {
+    const { data } = await axios.post(
+      `/api/genealogy/${clanSlug}/crowdsource/notices/resolve`,
+      { token },
+    )
+    const notice = data?.data ?? data
+    noticeTitle.value = notice?.title || ''
+    noticeContent.value = notice?.content || ''
+    noticeValid.value = true
+  } catch (e: any) {
+    showToast(e?.response?.data?.message || '通知链接无效或已过期')
   }
 })
 </script>

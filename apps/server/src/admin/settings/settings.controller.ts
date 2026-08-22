@@ -399,7 +399,7 @@ const [photos, videos, others] = await Promise.all([
   // ==================== 家族信息编辑 ====================
 
   /**
-   * 获取家族信息
+   * 获取家族信息（含 slogan/origin_place/logo_url/cover_url 等扩展列）
    */
   @Get('clan-info')
   @ApiOperation({ summary: '获取家族信息' })
@@ -424,21 +424,40 @@ const [photos, videos, others] = await Promise.all([
       throw new NotFoundException('Clan not found');
     }
 
+    const settings = (clan.settings_json as Record<string, any>) || {};
+
     return {
       id: clan.id.toString(),
       name: clan.name,
       description: clan.description,
+      slogan: clan.slogan,
+      origin_place: clan.origin_place,
+      logo_url: clan.logo_url,
+      cover_url: clan.cover_url,
+      spirit: clan.spirit,
+      rules: clan.rules,
       admin_user: clan.admin_user ? {
         id: clan.admin_user.id,
         name: clan.admin_user.nickname || clan.admin_user.phone,
       } : null,
+      settings_json: settings,
+      // 便捷字段：直接读出 settings_json 里的扩展信息
+      contact_email: settings.contact_email || '',
+      contact_phone: settings.contact_phone || '',
+      website: settings.website || '',
+      established_year: settings.established_year || '',
+      cultural_heritage: settings.cultural_heritage || '',
+      notable_figures: settings.notable_figures || '',
       created_at: clan.created_at,
       updated_at: clan.updated_at,
     };
   }
 
   /**
-   * 更新家族信息
+   * 更新家族信息（含 slogan/origin_place/logo_url/cover_url 全字段）
+   * - 兼容老字段（name/description/cover_url/default_role）
+   * - 新增字段（slogan/origin_place/logo_url）落 clans 表扩展列
+   * - 其他扩展信息（contact_email 等）入 settings_json
    */
   @Put('clan-info')
   @ApiOperation({ summary: '更新家族信息' })
@@ -452,28 +471,75 @@ const [photos, videos, others] = await Promise.all([
 
     const updateData: any = {};
 
+    // ---------- 基础字段（直接落 clans 表）----------
     if (body.name !== undefined) {
       updateData.name = body.name;
     }
-
     if (body.description !== undefined) {
       updateData.description = body.description;
     }
+    if (body.slogan !== undefined) {
+      updateData.slogan = body.slogan || null;
+    }
+    if (body.origin_place !== undefined) {
+      updateData.origin_place = body.origin_place || null;
+    }
+    if (body.spirit !== undefined) {
+      updateData.spirit = body.spirit || null;
+    }
+    if (body.rules !== undefined) {
+      updateData.rules = body.rules || null;
+    }
+    if (body.logo_url !== undefined) {
+      updateData.logo_url = body.logo_url || null;
+    }
 
+    // ---------- settings_json 中的老兼容字段 ----------
+    let currentSettings: Record<string, any> =
+      ((await this.prisma.clan.findUnique({ where: { id: clanId } }))?.settings_json as Record<string, any>) || {};
+
+    let settingsChanged = false;
+
+    // 兼容老逻辑：cover_url 在原代码中会写入 settings_json，
+    // 但 clans 表新增了独立 cover_url 列后，统一以列为准；仅在未设列时才回填到 settings_json。
     if (body.cover_url !== undefined) {
-      const currentSettings = ((await this.prisma.clan.findUnique({ where: { id: clanId } }))?.settings_json || {}) as Record<string, any>;
-      updateData.settings_json = {
-        ...currentSettings,
-        cover_url: body.cover_url,
-      };
+      const coverUrl = body.cover_url || null;
+      updateData.cover_url = coverUrl;
+      if (coverUrl !== currentSettings.cover_url) {
+        currentSettings = { ...currentSettings, cover_url: coverUrl };
+        settingsChanged = true;
+      }
     }
 
     if (body.default_role !== undefined) {
-      const currentSettings = ((await this.prisma.clan.findUnique({ where: { id: clanId } }))?.settings_json || {}) as Record<string, any>;
-      updateData.settings_json = {
-        ...currentSettings,
-        default_role: body.default_role,
-      };
+      currentSettings = { ...currentSettings, default_role: body.default_role };
+      settingsChanged = true;
+    }
+
+    // 新增扩展字段（contact_email / contact_phone / website / established_year /
+    //                cultural_heritage / notable_figures）统一入 settings_json
+    const EXTRA_FIELDS = [
+      'contact_email',
+      'contact_phone',
+      'website',
+      'established_year',
+      'cultural_heritage',
+      'notable_figures',
+    ];
+    for (const key of EXTRA_FIELDS) {
+      if (body[key] !== undefined) {
+        currentSettings = { ...currentSettings, [key]: body[key] };
+        settingsChanged = true;
+      }
+    }
+
+    if (body.settings_json !== undefined && body.settings_json !== null) {
+      currentSettings = { ...currentSettings, ...body.settings_json };
+      settingsChanged = true;
+    }
+
+    if (settingsChanged) {
+      updateData.settings_json = currentSettings;
     }
 
     const updated = await this.prisma.clan.update({
@@ -494,6 +560,13 @@ const [photos, videos, others] = await Promise.all([
       id: updated.id.toString(),
       name: updated.name,
       description: updated.description,
+      slogan: updated.slogan,
+      origin_place: updated.origin_place,
+      logo_url: updated.logo_url,
+      cover_url: updated.cover_url,
+      spirit: updated.spirit,
+      rules: updated.rules,
+      settings_json: updated.settings_json,
       updated_at: updated.updated_at,
     };
   }

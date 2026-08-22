@@ -11,7 +11,6 @@ import {
   PictureFilled,
   Connection,
   Setting,
-  Printer,
   Message,
   Document,
   HomeFilled,
@@ -20,9 +19,11 @@ import {
   Expand,
   UserFilled,
   Menu,
-  Warning,
   Search,
   EditPen,
+  Calendar,
+  ChatDotRound,
+  DataLine,
 } from '@element-plus/icons-vue'
 
 const iconMap: Record<string, any> = {
@@ -31,11 +32,12 @@ const iconMap: Record<string, any> = {
   PictureFilled,
   Connection,
   Setting,
-  Printer,
   Message,
   Document,
-  Warning,
   EditPen,
+  Calendar,
+  ChatDotRound,
+  DataLine,
 }
 
 const route = useRoute()
@@ -107,14 +109,43 @@ const clanSlug = computed(() => (route.params.slug as string) || '')
 
 // 根据当前 slug 动态生成所有菜单路径（族谱管理员后台，按职责域重组）
 // 顶级分组：
-//   - 族谱：只读/查看类（数据概览、树谱、册谱、旧谱）+ 数据统计
+//   - 家族概况：顶级直达项（无子菜单，原【数据概览】+【家族信息】合并至此）
+//   - 族谱：只读/查看类（树谱、册谱、旧谱）+ 数据统计
 //   - 修谱：编辑/创作/分发全流程（族谱数据、众包修改、定谱、生成族谱、印刷）
-const menuItems = computed(() => [
+//   - 家族大事：事件/迁移相关的内容与视频
+//   - 家族管理：成员/公告/邀请/审核/字辈 等管理员职责 + 家族公众号
+//   - 历史影像：影像库与历史影像的审核（原【内容与影像】+ 影像审核）
+//   - 设置：系统配置类（原【系统设置】 + 题库管理）
+//
+// 菜单项两种形态：
+//   - 顶级直达项（leaf）：{ title, icon, path }        — 点击标题直接跳路由
+//   - 顶级分组（group）：{ title, icon, children[] }   — 可展开的折叠菜单
+type MenuLeaf = { title: string; icon: string; path: string }
+type MenuGroup = { title: string; icon: string; children: { title: string; path: string }[] }
+type MenuEntry = MenuLeaf | MenuGroup
+
+const menuItems = computed<MenuEntry[]>(() => [
+  // ============= 顶级直达菜单：家族概况 =============
+  // 原【数据概览】+【家族信息】合并至此，点击标题直接跳转
+  {
+    title: '家族概况',
+    icon: 'DataLine',
+    path: `/zupu/${clanSlug.value}`,
+  },
+  {
+    title: '家族理事会',
+    icon: 'User',
+    path: `/zupu/${clanSlug.value}/council`,
+  },
+  {
+    title: '修谱小组',
+    icon: 'EditPen',
+    path: `/zupu/${clanSlug.value}/revision-team`,
+  },
   {
     title: '族谱',
     icon: 'Monitor',
     children: [
-      { title: '数据概览', path: `/zupu/${clanSlug.value}` },
       { title: '树谱', path: `/tree/${clanSlug.value}` },
       { title: '册谱', path: `/cepu/${clanSlug.value}` },
       { title: '旧谱', path: `/zupu/${clanSlug.value}/genealogy/old` },
@@ -127,44 +158,50 @@ const menuItems = computed(() => [
       { title: '族谱数据', path: `/zupu/${clanSlug.value}/genealogy/data` },
       { title: '众包修改', path: `/zupu/${clanSlug.value}/genealogy/crowdsource` },
       { title: '定谱', path: `/zupu/${clanSlug.value}/genealogy/finalize` },
+      { title: '族员入口', path: `/zupu/${clanSlug.value}/genealogy/h5-entry` },
       { title: '印刷', path: `/zupu/${clanSlug.value}/print` },
     ],
   },
   {
-    title: '族员管理',
-    icon: 'User',
+    title: '家族大事',
+    icon: 'Calendar',
     children: [
-      { title: '族员列表', path: `/zupu/${clanSlug.value}/members` },
-      { title: '权限分配', path: `/zupu/${clanSlug.value}/members?tab=roles` },
-      { title: '邀请二维码', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
-      { title: '验证记录', path: `/zupu/${clanSlug.value}/invite/records` },
-      { title: '信息修改审核', path: `/zupu/${clanSlug.value}/invite/reviews` },
+      { title: '大事件列表', path: `/zupu/${clanSlug.value}/family-events` },
+      { title: '大事件视频', path: `/zupu/${clanSlug.value}/video/event` },
+      { title: '迁徙管理', path: `/zupu/${clanSlug.value}/migration` },
+      { title: '迁徙历史视频', path: `/zupu/${clanSlug.value}/video/migration` },
     ],
   },
   {
-    title: '审核中心',
-    icon: 'Warning',
+    title: '家族管理',
+    icon: 'User',
     children: [
-      { title: '影像审核', path: `/zupu/${clanSlug.value}/reviews/media` },
+      // 族员管理：直接指向原【族员列表】页面（该页面内置【族员列表/权限分配】两个 tab）
+      { title: '族员管理', path: `/zupu/${clanSlug.value}/members` },
+      { title: '公告管理', path: `/zupu/${clanSlug.value}/announcements` },
+      // 邀请二维码：内集成【验证记录】 tab，默认进入二维码列表
+      { title: '邀请二维码', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
+      { title: '族员信息审核', path: `/zupu/${clanSlug.value}/invite/reviews` },
       { title: '生平审核', path: `/zupu/${clanSlug.value}/reviews/bio` },
       { title: '家庭关系变更审核', path: `/zupu/${clanSlug.value}/family-relation/reviews` },
       { title: '子女归属争议', path: `/zupu/${clanSlug.value}/family-relation/disputes` },
       { title: '举报管理', path: `/zupu/${clanSlug.value}/reports` },
+      { title: '字辈管理', path: `/zupu/${clanSlug.value}/settings/xipai` },
+      // 原【家族信息】已合并到【家族概况】（页面右上角设置图标打开弹窗）
+      // 公众号配置与内容管理（原【家族公众号】顶级分组，已合并到【家族管理】下）
+      { title: '公众号配置', path: `/zupu/${clanSlug.value}/wechat/config` },
+      { title: '公众号内容', path: `/zupu/${clanSlug.value}/wechat/content` },
     ],
   },
   {
-    title: '内容与影像',
+    title: '历史影像',
     icon: 'PictureFilled',
     children: [
       { title: '影像库', path: `/zupu/${clanSlug.value}/media/library` },
       { title: '相册管理', path: `/zupu/${clanSlug.value}/media/albums` },
       { title: '家庭图册', path: `/zupu/${clanSlug.value}/family-albums` },
-      { title: '公告管理', path: `/zupu/${clanSlug.value}/announcements` },
-      { title: '题库管理', path: `/zupu/${clanSlug.value}/memory/quizzes` },
-      { title: '大事件列表', path: `/zupu/${clanSlug.value}/family-events` },
-      { title: '迁徙管理', path: `/zupu/${clanSlug.value}/migration` },
-      { title: '迁徙历史视频', path: `/zupu/${clanSlug.value}/video/migration` },
-      { title: '大事件视频', path: `/zupu/${clanSlug.value}/video/event` },
+      // 影像审核：从原【审核中心】调整到【历史影像】
+      { title: '影像审核', path: `/zupu/${clanSlug.value}/reviews/media` },
     ],
   },
   {
@@ -184,26 +221,31 @@ const menuItems = computed(() => [
     ],
   },
   {
-    title: '系统设置',
+    title: '设置',
     icon: 'Setting',
     children: [
       { title: '隐私配置', path: `/zupu/${clanSlug.value}/settings/privacy` },
-      { title: '字辈管理', path: `/zupu/${clanSlug.value}/settings/xipai` },
-      { title: '家族信息', path: `/zupu/${clanSlug.value}/settings/clan-info` },
       { title: '云存储', path: `/zupu/${clanSlug.value}/settings/storage` },
       { title: '数据导出', path: `/zupu/${clanSlug.value}/settings/export` },
+      // 题库管理：从原【内容与影像】调整到【设置】
+      { title: '题库管理', path: `/zupu/${clanSlug.value}/memory/quizzes` },
       { title: 'AI工具使用记录', path: `/zupu/${clanSlug.value}/toolbox-usage` },
       { title: '回收站', path: `/zupu/${clanSlug.value}/trash` },
       { title: '操作日志', path: `/zupu/${clanSlug.value}/logs` },
     ],
   },
+  // 原【家族公众号】顶级分组已于菜单重构后合并到【家族管理】下
 ])
 
 // 根据当前路由自动展开对应的父级菜单；允许用户同时展开多个分组（UX-09）
 const openedMenus = ref<string[]>([])
+const isLeaf = (item: MenuEntry): item is MenuLeaf =>
+  typeof (item as MenuLeaf).path === 'string'
 const updateOpenedMenus = () => {
   const currentPath = route.path
   for (const item of menuItems.value) {
+    // 顶级直达项（leaf）没有子菜单，无需展开
+    if (isLeaf(item)) continue
     for (const child of item.children) {
       if (child.path === currentPath || currentPath.startsWith(child.path + '?')) {
         if (!openedMenus.value.includes(item.title)) {
@@ -217,11 +259,11 @@ const updateOpenedMenus = () => {
 watch(() => route.path, updateOpenedMenus, { immediate: true })
 
 const activeMenu = computed(() => {
-  // 处理带 query 的路由，如 /zupu/:slug/members?tab=roles
-  const fullPath = route.fullPath
-  const tab = route.query.tab
-  if (tab === 'roles') return `/zupu/${clanSlug.value}/members?tab=roles`
-  return fullPath
+  // 使用纯路径（不含 query）作为高亮依据；
+  // 原【族员列表】与【权限分配】两个菜单项都指向同一页面（一个带 ?tab=roles），
+  // 现在合并为单个【族员管理】菜单项，路径与页面一致即可：
+  // 在该页面上（不论是否带 query）都高亮同一个菜单项。
+  return route.path
 })
 
 // 生成面包屑
@@ -229,6 +271,14 @@ const breadcrumbs = computed(() => {
   const crumbs: { title: string; path?: string }[] = []
   const currentPath = route.path
   for (const item of menuItems.value) {
+    // 顶级直达项（leaf）：面包屑只显示当前页标题，不显示上级
+    if (isLeaf(item)) {
+      if (item.path === currentPath) {
+        crumbs.push({ title: item.title, path: item.path })
+        return crumbs
+      }
+      continue
+    }
     for (const child of item.children) {
       const childBase = child.path.split('?')[0]
       if (currentPath === child.path || currentPath.startsWith(childBase + '/') || currentPath === childBase) {
@@ -251,18 +301,40 @@ const handleLogout = () => {
 }
 
 // 方案 B：菜单搜索过滤 + 按能力裁剪（短信未配置时隐藏"通知与短信"组）
-const filteredMenuItems = computed(() => {
+const filteredMenuItems = computed<MenuEntry[]>(() => {
   const kw = menuKeyword.value.trim().toLowerCase()
   const hideSmsGroup = capabilityStore.loaded && !capabilityStore.isAvailable('sms')
-  return menuItems.value
-    .filter((item) => !(hideSmsGroup && item.title === '通知与短信'))
-    .map((item) => {
-      if (!kw) return item
-      const children = item.children.filter((c) => c.title.toLowerCase().includes(kw))
-      return { ...item, children }
-    })
-    .filter((item) => item.children.length > 0)
+  const result: MenuEntry[] = []
+  for (const item of menuItems.value) {
+    if (hideSmsGroup && item.title === '通知与短信') continue
+    if (isLeaf(item)) {
+      // 顶级直达项（leaf）：关键字命中则保留
+      if (!kw || item.title.toLowerCase().includes(kw)) {
+        result.push(item)
+      }
+      continue
+    }
+    // 顶级分组（group）：子项命中则保留分组，否则隐藏
+    const group = item as MenuGroup
+    const children = !kw
+      ? group.children
+      : group.children.filter((c) => c.title.toLowerCase().includes(kw))
+    if (children.length > 0) {
+      result.push({ ...group, children })
+    }
+  }
+  return result
 })
+
+// 将过滤后的菜单拆分为顶级直达项（leaf）和顶级分组（group），
+// 模板根据二者分别渲染为 ElMenuItem / ElSubMenu。
+// 当前【家族概况】为唯一 leaf 项：点击标题直接跳转，无需展开。
+const leafMenuItems = computed<MenuLeaf[]>(() =>
+  filteredMenuItems.value.filter(isLeaf),
+)
+const groupMenuItems = computed<MenuGroup[]>(() =>
+  filteredMenuItems.value.filter((it): it is MenuGroup => !isLeaf(it)),
+)
 
 // 存储用量显示文案（面包屑下方一行字提示）
 const storageText = computed(() => {
@@ -307,21 +379,35 @@ const storageHint = computed(() =>
         router
         class="admin-menu"
       >
-        <template v-for="item in filteredMenuItems" :key="item.title">
-          <ElSubMenu :index="item.title">
-            <template #title>
-              <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
-              <span>{{ item.title }}</span>
-            </template>
-            <ElMenuItem
-              v-for="child in item.children"
-              :key="child.path"
-              :index="child.path"
-            >
-              {{ child.title }}
-            </ElMenuItem>
-          </ElSubMenu>
-        </template>
+        <!-- 顶级直达菜单（leaf）：无子菜单，点击直接跳转 -->
+        <ElMenuItem
+          v-for="leaf in leafMenuItems"
+          :key="leaf.title"
+          :index="leaf.path"
+        >
+          <ElIcon><component :is="iconMap[leaf.icon]" /></ElIcon>
+          <template #title>
+            <span>{{ leaf.title }}</span>
+          </template>
+        </ElMenuItem>
+        <!-- 顶级分组菜单（group）：含子项的折叠菜单 -->
+        <ElSubMenu
+          v-for="group in groupMenuItems"
+          :key="group.title"
+          :index="group.title"
+        >
+          <template #title>
+            <ElIcon><component :is="iconMap[group.icon]" /></ElIcon>
+            <span>{{ group.title }}</span>
+          </template>
+          <ElMenuItem
+            v-for="child in group.children"
+            :key="child.path"
+            :index="child.path"
+          >
+            {{ child.title }}
+          </ElMenuItem>
+        </ElSubMenu>
       </ElMenu>
     </ElAside>
 

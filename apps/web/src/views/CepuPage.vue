@@ -56,9 +56,28 @@ const volumeContent = ref<{
 const loading = ref(false);
 const editMode = ref(false);
 
+// ---------- 临时样式切换（仅影响当前阅读，不保存） ----------
+const tempLayout = ref<'su' | 'ou' | 'shixi_table'>('su');
+
+function onLayoutChange(val: string | number | boolean | undefined) {
+  // 临时切换样式，仅影响页面渲染，不修改卷宗配置
+  if (volumeContent.value?.config && typeof val === 'string') {
+    volumeContent.value.config._tempLayout = val as 'su' | 'ou' | 'shixi_table';
+  }
+}
+
+// 用于模板中获取当前域名
+const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+
 const searchKeyword = ref('');
 const searchResults = ref<{ persons: any[]; volumes: any[] } | null>(null);
 const searchOpen = ref(false);
+
+// 当前生效的排版样式（优先使用临时切换，否则使用卷宗配置）
+const effectiveLayout = computed(() => {
+  if (volumeContent.value?.config?._tempLayout) return volumeContent.value.config._tempLayout;
+  return volumeContent.value?.config?.layout || 'su';
+});
 
 const focusedEntryId = ref<string | null>(null);
 const focusPersonId = computed(() => (route.query.person ? String(route.query.person) : null));
@@ -190,6 +209,12 @@ async function selectVolume(id: string) {
   try {
     const data: any = await cepuApi.getVolume(clanId.value, id, shareToken.value);
     volumeContent.value = data;
+    // 同步临时样式为卷宗配置的布局
+    if (data?.config?.layout) {
+      tempLayout.value = data.config.layout;
+    } else {
+      tempLayout.value = 'su';
+    }
     if (hasLogin.value) loadAnnotations(id);
     nextTick(() => applyFocus());
   } catch {
@@ -462,32 +487,66 @@ function pickShixiDensity(chunkGens: number[], byGen: Map<number, ShiluEntry[]>)
   return 'normal';
 }
 
+/**
+ * 世系表条目 HTML：
+ * 【姓名块】+【说明块】双列结构。
+ * 【说明块】内部使用**多列布局**——每个信息字段(生卒/字号/籍贯/葬地/配偶/子女/功名/轶事/传记)
+ * 各自独立为一列,从右向左依次展开。这是传统中式族谱的标准排版:
+ *   姓名在最右,左侧每一列是一个独立的信息字段,像“古籍附录”一样从右往左读。
+ * 不同于之前的“单列贯通+全角空格分隔”,多列布局让长说明不再被压缩到单一窄列中。
+ */
 function shixiEntryHtml(e: ShiluEntry): string {
-  const lines: string[] = [];
-  lines.push(`<div class="shixi-name">${e.full_name}</div>`);
+  // 每个字段一个独立 div,字段间不需额外间隔(靠 box 间隔表达间距)
+  const fieldSpans: string[] = [];
+  // 生卒年份(深灰色)
   if (e.birth_year || e.death_year || e.is_living) {
     const b = e.birth_year ? `${e.birth_year}` : '?';
     const d = e.is_living ? '今' : e.death_year ? `${e.death_year}` : '?';
-    lines.push(`<div class="shixi-line">${b}-${d}</div>`);
+    fieldSpans.push(`<div class="shixi-year">${b}—${d}</div>`);
   }
-  if (e.courtesy_name) lines.push(`<div class="shixi-line">字${e.courtesy_name}</div>`);
-  if (e.native_place) lines.push(`<div class="shixi-line">籍${e.native_place}</div>`);
-  if (e.burial_place) lines.push(`<div class="shixi-line">葬${e.burial_place}</div>`);
+  // 字号
+  if (e.courtesy_name) fieldSpans.push(`<div class="shixi-line">字${escapeHtml(e.courtesy_name)}</div>`);
+  // 籍贯
+  if (e.native_place) fieldSpans.push(`<div class="shixi-line">籍${escapeHtml(e.native_place)}</div>`);
+  // 葬地
+  if (e.burial_place) fieldSpans.push(`<div class="shixi-line">葬${escapeHtml(e.burial_place)}</div>`);
+  // 配偶(多配偶中间用逗号分隔,多个配偶同占一列)
   if (e.spouses.length) {
     const sStr = e.spouses
-      .map((s) => `${s.name}${s.native_place ? `（${s.native_place}）` : ''}`)
+      .map((s) => `${escapeHtml(s.name)}${s.native_place ? `（${escapeHtml(s.native_place)}）` : ''}`)
       .join('、');
-    lines.push(`<div class="shixi-line">配${sStr}</div>`);
+    fieldSpans.push(`<div class="shixi-spouse">配${sStr}</div>`);
   }
+  // 子女(同列,中间用顿号)
   if (e.children.length) {
     const cStr = e.children
-      .map((c) => `${c.name}${c.child_type && c.child_type !== 'BIOLOGICAL' ? '（继）' : ''}`)
+      .map((c) => `${escapeHtml(c.name)}${c.child_type && c.child_type !== 'BIOLOGICAL' ? '（继）' : ''}`)
       .join('、');
-    lines.push(`<div class="shixi-line">子女:${cStr}</div>`);
+    fieldSpans.push(`<div class="shixi-children">子:${cStr}</div>`);
   }
-  if (e.achievements) lines.push(`<div class="shixi-line">${e.achievements}</div>`);
-  if (e.biography) lines.push(`<div class="shixi-bio">${e.biography}</div>`);
-  return `<div class="shixi-person">${lines.join('')}</div>`;
+  // 功名(棕褐色加粗)
+  if (e.achievements) fieldSpans.push(`<div class="shixi-achievement">${escapeHtml(e.achievements)}</div>`);
+  // 轶事(与功名同色)
+  if (e.anecdotes) fieldSpans.push(`<div class="shixi-achievement">${escapeHtml(e.anecdotes)}</div>`);
+  // 传记正文(独立列,可能较长)
+  if (e.biography) fieldSpans.push(`<div class="shixi-bio">${escapeHtml(e.biography)}</div>`);
+  // 双块结构:姓名块(独立列,红大字) + 说明块(姓名左侧,多列)
+  const infoHtml = fieldSpans.length > 0
+    ? `<div class="shixi-info">${fieldSpans.join('')}</div>`
+    : '';
+  return `
+    <div class="shixi-person">
+      <div class="shixi-name">${escapeHtml(e.full_name)}</div>
+      ${infoHtml}
+    </div>`.trim();
+}
+
+function escapeHtml(s: string): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 const HARD_LIMIT = 16;
@@ -638,6 +697,14 @@ onMounted(async () => {
         <el-tag v-else-if="shareMode && !hasLogin" size="small" type="info">只读分享</el-tag>
       </div>
       <div class="header-center">
+        <!-- 样式切换（仅世录卷显示，对所有用户可见） -->
+        <template v-if="volumeContent?.type === 'shilu'">
+          <el-radio-group v-model="tempLayout" size="small" @change="onLayoutChange">
+            <el-radio-button value="su">苏式</el-radio-button>
+            <el-radio-button value="ou">欧式</el-radio-button>
+            <el-radio-button value="shixi_table">世系表</el-radio-button>
+          </el-radio-group>
+        </template>
         <el-input
           v-model="searchKeyword"
           placeholder="全文检索：姓名 / 字号 / 传记 / 葬地…"
@@ -818,7 +885,7 @@ onMounted(async () => {
             </div>
 
             <!-- 苏式排版（默认 layout=su 或未配置）：横排文字条目 -->
-            <div v-if="!volumeContent.config?.layout || volumeContent.config.layout === 'su'" class="shilu-entries">
+            <div v-if="effectiveLayout === 'su'" class="shilu-entries">
               <div
                 v-for="e in volumeContent.entries || []"
                 :id="`shilu-${e.person_id}`"
@@ -842,7 +909,7 @@ onMounted(async () => {
             </div>
 
             <!-- 世系表开本(PR#1 竖排预览):与 PDF 排版同构,在线翻页查看 -->
-            <div v-else-if="volumeContent.config?.layout === 'shixi_table'" class="shixi-table-view">
+            <div v-else-if="effectiveLayout === 'shixi_table'" class="shixi-table-view">
               <div class="shixi-page-list">
                 <article
                   v-for="(page, pIdx) in shixiTablePages.pages"
@@ -856,6 +923,12 @@ onMounted(async () => {
                 >
                   <div class="shixi-page-dot" />
                   <div class="shixi-title">{{ page.title }}</div>
+                  <!-- 顶端连接线：直接作为 .shixi-page 子元素,避免被 writing-mode:vertical-rl 影响
+                       强制 writing-mode:horizontal-tb 保证水平绘制。 -->
+                  <div
+                    v-if="shixiTablePages.cfg.show_generation_connector !== false"
+                    class="shixi-connector"
+                  />
                   <!-- 标准页:每代一列 -->
                   <div v-if="!page.isSplitCol" class="shixi-grid">
                     <div v-for="g in page.gens" :key="g" class="shixi-col">
@@ -1049,7 +1122,7 @@ onMounted(async () => {
       </div>
       <div v-if="shareLinks.length" class="share-list">
         <div v-for="l in shareLinks" :key="l.token" class="share-item">
-          <el-input :model-value="`${location.origin}${l.url}`" readonly size="small" />
+          <el-input :model-value="`${currentOrigin}${l.url}`" readonly size="small" />
           <el-button size="small" @click="copyShare(l.url)">复制</el-button>
           <el-button size="small" type="danger" text @click="revokeShare(l.token)">撤销</el-button>
         </div>
@@ -1325,92 +1398,163 @@ onMounted(async () => {
 .slide-right-enter-active, .slide-right-leave-active { transition: margin-right 0.2s ease; }
 .cepu-loading { height: 100%; }
 
-/* [PR#1] 世系表开本在线预览版式(与 PDF 排版同构) */
+/* [PR#1] 世系表开本在线预览版式(与 PDF 排版同构)
+ * 设计要点：
+ * 1. 页面整体采用水平布局,5 个代际横向并排(从右到左)
+ * 2. 顶端连接线 + 小圆圈走水平坐标系(不受文字竖排影响)
+ * 3. 每个人物块内部使用 writing-mode:vertical-rl,实现传统竖排文字
+ * 4. 列头、页脚、连接器等元素强制 writing-mode:horizontal-tb
+ * 5. 页面左侧竖排标题通过 transform: rotate(-90deg) 实现
+ */
 .shixi-table-view { padding: 8px 0 24px; }
 .shixi-page-list { display: flex; flex-direction: column; gap: 24px; align-items: center; }
 .shixi-page {
-  width: 720px;
+  width: 1100px;
   max-width: 100%;
-  min-height: 920px;
-  padding: 36px 28px 36px;
+  min-height: 760px;
+  height: auto;
+  padding: 70px 56px 40px 110px; /* 左侧留空间放竖排标题 */
   box-sizing: border-box;
   position: relative;
   border: 3px double #333;
   background: #fffdf6;
-  writing-mode: vertical-rl;
   font-family: 'KaiTi', 'Songti SC', 'SimSun', 'Microsoft YaHei', serif;
-  overflow: hidden;
+  overflow: visible;
 }
+
+/* 分页标记小圆圈：右上角，与原型一致 */
 .shixi-page .shixi-page-dot {
-  position: absolute; top: 16px; right: 16px;
-  width: 18px; height: 18px;
+  position: absolute; top: 18px; right: 18px;
+  width: 22px; height: 22px;
   border: 1.5px solid #333; border-radius: 50%;
   background: #fffdf6;
+  z-index: 3;
 }
+
+/* 左侧竖排标题：通过旋转实现传统竖排 */
 .shixi-page .shixi-title {
-  position: absolute; bottom: 16px; left: 16px;
+  position: absolute;
+  bottom: 24px;
+  left: 18px;
+  width: 32px;
+  height: auto;
+  /* 旋转 -90 度实现从下到上的竖排文字 */
   writing-mode: vertical-rl;
+  text-orientation: upright;
+  font-family: 'KaiTi', 'Songti SC', serif;
+  color: #b22222;
+  font-size: 18px;
+  letter-spacing: 6px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+/* 页脚(横向第 X 页) */
+.shixi-page .shixi-page-footer {
+  position: absolute; bottom: 14px; right: 18px;
+  font-size: 12px; color: #888;
+}
+
+/* 顶端水平连接线：贯穿所有列顶端的水平线,被每列圆圈“穿过”,
+ * top:92px 对齐到圆圈中心 (浏览器实测 y≈180,差±1px) */
+.shixi-connector {
+  position: absolute;
+  top: 92px;
+  left: 110px;
+  right: 36px;
+  height: 0;
+  border-top: 1.5px solid #333;
+  writing-mode: horizontal-tb;
+  pointer-events: none;
+  z-index: 2;
+}
+.shixi-page.no-connector .shixi-connector { display: none; }
+
+/* 列布局:水平并排,从右向左(第一世在最右边) */
+.shixi-grid {
+  display: flex;
+  flex-direction: row-reverse;
+  min-height: 660px;
+  gap: 12px;
+  align-items: stretch;
+  position: relative;
+}
+
+/* 单列:列内人物纵向堆叠(同一代兄弟纵向排列),
+ * 列右对齐,保留上方的连接点空间 */
+.shixi-col {
+  flex: 1 1 0;
+  position: relative;
+  padding: 92px 4px 12px;       /* 顶部留 92px 空间给圆圈(16+列头) */
+  border-left: 1px solid #888;
+  min-width: 110px;
+  display: flex;
+  flex-direction: column;       /* 人物纵向堆叠 */
+  align-items: flex-end;         /* 人物靠列右侧 */
+  justify-content: flex-start;   /* 从顶端开始 */
+  gap: 6px;
+  writing-mode: horizontal-tb;   /* 明确水平坐标系,人物竖排由 .shixi-person 内部生效 */
+}
+.shixi-col:last-child { border-left: 1px solid #888; }
+
+/* 列头（第X世）：水平文字块,悬浮在列顶部中央(圆圈正下方) */
+.shixi-col-header {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #d9d9d9;
+  border: 1px solid #333;
   font-family: 'KaiTi', 'Songti SC', serif;
   color: #b22222;
   font-size: 16px;
-  letter-spacing: 6px;
-  line-height: 1.4;
-}
-.shixi-page .shixi-page-footer {
-  position: absolute; bottom: 12px; right: 16px;
-  writing-mode: horizontal-tb;
-  font-size: 12px; color: #888;
-}
-.shixi-grid {
-  display: flex; flex-direction: row-reverse;
-  height: 100%;
-  gap: 12px;
-  align-items: stretch;
-}
-.shixi-col {
-  flex: 1; position: relative;
-  padding: 36px 8px 12px;
-  border-left: 1px solid #888;
-  display: flex; flex-direction: column; align-items: center;
-  writing-mode: vertical-rl;
-  min-height: 800px;
-}
-.shixi-col:last-child { border-left: 1px solid #888; }
-.shixi-col-header {
-  position: absolute; top: 0; right: 0;
-  background: #d9d9d9; border: 1px solid #333;
-  writing-mode: horizontal-tb;
-  font-family: 'KaiTi', 'Songti SC', serif;
-  color: #b22222;
-  font-size: 14px;
   font-weight: bold;
-  padding: 4px 10px;
+  padding: 5px 14px;
   letter-spacing: 4px;
+  z-index: 4;
+  white-space: nowrap;
 }
+
+/* 列顶端的小圆圈(吊线图中的“挂载节点”):
+ * 与上方的水平连接线 .shixi-connector 交叉,形成传统世系表的“轴线” */
 .shixi-col::before {
-  content: ''; position: absolute; top: -6px; left: 50%;
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: 50%;
   transform: translateX(-50%);
-  width: 10px; height: 10px;
-  border: 2px solid #333; border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #333;
+  border-radius: 50%;
   background: #fffdf6;
+  z-index: 6;                     /* 高于连接线,覆在连接线上 */
+  writing-mode: horizontal-tb;
+  box-sizing: border-box;
 }
-.shixi-col::after {
-  content: ''; position: absolute; top: -1px; left: 50%;
-  width: 100%; height: 0;
-  border-top: 1px solid #333;
-}
-.shixi-page.no-connector .shixi-col::before,
-.shixi-page.no-connector .shixi-col::after { display: none; }
+.shixi-page.no-connector .shixi-col::before { display: none; }
+
+/* 单个人物块：【姓名块】+【说明块】双列结构
+ * 整块保持水平坐标系(horizontal-tb)，内部用 flex row-reverse 让姓名块在最右、说明块在左。
+ * 这是传统中式族谱的标准结构——姓名独占一列(红色楷体大字)，
+ * 所有生平说明在姓名左侧另起一列(黑色小字)。
+ * 两个子块内部各自走 writing-mode:vertical-rl，实现中文竖排。 */
 .shixi-person {
-  margin: 16px 0;
-  text-align: center;
-  max-width: 80px;
-  writing-mode: vertical-rl;
-  line-height: 1.9;
+  display: flex;
+  flex-direction: row-reverse;   /* 姓名在右、说明在左 */
+  writing-mode: horizontal-tb;   /* 强制水平坐标系，避免被祖先 vertical-rl 干扰 */
+  align-items: flex-start;        /* 两列顶端对齐 */
+  width: auto;                    /* 宽度自适应姓名+说明宽度之和 */
+  min-height: 200px;
+  max-height: 620px;
   cursor: pointer;
   border-radius: 4px;
-  padding: 4px 2px;
+  padding: 8px 4px;
   transition: background 0.15s;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-family: 'KaiTi', 'Songti SC', 'SimSun', 'Microsoft YaHei', serif;
+  gap: 0;
 }
 .shixi-person:hover { background: #f5efdc; }
 .shixi-person.focused {
@@ -1421,32 +1565,85 @@ onMounted(async () => {
   0%, 60% { background: #f7e7b8; }
   100% { background: #fdf3dc; }
 }
-.shixi-name {
+
+/* 姓名块：独立列，红字楷体大字,姓名字符上下紧贴排列 */
+.shixi-person .shixi-name {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  text-align: center;
   font-family: 'KaiTi', 'Songti SC', serif;
-  font-size: 16px;
+  font-size: 20px;
   font-weight: bold;
   color: #b22222;
-  margin-bottom: 6px;
-  letter-spacing: 2px;
+  letter-spacing: 0;
+  line-height: 1.05;             /* 紧贴排列,名字上下字几乎相连 */
+  flex-shrink: 0;
+  /* 宽度 = font-size,保证姓名占一列 */
+  width: 20px;
 }
-.shixi-line { font-size: 12px; color: #1a1a1a; margin: 2px 0; line-height: 1.8; }
-.shixi-bio { font-size: 12px; color: #1a1a1a; margin-top: 6px; line-height: 1.9; text-align: justify; }
 
+/* 说明块：姓名左侧,黑色小字,采用**多列布局**——
+ * 每个信息字段(生卒/字号/籍贯/葬地/配偶/子女/功名)各自独立成一列,
+ * 从右向左依次排列。符合传统中式族谱"古籍附录"式从右向左读的排版习惯。
+ * 横向空间不够时,字段会自动向左换行(列方向)。*/
+.shixi-person .shixi-info {
+  display: flex;
+  flex-direction: row-reverse;     /* 从右到左排列字段 */
+  flex-wrap: wrap-reverse;         /* 横向溢出时换到下一行(向左) */
+  writing-mode: horizontal-tb;      /* 强制水平坐标系 */
+  align-items: flex-start;         /* 顶端对齐 */
+  align-content: flex-start;
+  column-gap: 4px;                 /* 字段之间水平间距 */
+  row-gap: 2px;                    /* 换行后两行之间间距 */
+  color: #1a1a1a;
+  max-width: 140px;                /* 限制总宽度,超出后字段换到下一行 */
+  min-width: 0;
+}
+/* 说明块内每个字段都是独立的列：vertical-rl + 窄字宽 */
+.shixi-person .shixi-info > div {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+  width: 10px;                     /* 字符宽度 = 字号,每个字符占一行 */
+  padding: 0;
+  color: inherit;
+  margin: 0 1px;                   /* 字段列之间留 2px 间隙 */
+}
+/* 字段类型区分(与原类名同构) */
+.shixi-person .shixi-info .shixi-year { color: #1a1a1a; }
+.shixi-person .shixi-info .shixi-line { color: #4a453e; }
+.shixi-person .shixi-info .shixi-spouse { color: #2c5282; }
+.shixi-person .shixi-info .shixi-children { color: #2c5282; }
+.shixi-person .shixi-info .shixi-achievement { color: #8b4513; font-weight: 600; }
+.shixi-person .shixi-info .shixi-bio { color: #1a1a1a; font-size: 10.5px; line-height: 2.1; }
 /* [二期] 世系表密集模式(与 PDF 后端排版一致) */
 /* 中等密集:7-12 人/代 */
-.shixi-page.condense .shixi-person { margin: 10px 0; line-height: 1.7; max-width: 76px; }
-.shixi-page.condense .shixi-name { font-size: 14px; margin-bottom: 4px; }
-.shixi-page.condense .shixi-line { font-size: 11.5px; margin: 1px 0; line-height: 1.7; }
-.shixi-page.condense .shixi-col { padding: 32px 6px 10px; }
+.shixi-page.condense .shixi-person { min-height: 160px; max-height: 560px; gap: 0; }
+.shixi-page.condense .shixi-person .shixi-name { font-size: 15px; width: 15px; line-height: 1.05; }
+.shixi-page.condense .shixi-person .shixi-info { max-width: 110px; font-size: 9px; }
+.shixi-page.condense .shixi-person .shixi-info > div { font-size: 9px; width: 9px; line-height: 1.5; margin: 0 0.5px; }
+.shixi-page.condense .shixi-person .shixi-info .shixi-bio { font-size: 8px; line-height: 1.7; }
+.shixi-page.condense .shixi-col { padding: 82px 4px 10px; gap: 4px; }
+.shixi-page.condense .shixi-col-header { font-size: 14px; padding: 4px 10px; }
+
 /* 强密集:>12 人/代(单代多列时强制启用) */
-.shixi-page.condense-strong .shixi-person { margin: 6px 0; line-height: 1.5; max-width: 70px; padding: 2px 1px; }
-.shixi-page.condense-strong .shixi-name { font-size: 13px; margin-bottom: 3px; }
-.shixi-page.condense-strong .shixi-line { font-size: 11px; margin: 1px 0; line-height: 1.5; }
-.shixi-page.condense-strong .shixi-bio { font-size: 11px; line-height: 1.6; }
-.shixi-page.condense-strong .shixi-col { padding: 30px 4px 8px; min-height: 760px; }
+.shixi-page.condense-strong .shixi-person { min-height: 120px; max-height: 460px; }
+.shixi-page.condense-strong .shixi-person .shixi-name { font-size: 14px; width: 14px; }
+.shixi-page.condense-strong .shixi-person .shixi-info { max-width: 90px; font-size: 8.5px; }
+.shixi-page.condense-strong .shixi-person .shixi-info > div { font-size: 8.5px; width: 8.5px; line-height: 1.4; margin: 0 0.5px; }
+.shixi-page.condense-strong .shixi-person .shixi-info .shixi-bio { font-size: 7.5px; line-height: 1.5; }
+.shixi-page.condense-strong .shixi-col { gap: 3px; }
+.shixi-page.condense-strong .shixi-col { padding: 72px 3px 8px; min-height: 560px; }
+.shixi-page.condense-strong .shixi-col-header { font-size: 13px; padding: 3px 8px; letter-spacing: 3px; }
+
 /* 双列页:左右双列各占一格 */
-.shixi-grid.shixi-grid-split .shixi-col { flex: 1 1 50%; }
-.shixi-grid.shixi-grid-split .shixi-col-header { font-size: 13px; padding: 3px 8px; }
+.shixi-grid.shixi-grid-split { flex-direction: row-reverse; }
+.shixi-grid.shixi-grid-split .shixi-col { flex: 1 1 50%; min-width: 200px; }
+.shixi-grid.shixi-grid-split .shixi-col-header { font-size: 14px; padding: 4px 10px; letter-spacing: 3px; }
 
 /* [二期] 批注 */
 .volume-annotations, .person-annotations {

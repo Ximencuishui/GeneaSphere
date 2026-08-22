@@ -5,14 +5,35 @@
  * 左：通知文案管理（生成 H5 通知文案，让族员通过手机号登录修改族谱信息）
  * 右：族员修改审核（族员提交的修改记录，管理员通过/拒绝）
  */
-import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import axios from 'axios'
+import BioReviewPage from '@/views/admin/BioReviewPage.vue'
 
 const route = useRoute()
+const router = useRouter()
 const clanSlug = computed(() => String(route.params.slug ?? '1'))
+const ALLOWED_TABS = ['notice', 'submissions', 'bio'] as const
+type TabKey = (typeof ALLOWED_TABS)[number]
+const activeTab = ref<TabKey>('notice')
+
+watch(() => route.query.tab, (value) => {
+  activeTab.value = ALLOWED_TABS.includes(value as TabKey) ? value as TabKey : 'notice'
+}, { immediate: true })
+
+watch(activeTab, (value) => {
+  if (route.query.tab !== value) router.replace({ query: { ...route.query, tab: value } })
+  if (value === 'notice') loadNotices()
+  if (value === 'submissions') loadSubmissions()
+})
+
+const workflowHighlight = computed(() => {
+  if (activeTab.value === 'notice') return ['notify']
+  if (activeTab.value === 'submissions') return ['member_edit']
+  return ['review']
+})
 
 // ===== 通知文案 =====
 interface Notice {
@@ -33,8 +54,8 @@ const noticeLoading = ref(false)
 async function loadNotices() {
   noticeLoading.value = true
   try {
-    // TODO: 待后端 API  GET /api/genealogy/${slug}/crowdsource/notices
-    noticeList.value = []
+    const { data } = await axios.get(`/api/genealogy/${clanSlug.value}/crowdsource/notices`)
+    noticeList.value = data?.data ?? data ?? []
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '加载通知文案失败')
   } finally {
@@ -68,7 +89,7 @@ function openCreateNotice() {
   noticeDialogVisible.value = true
 }
 
-function openEditNotice(row: Notice) {
+function openEditNotice(row: any) {
   noticeEditing.value = row
   noticeForm.value = { ...row }
   noticeDialogVisible.value = true
@@ -84,22 +105,30 @@ async function handleSaveNotice() {
     return
   }
   try {
-    // TODO: 待后端 API  POST /api/genealogy/${slug}/crowdsource/notices
-    ElMessage.warning('TODO: 通知文案保存 API 待接入')
+    const payload = { ...noticeForm.value }
+    if (noticeEditing.value?.id) {
+      await axios.put(`/api/genealogy/${clanSlug.value}/crowdsource/notices/${noticeEditing.value.id}`, payload)
+    } else {
+      await axios.post(`/api/genealogy/${clanSlug.value}/crowdsource/notices`, payload)
+    }
+    ElMessage.success('通知文案已保存')
+    noticeDialogVisible.value = false
+    await loadNotices()
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '保存失败')
   }
 }
 
-async function handleDeleteNotice(row: Notice) {
+async function handleDeleteNotice(row: any) {
   try {
     await ElMessageBox.confirm(`确认删除通知"${row.title}"？`, '删除确认', {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
     })
-    // TODO: 待后端 API  DELETE /api/genealogy/${slug}/crowdsource/notices/${row.id}
-    ElMessage.warning('TODO: 删除 API 待接入')
+    await axios.delete(`/api/genealogy/${clanSlug.value}/crowdsource/notices/${row.id}`)
+    ElMessage.success('通知文案已删除')
+    await loadNotices()
   } catch {
     /* 用户取消 */
   }
@@ -109,13 +138,13 @@ async function handleDeleteNotice(row: Notice) {
  * 生成 H5 链接（管理员可复制发送给族员；族员通过手机号登录修改）
  * 链接格式：${origin}/h5/genealogy-edit?clanSlug=${slug}&token=${token}
  */
-function buildH5Link(row: Notice): string {
+function buildH5Link(row: any): string {
   const token = row.token || row.id || 'preview-token'
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   return `${origin}/h5/genealogy-edit?clanSlug=${clanSlug.value}&token=${encodeURIComponent(String(token))}`
 }
 
-async function copyH5Link(row: Notice) {
+async function copyH5Link(row: any) {
   const link = buildH5Link(row)
   try {
     await navigator.clipboard.writeText(link)
@@ -143,8 +172,19 @@ const submissionFilter = ref<'all' | 'pending' | 'approved' | 'rejected'>('pendi
 async function loadSubmissions() {
   submissionLoading.value = true
   try {
-    // TODO: 待后端 API  GET /api/genealogy/${slug}/crowdsource/submissions?status=${submissionFilter}
-    submissionList.value = []
+    const { data } = await axios.get(`/api/genealogy/${clanSlug.value}/crowdsource/submissions`, {
+      params: { status: submissionFilter.value },
+    })
+    const rows = data?.data ?? data ?? []
+    submissionList.value = rows.map((row: any) => ({
+      ...row,
+      member_name: row.member_name || row.requester_user_id,
+      field: row.field || row.field_name,
+      before: row.before ?? row.old_value ?? '',
+      after: row.after ?? row.new_value ?? '',
+      submitted_at: row.submitted_at || row.created_at,
+      status: String(row.status || '').toLowerCase(),
+    }))
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '加载审核列表失败')
   } finally {
@@ -152,21 +192,22 @@ async function loadSubmissions() {
   }
 }
 
-async function handleApprove(row: Submission) {
+async function handleApprove(row: any) {
   try {
     await ElMessageBox.confirm(
       `通过 ${row.member_name} 的"${row.field}"修改？\n修改前：${row.before}\n修改后：${row.after}`,
       '审核通过',
       { type: 'success', confirmButtonText: '通过', cancelButtonText: '取消' },
     )
-    // TODO: 待后端 API  POST /api/genealogy/${slug}/crowdsource/submissions/${row.id}/approve
-    ElMessage.warning('TODO: 审核通过 API 待接入')
+    await axios.post(`/api/genealogy/${clanSlug.value}/crowdsource/submissions/${row.id}/approve`)
+    ElMessage.success('修改申请已通过')
+    await loadSubmissions()
   } catch {
     /* 用户取消 */
   }
 }
 
-async function handleReject(row: Submission) {
+async function handleReject(row: any) {
   try {
     const { value: reason } = await ElMessageBox.prompt(
       `拒绝 ${row.member_name} 的"${row.field}"修改？`,
@@ -178,24 +219,28 @@ async function handleReject(row: Submission) {
         cancelButtonText: '取消',
       },
     )
-    // TODO: 待后端 API  POST /api/genealogy/${slug}/crowdsource/submissions/${row.id}/reject
-    ElMessage.warning(`TODO: 拒绝 API 待接入（原因：${reason}）`)
+    await axios.post(`/api/genealogy/${clanSlug.value}/crowdsource/submissions/${row.id}/reject`, { reason })
+    ElMessage.success('修改申请已拒绝')
+    await loadSubmissions()
   } catch {
     /* 用户取消 */
   }
 }
 
 onMounted(() => {
-  loadNotices()
-  loadSubmissions()
+  if (activeTab.value === 'notice') loadNotices()
+  if (activeTab.value === 'submissions') loadSubmissions()
 })
 </script>
 
 <template>
   <div class="crowdsource-page">
-    <ElRow :gutter="20">
-      <!-- 左：通知文案管理 -->
-      <ElCol :xs="24" :lg="12">
+    <!-- 修谱工作流（顶部一目了然，并凸显与本页相关的"发通知族员 / 族员自行更改 / 审核"三个节点） -->
+    <GenealogyWorkflowBar :highlight="workflowHighlight" />
+    <ElTabs v-model="activeTab" class="crowdsource-tabs">
+      <ElTabPane label="通知文案管理" name="notice">
+        <ElRow :gutter="20">
+          <ElCol :span="24">
         <ElCard>
           <template #header>
             <div class="card-header">
@@ -208,7 +253,7 @@ onMounted(() => {
             创建通知文案，生成 H5 链接发送给族员。族员扫码或点击链接，使用手机号登录后即可修改自己的族谱信息，提交后进入右侧审核列表。
           </p>
 
-          <ElTable v-loading="noticeLoading" :data="noticeList" empty-text="暂无通知文案（TODO: 待后端 API）">
+          <ElTable v-loading="noticeLoading" :data="noticeList" empty-text="暂无通知文案">
             <ElTableColumn label="标题" prop="title" />
             <ElTableColumn label="状态" prop="status" width="100">
               <template #default="{ row }">
@@ -228,10 +273,13 @@ onMounted(() => {
             </ElTableColumn>
           </ElTable>
         </ElCard>
-      </ElCol>
+          </ElCol>
+        </ElRow>
+      </ElTabPane>
 
-      <!-- 右：族员修改审核 -->
-      <ElCol :xs="24" :lg="12">
+      <ElTabPane label="族员修改审核" name="submissions">
+        <ElRow :gutter="20">
+          <ElCol :span="24">
         <ElCard>
           <template #header>
             <div class="card-header">
@@ -245,7 +293,7 @@ onMounted(() => {
             </div>
           </template>
 
-          <ElTable v-loading="submissionLoading" :data="submissionList" empty-text="暂无修改记录（TODO: 待后端 API）">
+          <ElTable v-loading="submissionLoading" :data="submissionList" empty-text="暂无修改记录">
             <ElTableColumn label="族员" prop="member_name" width="100" />
             <ElTableColumn label="字段" prop="field" width="120" />
             <ElTableColumn label="修改前" prop="before">
@@ -267,8 +315,14 @@ onMounted(() => {
             </ElTableColumn>
           </ElTable>
         </ElCard>
-      </ElCol>
-    </ElRow>
+          </ElCol>
+        </ElRow>
+      </ElTabPane>
+
+      <ElTabPane label="生平传记审核" name="bio">
+        <BioReviewPage />
+      </ElTabPane>
+    </ElTabs>
 
     <!-- 通知文案编辑弹窗 -->
     <ElDialog

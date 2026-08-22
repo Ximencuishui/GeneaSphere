@@ -32,6 +32,39 @@
     <!-- Left: Tree Canvas -->
     <div class="tree-canvas-container">
       <!--
+        左侧世代流水标签列（M4）：纵向排列 1..N 世，hover/active 状态高亮。
+        - 绝对定位叠在画布左缘，不挤压画布可用区
+        - 总代际数 = treeRef.getTotalGenerations()，随 graphChangeVersion 变化重算
+        - 点击某代际 → 在该代际 y 最小节点上调用 focusNode（与右下角滑块口径一致）
+      -->
+      <div
+        v-if="generationSlots.length > 0"
+        class="tree-gen-rail"
+        :class="{ 'rail--hidden': showDetail, 'rail--absolute': hasViewportSnapshot }"
+      >
+        <div class="rail__title">世代</div>
+        <div class="rail__list">
+          <button
+            v-for="g in generationSlots"
+            :key="g.gen"
+            type="button"
+            class="rail__item"
+            :class="{
+              'rail__item--active': activeGen === g.gen,
+              'rail__item--offscreen': !g.inViewport,
+            }"
+            :style="g.screenY != null ? { top: g.screenY + 'px' } : undefined"
+            :title="`第 ${g.gen} 世 · ${g.count} 人`"
+            @click="focusGeneration(g.gen)"
+          >
+            <span class="rail__num">{{ g.gen }}</span>
+            <span class="rail__sep" aria-hidden="true" />
+            <span class="rail__hint">世</span>
+          </button>
+        </div>
+      </div>
+
+      <!--
         GenealogyTree 是重组件，内部依赖 @antv/g6。
         使用 defineAsyncComponent 懒加载，避免 TreePage 的 chunk 在
         GenealogyTree（以及间接的 vendor-antv）加载完成前无法执行。
@@ -438,6 +471,219 @@ const highlightActive = ref(false);
 const highlightCount = ref(0);
 const highlightNodeIds = ref<Set<string>>(new Set());
 
+// =========== 左侧世代 rail（M4）==========
+
+/** 当前聚焦的代际（1-based；null = 未选中） */
+const activeGen = ref<number | null>(null);
+
+/** 单个世代 rail item 的高度（像素）；用于越界判断 */
+const RAIL_ITEM_HEIGHT = 40;
+
+/**
+ * 代际索引：从 genealogyStore.treeData 做 DFS 算出每节点的 generation（深度+1），
+ * 然后按代际聚合计数 + 记录每个代际的首个节点 id（用于点击聚焦）。
+ *
+ * 与 GenealogyTree.getTotalGenerations 口径一致（根节点为第 1 代）。
+ * 响应 genealogyStore.treeData 变化。
+ */
+interface GenerationEntry {
+  gen: number;
+  count: number;
+  /** 该代际首个节点 id（DFS 前序；用于点击聚焦的退化方案） */
+  firstNodeId: string | null;
+  /**
+   * 相对画布容器顶部的像素 y。由 generationSlots 在 snapshot 基础上算出。
+   * - 值为 number 时：动态定位该 item 的 top
+   * - 值为 null 时：snapshot 尚未就绪，template 退化为默认间距定位
+   */
+  screenY: number | null;
+  /** 屏幕 y 是否在画布可视区（用于淡出越界世代） */
+  inViewport: boolean;
+}
+
+/**
+ * 兜底代际索引：仅在 G6 snapshot 尚未就绪时使用，避免初次渲染浮窗空白。
+ * - 仍基于 genealogyStore.treeData DFS，与老 generationIndex 等价
+ */
+function computeFallbackIndex(): GenerationEntry[] {
+  const tree = genealogyStore.treeData as any;
+  if (!tree) return [];
+  const buckets = new Map<number, { count: number; firstNodeId: string | null }>();
+  const visit = (node: any, depth: number) => {
+    if (!node) return;
+    const gen = depth + 1; // 根 = 第 1 世
+    const cur = buckets.get(gen);
+    if (!cur) {
+      buckets.set(gen, { count: 1, firstNodeId: String(node.id) });
+    } else {
+      cur.count++;
+    }
+    if (Array.isArray(node.children)) {
+      for (const c of node.children) visit(c, depth + 1);
+    }
+  };
+  visit(tree, 0);
+  const arr: GenerationEntry[] = [];
+  const maxGen = Math.max(...buckets.keys());
+  for (let g = 1; g <= maxGen; g++) {
+    const b = buckets.get(g);
+    arr.push({
+      gen: g,
+      count: b?.count ?? 0,
+      firstNodeId: b?.firstNodeId ?? null,
+      screenY: null,
+      inViewport: true,
+    });
+  }
+  return arr;
+}
+
+/**
+ * 世代浮窗渲染列表（M4+：跟随画布）。
+ *
+ * 数据流：
+ * 1. 读 treeRef.graphChangeVersion（ref.value）触发响应式；
+ * 2. 调 treeRef.getMinimapSnapshot() 拉取当前节点 + viewport 快照；
+ * 3. 按 n.gen 分组聚合，每代际取画布 y 最小值（与 focusGeneration 选代表节点口径一致）；
+ * 4. 用 G6 v5 视口变换 `screenY = (canvasY - cy) * zoom + vh/2` 换算成画布容器像素 y；
+ * 5. 越界 item 标记 inViewport=false（template 加 rail__item--offscreen 淡化）。
+ *
+ * 兜底：snapshot 为空时退回 DFS 索引（screenY=null → 默认 flex 流式布局）。
+ */
+const generationSlots = computed<GenerationEntry[]>(() => {
+  // 显式读取 graphChangeVersion 的 .value，使本 computed 能响应画布变更。
+  const tree = treeRef.value as any;
+  const version = tree?.graphChangeVersion?.value ?? 0;
+  void version; // 仅用于依赖追踪
+
+  const snap = typeof tree?.getMinimapSnapshot === 'function'
+    ? tree.getMinimapSnapshot()
+    : null;
+
+  // 快照为空（画布尚未就绪）→ 兜底
+  if (!snap || !Array.isArray(snap.nodes) || snap.nodes.length === 0) {
+    return computeFallbackIndex();
+  }
+
+  const { cy, zoom, vh } = snap.viewport;
+  // 防御性：zoom 为 0 时按 1 处理（极端边缘情况）
+  const safeZoom = zoom && Number.isFinite(zoom) ? zoom : 1;
+
+  // 按 gen 分组，聚合该代际节点的画布 y（取最小值 → 与 focusGeneration 代表节点同源）
+  const buckets = new Map<number, { count: number; minCanvasY: number; firstNodeId: string | null }>();
+  for (const n of snap.nodes as Array<{ id: string; y: number; gen?: number }>) {
+    // 配偶节点 generation=-1 → 跳过，不参与浮窗定位
+    const gen = typeof n.gen === 'number' && n.gen >= 0 ? n.gen + 1 : null;
+    if (gen == null) continue;
+    const cur = buckets.get(gen);
+    if (!cur) {
+      buckets.set(gen, { count: 1, minCanvasY: n.y, firstNodeId: n.id });
+    } else {
+      cur.count++;
+      if (n.y < cur.minCanvasY) {
+        cur.minCanvasY = n.y;
+        cur.firstNodeId = n.id;
+      }
+    }
+  }
+
+  if (buckets.size === 0) return computeFallbackIndex();
+
+  const arr: GenerationEntry[] = [];
+  const maxGen = Math.max(...buckets.keys());
+  for (let g = 1; g <= maxGen; g++) {
+    const b = buckets.get(g);
+    if (!b) {
+      // 缺失代际：仍占位（与旧行为一致），但 screenY = null → flex 流式布局
+      arr.push({ gen: g, count: 0, firstNodeId: null, screenY: null, inViewport: true });
+      continue;
+    }
+    // G6 v5 视口变换：screenY = (canvasY - cy) * zoom + vh/2
+    const screenY = (b.minCanvasY - cy) * safeZoom + vh / 2;
+    const inViewport = screenY > -RAIL_ITEM_HEIGHT && screenY < vh + RAIL_ITEM_HEIGHT;
+    arr.push({
+      gen: g,
+      count: b.count,
+      firstNodeId: b.firstNodeId,
+      screenY,
+      inViewport,
+    });
+  }
+  return arr;
+});
+
+/**
+ * 是否已从画布拿到 viewport 快照。
+ * - 为 true 时浮窗使用 absolute 定位（世代跟随画布）
+ * - 为 false 时退回到默认 flex 流式布局（依次排列）
+ * 模板中根据该值给 .tree-gen-rail 追加 `rail--absolute` 类，CSS 才启用 absolute 样式。
+ */
+const hasViewportSnapshot = computed<boolean>(() => {
+  const tree = treeRef.value as any;
+  const version = tree?.graphChangeVersion?.value ?? 0;
+  void version;
+  if (typeof tree?.getMinimapSnapshot !== 'function') return false;
+  const snap = tree.getMinimapSnapshot();
+  return !!(snap && Array.isArray(snap.nodes) && snap.nodes.length > 0);
+});
+
+/**
+ * 聚焦某代际：复用 TreeGenerationSlider 同口径（取该代际 y 最小节点 → focusNode）
+ * - 优先用 getMinimapSnapshot 计算 y 最小节点（与右下角滑块一致）
+ * - 退化用 generationIndex 中预存的 firstNodeId
+ * - 都拿不到 → ElMessage 提示
+ */
+function focusGeneration(gen: number) {
+  const tree = treeRef.value as any;
+  if (!tree) {
+    ElMessage.info('画布尚未就绪');
+    return;
+  }
+  activeGen.value = gen;
+  // [世代浮窗跟随画布 2026-08-20] 优先用 generationSlots 中预存的代表节点 id
+  // （已在 computed 中按画布 y 最小值挑出，避免重复扫描 snapshot）。
+  const slot = generationSlots.value.find((e) => e.gen === gen);
+  let targetId: string | null = slot?.firstNodeId ?? null;
+  // 退化路径：snapshot 尚未就绪或该代际无代表节点时，再读一次实时快照算一次
+  if (!targetId) {
+    const snap = typeof tree.getMinimapSnapshot === 'function' ? tree.getMinimapSnapshot() : null;
+    if (snap && Array.isArray(snap.nodes) && snap.nodes.length) {
+      const ys = snap.nodes.map((n: any) => n.y).sort((a: number, b: number) => a - b);
+      const minY = ys[0];
+      const maxY = ys[ys.length - 1];
+      const totalGen = Math.max(1, generationSlots.value.length);
+      const range = Math.max(1, maxY - minY);
+      const targetY = minY + (gen - 0.5) * (range / totalGen);
+      let bestDist = Infinity;
+      for (const n of snap.nodes) {
+        const d = Math.abs(n.y - targetY);
+        if (d < bestDist) {
+          bestDist = d;
+          targetId = n.id;
+        }
+      }
+    }
+  }
+  if (!targetId) {
+    // 最后退化：从 DFS 兑底索引里取首个节点 id
+    const fallback = computeFallbackIndex().find((e) => e.gen === gen);
+    targetId = fallback?.firstNodeId ?? null;
+  }
+  if (targetId && typeof tree.focusNode === 'function') {
+    tree.focusNode(targetId);
+  } else {
+    ElMessage.info(`第 ${gen} 世暂无节点`);
+  }
+}
+
+/** 选中节点时清掉 rail 的 active 高亮，避免误导 */
+watch(
+  () => genealogyStore.selectedNode,
+  (node) => {
+    if (node) activeGen.value = null;
+  },
+);
+
 // Get initial letter of name
 function getInitial(name: string) {
   return name ? name.charAt(0) : '?';
@@ -489,8 +735,11 @@ watch(
 );
 
 // 监听 GenealogyTree 画布变更后驱动 Minimap 和 GenerationSlider 增量刷新
+// [世代浮窗跟随画布 2026-08-20] 修正 getter：必须读 .value。
+// 旧写法 `() => treeRef.value?.graphChangeVersion` 拿到的值是 ref 对象本身，
+// 引用不会变化，watch 实际不生效。改为读 ref.value 后才能响应 afterrender / aftertransform。
 watch(
-  () => (treeRef.value as any)?.graphChangeVersion,
+  () => (treeRef.value as any)?.graphChangeVersion?.value,
   () => {
     minimapRef.value?.refreshSnapshot?.();
   },
@@ -927,6 +1176,200 @@ onMounted(() => {
   position: relative;
 }
 
+/* ================================================================
+ * 左侧世代流水标签列（M4：tree-gen-rail）
+ * - 绝对定位叠在画布左缘，不挤压画布可用区
+ * - 纵向列表，1-based 代际号 + 计数
+ * - z-index 取 15：低于画布 toolbar（z-toolbar=30），避免遮挡 G6 节点交互
+ * - 与现有 z-index 表保持一致（区间 10-29 留给画布内辅助视图）
+ * ================================================================ */
+.tree-gen-rail {
+  position: absolute;
+  top: 60px; /* 48 navbar + 12 gap */
+  left: 12px;
+  bottom: 80px; /* 给 minimap/slider 让出底部 */
+  width: 72px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 252, 248, 0.94);
+  border: 1px solid rgba(201, 169, 110, 0.28);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(93, 64, 55, 0.08);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.tree-gen-rail.rail--hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-8px);
+}
+
+.rail__title {
+  padding: 8px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  color: #8D6E63;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(201, 169, 110, 0.12), transparent);
+  border-bottom: 1px solid rgba(201, 169, 110, 0.18);
+  flex-shrink: 0;
+}
+
+.rail__list {
+  flex: 1;
+  /* [世代浮窗跟随画布 2026-08-20] 给 absolute 定位的 item 提供定位基准。
+   * - 默认仍可滚动（snapshot 未就绪时保留滚动浏览能力）
+   * - 在 .rail--absolute 模式下改为 overflow:hidden + mask-image 柔和越界项 */
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  /* 自定义滚动条：与画布色调一致 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(201, 169, 110, 0.35) transparent;
+}
+.rail__list::-webkit-scrollbar {
+  width: 4px;
+}
+.rail__list::-webkit-scrollbar-thumb {
+  background: rgba(201, 169, 110, 0.35);
+  border-radius: 2px;
+}
+.rail__list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* [世代浮窗跟随画布 2026-08-20] 画布 snapshot 就绪后启用 absolute 定位：
+ * - 隐藏滚动条（不要用户手动滚动代替画布平移）
+ * - 顶部底部加 mask-image 渐变，让越出可见区的世代 item 柔和消失
+ * - 【关键】用负 top/bottom 抵消父 .tree-gen-rail 的 absolute 偏移（top:60 / bottom:80），
+ *   让 .rail__list 的 y 范围与 G6 viewport 一致（navbar 下方 48 ~ 100vh），
+ *   这样 item 的 top = screenY 可直接与 G6 画布节点对齐 */
+.tree-gen-rail.rail--absolute .rail__list {
+  position: absolute;
+  top: -60px;
+  left: 0;
+  right: 0;
+  bottom: -80px;
+  overflow: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tree-gen-rail.rail--absolute .rail__list::-webkit-scrollbar {
+  display: none;
+}
+.tree-gen-rail.rail--absolute .rail__list {
+  /* 上下各 32px 柔和渐隐区域（对应 RAIL_ITEM_HEIGHT 附近） */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 32px,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 32px,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+}
+
+.rail__item {
+  appearance: none;
+  background: transparent;
+  border: none;
+  width: 100%;
+  padding: 6px 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  font-family: inherit;
+  color: #5D4037;
+  position: relative;
+  transition: background 0.15s ease, color 0.15s ease,
+    /* [世代浮窗跟随画布 2026-08-20] 画布平移/缩放时 item top 变化，加 0.18s 补间动画，
+     * 让世代标签轻微跟随画布动作，避免生硬跳跃 */
+    top 0.18s ease, opacity 0.2s ease;
+}
+/* [世代浮窗跟随画布 2026-08-20] absolute 模式下：item 以 top 动态定位、垂直居中 */
+.tree-gen-rail.rail--absolute .rail__item {
+  position: absolute;
+  left: 50%;
+  width: calc(100% - 8px);
+  transform: translate(-50%, -50%);
+}
+.rail__item:hover {
+  background: rgba(201, 169, 110, 0.10);
+}
+/* [世代浮窗跟随画布 2026-08-20] absolute 模式下 active 高亮条需重新定位，
+ * 覆盖上面默认的 top:6px bottom:6px（依赖父容器全高） */
+.tree-gen-rail.rail--absolute .rail__item--active {
+  background: linear-gradient(90deg, rgba(201, 169, 110, 0.22), rgba(201, 169, 110, 0.06));
+  box-shadow: 0 0 0 1px rgba(201, 169, 110, 0.4);
+}
+.rail__item--active {
+  background: linear-gradient(90deg, rgba(201, 169, 110, 0.18), rgba(201, 169, 110, 0.05));
+}
+.rail__item--active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: #C9A96E;
+  border-radius: 0 2px 2px 0;
+}
+/* [世代浮窗跟随画布 2026-08-20] absolute 模式下，item 本身已脱离 flex 流式父，
+ * ::before 的 top/bottom 高度需要按内容自适应：改成 inset 自动撑满 item 高度 */
+.tree-gen-rail.rail--absolute .rail__item--active::before {
+  top: 4px;
+  bottom: 4px;
+}
+
+/* [世代浮窗跟随画布 2026-08-20] 越界项：不接收点击，透明度降低但仍占位（与画布节点可见性对应） */
+.rail__item--offscreen {
+  opacity: 0.22;
+  pointer-events: none;
+  filter: grayscale(0.4);
+}
+
+.rail__num {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #5D4037;
+  line-height: 1;
+}
+.rail__item--active .rail__num {
+  color: #C9A96E;
+}
+
+.rail__sep {
+  width: 1px;
+  height: 12px;
+  background: rgba(201, 169, 110, 0.35);
+}
+
+.rail__hint {
+  font-size: 11px;
+  color: #8D6E63;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.rail__item--active .rail__hint {
+  color: #C9A96E;
+  font-weight: 600;
+}
+
 /* 异步加载 GenealogyTree 期间的紧凑占位：避免 vendor-antv 慢加载时整页白屏 */
 .tree-async-fallback {
   width: 100%;
@@ -1349,6 +1792,10 @@ onMounted(() => {
   .detail-panel {
     width: 360px;
   }
+  /* [M4] 左侧世代 rail 宽度压缩（代际滑块在此断点已隐藏，让位给 rail） */
+  .tree-gen-rail {
+    width: 60px;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -1358,6 +1805,22 @@ onMounted(() => {
   .detail-panel {
     width: 320px;
   }
+  /* [M4] 进一步压缩 */
+  .tree-gen-rail {
+    width: 52px;
+    top: 56px;
+  }
+  .rail__num {
+    font-size: 14px;
+  }
+  .rail__hint {
+    font-size: 10px;
+  }
+  /* [世代浮窗跟随画布 2026-08-20] 1024px 断点 .tree-gen-rail top 改为 56，
+   * .rail__list 的 negative top 同步调为 -56，保持与 G6 viewport 对齐 */
+  .tree-gen-rail.rail--absolute .rail__list {
+    top: -56px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1365,12 +1828,12 @@ onMounted(() => {
     flex-direction: column;
     height: 100vh;
   }
-  
+
   .tree-canvas-container {
     flex: 1;
     min-height: 40vh;
   }
-  
+
   .detail-panel {
     width: 100%;
     max-height: 60vh;
@@ -1378,44 +1841,113 @@ onMounted(() => {
     border-top: 2px solid rgba(201, 169, 110, 0.3);
     position: relative;
   }
-  
+
   .panel-header-actions {
     top: 12px;
     right: 12px;
   }
-  
+
   .close-panel-btn {
     width: 36px;
     height: 36px;
   }
-  
+
   .media-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .person-header {
     padding: 32px 16px 24px;
   }
-  
+
   .person-avatar {
     width: 70px !important;
     height: 70px !important;
     font-size: 28px !important;
   }
-  
+
   .person-name {
     font-size: 20px;
   }
-  
+
   .person-info-section,
   .person-actions,
   .related-media {
     padding: 16px;
   }
-  
+
   .action-buttons .el-button {
     padding: 10px 16px;
     font-size: 13px;
+  }
+
+  /* [M4] 移动端：详情面板为底部抽屉，rail 转为顶部横向 mini 条
+   * - 宽度撑满，高度压为单行；纵向列表改为水平滚动
+   * - 保留全部代际入口，不与 navbar 争高（仅在 navbar 下方贴边）
+   */
+  .tree-gen-rail {
+    width: auto;
+    max-width: calc(100% - 24px);
+    top: 56px;
+    bottom: auto;
+    left: 12px;
+    right: 12px;
+    flex-direction: row;
+    height: 36px;
+  }
+  /* [世代浮窗跟随画布 2026-08-20] 移动端：横向 mini 条不需要 absolute 定位，
+   * 重置 .rail__list 为 static 并去掉负偏移，恢复正常 flex 流式布局 */
+  .tree-gen-rail.rail--absolute .rail__list {
+    position: static;
+    top: auto;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .tree-gen-rail.rail--absolute .rail__item {
+    position: static;
+    width: auto;
+    transform: none;
+  }
+  .rail__title {
+    padding: 0 8px;
+    border-bottom: none;
+    border-right: 1px solid rgba(201, 169, 110, 0.18);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    letter-spacing: 2px;
+  }
+  .rail__list {
+    flex-direction: row;
+    padding: 0 4px;
+    gap: 0;
+  }
+  .rail__item {
+    flex-direction: row;
+    padding: 4px 8px;
+    gap: 4px;
+    width: auto;
+  }
+  .rail__item--active::before {
+    left: 4px;
+    right: 4px;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: 2px;
+  }
+  .rail__num {
+    font-size: 13px;
+  }
+  .rail__hint {
+    font-size: 10px;
+  }
+  .rail__sep {
+    width: 1px;
+    height: 10px;
   }
 }
 
@@ -1424,16 +1956,27 @@ onMounted(() => {
     grid-template-columns: repeat(2, 1fr);
     gap: 8px;
   }
-  
+
   .person-meta {
     flex-direction: row;
     flex-wrap: wrap;
     justify-content: center;
   }
-  
+
   .action-buttons .el-button {
     padding: 8px 12px;
     font-size: 12px;
+  }
+
+  /* [M4] 超窄屏：rail 进一步压缩字号 */
+  .rail__title {
+    font-size: 11px;
+  }
+  .rail__num {
+    font-size: 12px;
+  }
+  .rail__hint {
+    font-size: 9px;
   }
 }
 </style>

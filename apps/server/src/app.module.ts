@@ -35,6 +35,10 @@ import { ClanMigrationVideoModule } from './clan-migration-video/clan-migration-
 import { ClanEventVideoModule } from './clan-event-video/clan-event-video.module';
 import { CepuModule } from './cepu/cepu.module';
 import { GenealogyWorkflowModule } from './genealogy-workflow/genealogy-workflow.module';
+import { GenealogyCrowdsourceModule } from './genealogy-crowdsource/genealogy-crowdsource.module';
+import { GenealogyDraftModule } from './genealogy-draft/genealogy-draft.module';
+import { GenealogyFinalizeModule } from './genealogy-finalize/genealogy-finalize.module';
+import { GenealogyDigitizeModule } from './genealogy-digitize/genealogy-digitize.module';
 
 @Module({
   imports: [
@@ -72,6 +76,10 @@ import { GenealogyWorkflowModule } from './genealogy-workflow/genealogy-workflow
     ClanEventVideoModule,
     CepuModule,
     GenealogyWorkflowModule,
+    GenealogyCrowdsourceModule,
+    GenealogyDraftModule,
+    GenealogyFinalizeModule,
+    GenealogyDigitizeModule,
   ],
   controllers: [AppController],
   providers: [

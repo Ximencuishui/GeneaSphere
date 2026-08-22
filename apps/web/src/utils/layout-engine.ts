@@ -315,6 +315,26 @@ export class LayoutEngine {
       }
     }
 
+    // 14. 重新计算配偶边路径
+    // alignMainLineage / 整体平移会改变节点的最终坐标，而 positionSpouseNodes
+    // 阶段算出的 path 仍是旧坐标，必须同步修正，否则夫妻牵引线会偏离或消失。
+    for (const edge of edges) {
+      if (edge.kind !== 'spouse') continue;
+      const sourcePos = nodePositions.get(edge.source);
+      const targetPos = nodePositions.get(edge.target);
+      if (!sourcePos || !targetPos) continue;
+      const isSourceMain = sourcePos.x <= targetPos.x;
+      const mainPos = isSourceMain ? sourcePos : targetPos;
+      const spousePos = isSourceMain ? targetPos : sourcePos;
+      edge.path = {
+        points: [
+          { x: mainPos.x + mainPos.width / 2, y: mainPos.y },
+          { x: spousePos.x - spousePos.width / 2, y: spousePos.y },
+        ],
+        type: 'orth',
+      };
+    }
+
     const finalPositions = Array.from(nodePositions.values());
     const finalBounds = getBoundingBox(finalPositions);
 

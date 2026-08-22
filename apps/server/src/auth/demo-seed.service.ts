@@ -131,7 +131,7 @@ export class DemoSeedService implements OnModuleInit {
       const isFirstCreate = !demoClan;
       if (!demoClan) {
         demoClan = await this.prisma.clan.create({
-          data: { name: '朱熹族谱（演示）', description: this.buildClanDescription(), admin_user: { connect: { id: demoUser.id } } },
+          data: { name: '朱熹族谱（演示）', slug: 'zhuxi-demo', description: this.buildClanDescription(), admin_user: { connect: { id: demoUser.id } } },
         });
         await this.prisma.clanMember.create({ data: { clan_id: demoClan.id, user_id: demoUser.id, role: 'OWNER' } });
         const stats = await this.createDemoZhuXiGenealogy(demoClan.id);
@@ -139,6 +139,11 @@ export class DemoSeedService implements OnModuleInit {
       } else {
         const existing = await this.prisma.clanMember.findUnique({ where: { clan_id_user_id: { clan_id: demoClan.id, user_id: demoUser.id } } });
         if (!existing) await this.prisma.clanMember.create({ data: { clan_id: demoClan.id, user_id: demoUser.id, role: 'OWNER' } });
+        // [2026-08-20] 老库兼容：补齐老 demo 家族缺失的 slug 字段（老 seed 漏写）
+        if (!demoClan.slug) {
+          await this.prisma.clan.update({ where: { id: demoClan.id }, data: { slug: 'zhuxi-demo' } });
+          this.logger.log(`  ✅ 补齐 demo 家族 slug=zhuxi-demo`);
+        }
       }
       const existingMemberClan = await this.prisma.clanMember.findUnique({ where: { clan_id_user_id: { clan_id: demoClan.id, user_id: demoMemberUser.id } } });
       if (!existingMemberClan) await this.prisma.clanMember.create({ data: { clan_id: demoClan.id, user_id: demoMemberUser.id, role: 'EDITOR' } });
@@ -210,12 +215,208 @@ export class DemoSeedService implements OnModuleInit {
         });
       }
 
+      // [2026-08-20] 补齐册谱卷宗冷启动数据（卷一谱序源流 + 卷二/三世录）
+      await this.seedBookVolumes(demoClan.id, demoUser.id.toString());
+
+      // [2026-08-21] 补齐家族概况冷启动数据：精神、家规、口号、来源 + 理事会 + 修谱小组
+      await this.seedClanOverview(demoClan.id);
+
       await this.seedPlatformAdmin();
     } catch (error) {
       this.logger.error('种子数据初始化失败:', error.message);
       this.logger.error(error.stack);
     }
   }
+
+  /**
+   * 册谱卷宗冷启动：为演示家族补齐卷一谱序源流 + 卷二/三世录（幂等）。
+   * 注意：不能"存在即跳过"——老库可能已有 cepu.getVolumes() 空库自动生成的占位卷
+   * （卷一内容为"（此处录入谱序…）"占位符），必须逐卷幂等补齐，否则卷一永远停留在占位状态。
+   */
+  private async seedBookVolumes(clanId: bigint, adminUserId: string) {
+    // 卷一：谱序源流（文档卷，含姓氏源流、朱熹简介、修谱宗旨、凡例、修谱人员）
+    const volume1Content = `<h2 style="text-align:center;">朱氏族谱谱序</h2>
+<h3 style="text-align:center;color:#666;">——暨《紫阳朱氏宗谱》首修序</h3>
+<p style="text-indent:2em;">盖闻木本水源，人心敦本；春露秋霜，孝思不匮。姓氏之传，家族之系，犹江河之有源，枝叶之有根也。朱氏得姓，肇自微子，衍于沛国，播迁四方，而我闽中紫阳一脉，实理学宗师朱文公熹之后裔也。</p>
+<h4>一、姓氏源流</h4>
+<p style="text-indent:2em;">朱氏起源于曹挟邾国，战国时期去"邑"为"朱"，遂有朱姓。两汉之际，沛国朱氏为望族，世居安徽宿州。南唐永嘉陵参政朱廷畴，为紫阳朱氏入闽始祖。廷畴四世孙朱松，任福建建州尤溪县尉，携家寓居尤溪。朱松之子朱熹，字元晦，号紫阳，生于宋建炎四年（1130年），卒于庆元六年（1200年），为宋代理学集大成者，世称"朱子"。</p>
+<h4>二、家族源流</h4>
+<p style="text-indent:2em;">文公朱熹，原籍江西婺源，五世祖朱惟甫任福建建州录事参军，遂家于建宁府崇安县五夫里。曾祖朱森、祖朱绚、父朱松，世有隐德。公生于尤溪，幼随父迁居崇安，师从李侗，亲炙洛学。绍兴十八年（1148年）进士及第，历仕泉州同安主簿、知南康军、提举浙东常平茶盐公事、焕章阁待制等职。庆元党禁起，落职奉祠，筑室建阳考亭，聚徒讲学，创白鹿洞书院，亲订《白鹿洞书院学规》，为后世书院楷模。</p>
+<p style="text-indent:2em;">文公三子：长朱塾，字子厚；次朱埜，字子桀；季朱在，字子思。皆以父荫入仕，各有传述。长房朱塾之孙朱鉴，编《朱文公实纪》；季房朱在续修族谱，辑《朱子实纪》十二卷，为吾族文献之祖。自宋而元，而明，而清，以至近世，子孙繁衍，分布于闽、赣、浙、苏、皖各省，蔚为江南望族。</p>
+<h4>三、本次修谱宗旨</h4>
+<p style="text-indent:2em;">岁在乙巳，适逢文公诞辰八百九十五周年，族中贤达倡议续修族谱，以彰先德，以联族谊，以启后昆。本次修谱，遵循"存真求实"之原则，上溯源流，下续世系，旁及艺文，兼录女眷，务求周备。又值信息时代，本谱采用数字化技术编纂，可于线上浏览检索，便于海内外宗亲互联互通，共续紫阳血脉。</p>
+<h4>四、凡例</h4>
+<ul style="line-height:1.8;">
+<li>一、本谱以朱熹为一世祖，依次编排，不遗漏任何裔孙。</li>
+<li>二、男子书名，女子书氏；已嫁者随夫姓，已聘者书"字"。</li>
+<li>三、字号、籍贯、生卒年月日时、葬地，皆据实录入；无考者缺之。</li>
+<li>四、功名、官职、著述，择要记载，以彰先德。</li>
+<li>五、养子、入赘，注明其故，以明血统。</li>
+<li>六、节妇、孝子、烈女，酌情立传，以励风化。</li>
+<li>七、女性入"闺秀录"，与男性"世系录"并列，各从其类。</li>
+</ul>
+<h4>五、修谱人员名单</h4>
+<table style="width:100%;border-collapse:collapse;margin-top:8px;">
+<tr style="background:#f5f5f5;"><th style="border:1px solid #ddd;padding:8px;text-align:left;">姓名</th><th style="border:1px solid #ddd;padding:8px;text-align:left;">辈分</th><th style="border:1px solid #ddd;padding:8px;text-align:left;">职责</th></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">朱熹</td><td style="border:1px solid #ddd;padding:8px;">一世祖</td><td style="border:1px solid #ddd;padding:8px;">创始修谱（宋）</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">朱在</td><td style="border:1px solid #ddd;padding:8px;">二世</td><td style="border:1px solid #ddd;padding:8px;">续修《朱子实纪》（宋嘉定）</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">朱鉴</td><td style="border:1px solid #ddd;padding:8px;">三世</td><td style="border:1px solid #ddd;padding:8px;">编《朱文公实纪》（宋）</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">编纂委员会</td><td style="border:1px solid #ddd;padding:8px;">第28世</td><td style="border:1px solid #ddd;padding:8px;">本次续修主持</td></tr>
+</table>
+<p style="margin-top:24px;text-align:right;">朱氏族谱续修理事会 敬撰<br/>公元二〇二五年（岁次乙巳）</p>`;
+
+    // 卷一：存在但为占位符内容 → 替换为完整谱序；已完整/已编辑 → 不动
+    const vol1 = await this.prisma.bookVolume.findFirst({
+      where: { clan_id: clanId, type: 'document', sort_order: 1 },
+    });
+    if (!vol1) {
+      await this.prisma.bookVolume.create({
+        data: {
+          clan_id: clanId,
+          sort_order: 1,
+          title: '卷一 谱序源流',
+          type: 'document',
+          content: volume1Content,
+          created_by: adminUserId,
+        },
+      });
+      this.logger.log('  ✅ 卷一谱序源流已创建');
+    } else if (!vol1.content || vol1.content.includes('此处录入谱序')) {
+      await this.prisma.bookVolume.update({
+        where: { id: vol1.id },
+        data: { content: volume1Content, created_by: adminUserId },
+      });
+      this.logger.log(`  ✅ 卷一谱序源流占位内容已替换为完整谱序（id=${vol1.id}）`);
+    } else {
+      this.logger.log('  卷一谱序源流内容已完整，跳过');
+    }
+
+    // 卷二：世系录（世录卷，男性）—— 已存在则不动（保留默认/用户配置）
+    const vol2 = await this.prisma.bookVolume.findFirst({
+      where: { clan_id: clanId, type: 'shilu', sort_order: 2 },
+    });
+    if (!vol2) {
+      await this.prisma.bookVolume.create({
+        data: {
+          clan_id: clanId,
+          sort_order: 2,
+          title: '卷二 世系录',
+          type: 'shilu',
+          config: { gender_filter: 'male', layout: 'su' },
+          created_by: adminUserId,
+        },
+      });
+      this.logger.log('  ✅ 卷二世系录已创建');
+    }
+
+    // 卷三：闺秀录（世录卷，女性）—— 已存在则不动
+    const vol3 = await this.prisma.bookVolume.findFirst({
+      where: { clan_id: clanId, type: 'shilu', sort_order: 3 },
+    });
+    if (!vol3) {
+      await this.prisma.bookVolume.create({
+        data: {
+          clan_id: clanId,
+          sort_order: 3,
+          title: '卷三 闺秀录',
+          type: 'shilu',
+          config: { gender_filter: 'female', layout: 'su' },
+          created_by: adminUserId,
+        },
+      });
+      this.logger.log('  ✅ 卷三闺秀录已创建');
+    }
+
+    this.logger.log('  册谱卷宗冷启动检查完成（卷一谱序源流、卷二世系录、卷三闺秀录）');
+  }
+
+  /** 家族概况冷启动：精神、家规、口号、来源 + 理事会 + 修谱小组 */
+  private async seedClanOverview(clanId: bigint) {
+    // 1) 补齐家族基础信息（spirit / rules / slogan / origin_place）
+    const clan = await this.prisma.clan.findUnique({ where: { id: clanId } });
+    if (!clan) return;
+
+    const needUpdate =
+      !clan.slogan ||
+      !clan.origin_place ||
+      !clan.spirit ||
+      !clan.rules;
+
+    if (needUpdate) {
+      await this.prisma.clan.update({
+        where: { id: clanId },
+        data: {
+          slogan: clan.slogan || '传承朱子家训，弘扬理学精神',
+          origin_place: clan.origin_place || '江西婺源',
+          spirit: clan.spirit || '忠孝传家远，诗书继世长。\n恪守朱子家训，秉持格物致知、诚意正心、修身齐家、治国平天下之道。',
+          rules: clan.rules || '一、孝父母：百善孝为先，晨昏定省，侍奉无怠。\n二、友兄弟：手足情深，兄友弟恭，和睦相处。\n三、谨夫妇：相敬如宾，勤俭持家，共育后代。\n四、教子孙：诗书传家，以德为先，严慈相济。\n五、睦宗族：宗族和睦，守望相助，患难与共。\n六、重丧祭：慎终追远，祭祀以诚，不忘根本。\n七、崇节俭：戒奢以俭，量入为出，积善余庆。\n八、守国法：奉公守法，不涉邪僻，立身行道。',
+        },
+      });
+      this.logger.log('  ✅ 家族概况信息已补齐（口号/来源/精神/家规）');
+    }
+
+    // 2) 家族理事会成员（幂等：按姓名+clan_id判断）
+    const existingCouncil = await this.prisma.clanCouncilMember.findMany({
+      where: { clan_id: clanId },
+      select: { name: true },
+    });
+    const existingNames = new Set(existingCouncil.map((m) => m.name));
+
+    const councilMembers = [
+      { name: '朱国栋', contact: '13800001001', position: '理事长', remark: '朱熹第 25 世孙，退休教师，主持理事会工作' },
+      { name: '朱昌华', contact: '13800001002', position: '副理事长', remark: '朱熹第 26 世孙，企业家，负责外联与筹款' },
+      { name: '朱盛荣', contact: '13800001003', position: '理事', remark: '朱熹第 27 世孙，退休干部，负责族务协调' },
+      { name: '朱明德', contact: '13800001004', position: '理事', remark: '朱熹第 28 世孙，中学教师，负责文化研究' },
+      { name: '朱耀辉', contact: '13800001005', position: '监事', remark: '朱熹第 27 世孙，会计师，负责财务监督' },
+    ];
+
+    const newCouncil = councilMembers.filter((m) => !existingNames.has(m.name));
+    if (newCouncil.length > 0) {
+      await this.prisma.clanCouncilMember.createMany({
+        data: newCouncil.map((m, i) => ({
+          clan_id: clanId,
+          name: m.name,
+          contact: m.contact,
+          position: m.position,
+          sort_order: i,
+          remark: m.remark,
+        })),
+      });
+      this.logger.log(`  ✅ 家族理事会成员已创建：${newCouncil.length} 人`);
+    }
+
+    // 3) 修谱小组成员（幂等：按姓名+clan_id判断）
+    const existingRevision = await this.prisma.clanRevisionTeamMember.findMany({
+      where: { clan_id: clanId },
+      select: { name: true },
+    });
+    const existingRevisionNames = new Set(existingRevision.map((m) => m.name));
+
+    const revisionMembers = [
+      { name: '朱文斌', contact: '13800002001', duty: '主编', remark: '朱熹第 26 世孙，历史系教授，主修谱牒学' },
+      { name: '朱武强', contact: '13800002002', duty: '副主编', remark: '朱熹第 27 世孙，地方志办公室退休，负责世系考订' },
+      { name: '朱秀兰', contact: '13800002003', duty: '资料搜集', remark: '朱熹第 28 世孙女，负责走访调研、老谱收集' },
+      { name: '朱慧敏', contact: '13800002004', duty: '文字录入', remark: '朱熹第 29 世孙女，负责文字录入与校对' },
+      { name: '朱致远', contact: '13800002005', duty: '排版设计', remark: '朱熹第 28 世孙，平面设计师，负责版式设计' },
+      { name: '朱守正', contact: '13800002006', duty: '校对审核', remark: '朱熹第 25 世孙，退休编辑，负责终校把关' },
+    ];
+
+    const newRevision = revisionMembers.filter((m) => !existingRevisionNames.has(m.name));
+    if (newRevision.length > 0) {
+      await this.prisma.clanRevisionTeamMember.createMany({
+        data: newRevision.map((m, i) => ({
+          clan_id: clanId,
+          name: m.name,
+          contact: m.contact,
+          duty: m.duty,
+          sort_order: i,
+          remark: m.remark,
+        })),
+      });
+      this.logger.log(`  ✅ 修谱小组成员已创建：${newRevision.length} 人`);
+    }
+  }
+
   private async seedPlatformAdmin() {
     // 4 个角色的演示账号，统一密码 admin123，便于平台多角色权限测试。
     // 现有 seed 只创建 super 账号；此处扩展为完整 4 角色覆盖（幂等 upsert）。
@@ -263,7 +464,7 @@ export class DemoSeedService implements OnModuleInit {
   private static readonly TARGET_POPULATION = 1000;
   private static readonly CURRENT_YEAR = 2025;
   private static readonly GENERATION_YEARS = 32;
-  private static readonly ZIBEI_CHARS = ['熹','塾','埜','在','鉴','铨','潜','鋆','浚','洪','沐','深','桂','桐','森','柄','模','朴','梓','樾','楷','检','樽','栻','栉','栒','栋','梁'];
+  private static readonly ZIBEI_CHARS = ['熹','塾','埜','在','鉴','铨','潜','鋆','浚','洪','沐','深','桂','桐','森','柄','模','朴','梓','樾','楷','检','樽','栻','栉','栒','栋','梁','焕','炽','炜','炤','焘'];
   private static readonly MALE_GIVEN_NAMES = ['康','宁','安','平','泰','昌','盛','荣','华','耀','明','德','仁','义','礼','智','信','忠','孝','廉','邦','国','家','民','世','代','永','长','久','远','福','禄','寿','喜','财','源','海','山','川','林','涛','波','渊','文','武','斌','勇','强','伟','雄','辉','光','星','辰','天','地','宇','宙','鸿','志','远','翔','飞','龙','虎','豹','麟','凤','祺','瑞'];
   private static readonly MARRIAGE_SURNAMES = ['刘','陈','张','王','李','赵','黄','周','吴','徐','孙','胡','高','林','何','郭','马','罗','梁','宋','郑','谢','韩','唐','冯','于','董','萧','程','曹','袁','邓','许','傅','沈','曾','彭','吕','苏','卢','蒋','蔡','贾','丁','魏','薛','叶','阎','余','潘'];
   private static readonly FEMALE_GIVEN_NAMES = ['娘','姑','英','华','芳','芬','萍','莉','梅','兰','菊','竹','莲','荷','玉','珍','珠','翠','凤','鸾','燕','莺','蝶','娥','媛','婷','娟','秀','惠','敏','慧','巧','美','丽','倩','仪','静','娴','淑','贤','德','贞','婉','柔','云','霞','月','星','瑶','琼'];
@@ -302,6 +503,149 @@ export class DemoSeedService implements OnModuleInit {
     { name: '黄氏', gender: 'female', birth: 1265, death: 1333, generation: 5, branch: 'B' },
     { name: '罗氏', gender: 'female', birth: 1270, death: 1338, generation: 5, branch: 'C' },
   ];
+  /**
+   * 历史重点族员传记数据：与 HISTORICAL_FIGURES 一一对应。
+   * - 男性填写字号 / 籍贯 / 葬地 / 功名 / 传记
+   * - 女性填写誉称 / 葬地 / 配偶家世（马氏、朱氏、范氏等外族姓氏)
+   * - 用于册谱世系表开本预览时让“重点人物”展开信息，避免只有名字和年份。
+   */
+  private static readonly HISTORICAL_BIOS: Record<string, {
+    courtesy_name?: string;
+    native_place?: string;
+    burial_place?: string;
+    achievements?: string;
+    biography?: string;
+    marital_notes?: string;
+  }> = {
+    '朱熹': {
+      courtesy_name: '元晦、仲晦',
+      native_place: '福建路建宁府崇安县(今武夷山市)',
+      burial_place: '建阳唐石里大林谷(今福建建阳区)',
+      achievements: '南宋理学家、文学家,世称朱子,理学集大成者。',
+      biography: '号紫阳,绍兴十八年(1148)进士,历任泉州同安主簿、知南康军、提举浙东常平茶盐公事等。淳熙十四年(1187)授秘阁修撰,庆元六年(1200)卒。创白鹿洞书院,著有《四书章句集注》《周易本义》《诗集传》《楚辞集注》等,后世辑为《朱子语类》《朱文公文集》。',
+    },
+    '刘氏': {
+      native_place: '崇安五夫里',
+      burial_place: '与夫同坆',
+      marital_notes: '朱熹继配,封硕人。',
+    },
+    '朱塾': {
+      courtesy_name: '子厚',
+      native_place: '建阳崇安',
+      burial_place: '唐石里',
+      achievements: '承奉郎,父荫入仕。',
+      biography: '朱熹长子。幼承庭训,通晓经义。以父荫补承奉郎,任监潭州南岳庙。绍熙四年(1193)先于父卒,年仅三十九,朱熹深痛之,手书《亡男塾扩记》于墓中。',
+    },
+    '朱埜': {
+      courtesy_name: '子桀',
+      native_place: '建阳',
+      burial_place: '建阳后山',
+      achievements: '从事郎,迁儒林郎。',
+      biography: '朱熹次子。庆元党禁时随同远窜,后以父泽入仕,历任泉州市舶司干办公事。',
+    },
+    '朱在': {
+      courtesy_name: '子思',
+      native_place: '建阳',
+      burial_place: '唐石里',
+      achievements: '迪功郎,补官入仕。',
+      biography: '朱熹季子。自幼随父讲学,《朱子语类》多载其问对。庆元党禁解后任迪功郎,嘉定年间编刻《朱子实纪》十二卷,为后世研究朱子重要文献。',
+    },
+    '林氏': { native_place: '崇安', burial_place: '与夫同坆', marital_notes: '朱塾配,先卒。' },
+    '赵氏': { native_place: '宗室', burial_place: '建阳', marital_notes: '朱埜配,宗室女。' },
+    '范氏': { native_place: '建阳', burial_place: '唐石里', marital_notes: '朱在配。' },
+    '朱鉴': {
+      courtesy_name: '子明',
+      native_place: '建阳',
+      burial_place: '唐石里',
+      achievements: '承务郎,累迁朝奉大夫。',
+      biography: '朱塾长子。承父祖之学,潜心理学,门人称“文肃先生”。编《朱文公实纪》,刊刻于建阳。',
+    },
+    '朱铨': {
+      courtesy_name: '子衡',
+      native_place: '建阳',
+      burial_place: '唐石里',
+      achievements: '从事郎,府学教授。',
+      biography: '朱塾次子。任府学教授,后迁居婺源,开朱氏婺源支,为婺源朱氏始迁祖。',
+    },
+    '朱潜': {
+      courtesy_name: '子虚',
+      native_place: '建阳',
+      burial_place: '建阳',
+      achievements: '迪功郎。',
+      biography: '朱埜子。',
+    },
+    '朱鋆': {
+      courtesy_name: '子文',
+      native_place: '建阳',
+      burial_place: '唐石里',
+      achievements: '从事郎。',
+      biography: '朱在子。续修朱子家谱,辑《朱子实纪》。',
+    },
+    '郑氏': { native_place: '崇安', burial_place: '与夫同坆', marital_notes: '朱鉴配。' },
+    '王氏': { native_place: '婺源', burial_place: '婺源', marital_notes: '朱铨配,随夫迁婺源。' },
+    '孙氏': { native_place: '建阳', burial_place: '建阳', marital_notes: '朱潜配。' },
+    '徐氏': { native_place: '建阳', burial_place: '唐石里', marital_notes: '朱鋆配。' },
+    '朱浚': {
+      courtesy_name: '子深',
+      native_place: '婺源',
+      burial_place: '婺源',
+      achievements: '儒林郎。',
+      biography: '朱鉴子。承家学,以儒术传家。',
+    },
+    '朱洪': {
+      courtesy_name: '子大',
+      native_place: '婺源',
+      burial_place: '婺源',
+      achievements: '从事郎。',
+      biography: '朱铨子。守婺源祖业,拓展朱氏婺源分支。',
+    },
+    '朱沐': {
+      courtesy_name: '子清',
+      native_place: '建阳',
+      burial_place: '建阳',
+      achievements: '府学教谕。',
+      biography: '朱潜子。',
+    },
+    '朱深': {
+      courtesy_name: '子澄',
+      native_place: '建阳',
+      burial_place: '唐石里',
+      achievements: '从政郎。',
+      biography: '朱鋆子。',
+    },
+    '朱桂': {
+      courtesy_name: '子芬',
+      native_place: '婺源',
+      burial_place: '婺源',
+      achievements: '宣教郎。',
+      biography: '朱浚子。继承婺源支,渐成婺源望族。',
+    },
+    '朱桐': {
+      courtesy_name: '子桐',
+      native_place: '婺源',
+      burial_place: '婺源',
+      achievements: '从事郎。',
+      biography: '朱洪子。',
+    },
+    '朱森': {
+      courtesy_name: '子森',
+      native_place: '建阳',
+      burial_place: '建阳',
+      achievements: '儒学教谕。',
+      biography: '朱沐子。',
+    },
+    '朱柄': {
+      courtesy_name: '子柄',
+      native_place: '建阳',
+      burial_place: '唐石里',
+      achievements: '宣教郎。',
+      biography: '朱深子。',
+    },
+    '郭氏': { native_place: '婺源', burial_place: '婺源', marital_notes: '朱桂配。' },
+    '马氏': { native_place: '婺源', burial_place: '婺源', marital_notes: '朱桐配。' },
+    '黄氏': { native_place: '建阳', burial_place: '建阳', marital_notes: '朱森配。' },
+    '罗氏': { native_place: '建阳', burial_place: '唐石里', marital_notes: '朱柄配。' },
+  };
   private async createDemoZhuXiGenealogy(clanId: bigint) {
     const startTime = Date.now();
     this.logger.log('开始生成朱熹族谱 1000 人演示数据...');
@@ -320,6 +664,29 @@ export class DemoSeedService implements OnModuleInit {
     const createdHistorical = await this.prisma.person.createManyAndReturn({ data: historicalData });
     createdHistorical.forEach((p, idx) => { historicalMap.set(DemoSeedService.HISTORICAL_FIGURES[idx].name, p.id); });
     this.logger.log(`  [1/5] 历史核心层: ${createdHistorical.length} 人`);
+    // [2026-08-19] 为历史重点族员插入 PersonBio（字号/籍贯/葬地/功名/传记),
+    // 供册谱世系表开本预览时呈现,避免重点人物只有名字 + 年份的“空脸谱”效果。
+    // 幂等：按 person_id upsert,重复启动不会重复创建。
+    const bioData = DemoSeedService.HISTORICAL_FIGURES
+      .map((f) => DemoSeedService.HISTORICAL_BIOS[f.name])
+      .filter((b): b is NonNullable<typeof b> => !!b);
+    const personIdsWithBio = DemoSeedService.HISTORICAL_FIGURES
+      .filter((f) => !!DemoSeedService.HISTORICAL_BIOS[f.name])
+      .map((f) => historicalMap.get(f.name))
+      .filter((id): id is bigint => !!id);
+    if (bioData.length === personIdsWithBio.length && bioData.length > 0) {
+      await this.prisma.$transaction(
+        personIdsWithBio.map((pid, i) => {
+          const b = bioData[i];
+          return this.prisma.personBio.upsert({
+            where: { person_id: pid },
+            create: { person_id: pid, ...b },
+            update: b,
+          });
+        }),
+      );
+      this.logger.log(`        历史重点人物 PersonBio: ${bioData.length} 条`);
+    }
     const famIdx = new Map<string, number>();
     const familiesArr: Array<{ clan_id: bigint; husband_id: bigint | null; wife_id: bigint | null; union_type: string }> = [];
     const childrenArr: Array<{ family_key: string; child_key: string; birth_order: number }> = [];
@@ -373,16 +740,38 @@ export class DemoSeedService implements OnModuleInit {
       breedingPool.push({name: f.name, gen: f.generation, birth: f.birth, branch: f.branch || 'A', wifeName: wifeMap5.get(f.name) || null});
     }
     const usedNames = new Set<string>(DemoSeedService.HISTORICAL_FIGURES.map((f) => f.name));
+    // [2026-08-20 修复] 名字组合空间冲突：
+    //   ZIBEI_CHARS 长度 28 × MALE_GIVEN_NAMES 长度 70 = 1960 组合，理论上够用。
+    //   但 nextName 第 81 次就会生成 '朱塾明'（zibeiIdx=85,nameIdx=80），后续 LCM(28,70)=140 次后
+    //   又会回到 '朱塾明'！原 ensureUnique 重试 500 次内反复撞 usedNames，500 次后强制返回重名，
+    //   导致 1194/1314 '朱塾明'、1476/1596 '朱栋德'、1758/1878 '朱栻仁' 等多份重名 persons
+    //   插入数据库，newPersonMap.set 后写入的覆盖前面的，最终 first-id 的人成 orphan（无家庭）。
+    //   修复：nextName 维护 usedPairs 集合，仅当 (zibei, given) 未使用时才返回，从源头杜绝重名，
+    //   ensureUnique 退化为防御性兜底（理论上已不触发）。
+    const usedMalePairs = new Set<string>();
     const newPeopleData: any[] = [];
     const newFamiliesData: Array<{key:string;husbandName:string;wifeName:string|null;childNames:string[];childOrders:number[];}> = [];
+    let totalCreated = 0;
     let nameIdx = 0;
     let zibeiIdx = 5;
     const nextName = (): string => {
-      const zibei = DemoSeedService.ZIBEI_CHARS[zibeiIdx % DemoSeedService.ZIBEI_CHARS.length];
-      zibeiIdx++;
-      const given = DemoSeedService.MALE_GIVEN_NAMES[nameIdx % DemoSeedService.MALE_GIVEN_NAMES.length];
-      nameIdx++;
-      return '朱' + zibei + given;
+      // [2026-08-20 修复] ZIBEI_CHARS 扩展到 33 个字符（与 70 互质），LCM(33, 70) = 2310 >> 繁衍数 526。
+      //   原 28 字符时 LCM(28, 70) = 140，第 141 次必撞名。现在 33 字符，attempt=0 直接成功。
+      const ZIBEI_LEN = DemoSeedService.ZIBEI_CHARS.length;
+      for (let attempt = 0; attempt < ZIBEI_LEN * 70; attempt++) {
+        const z = zibeiIdx % ZIBEI_LEN;
+        const g = (nameIdx + attempt * 7) % 70;
+        const pair = `${z}_${g}`;
+        if (!usedMalePairs.has(pair)) {
+          usedMalePairs.add(pair);
+          const zibei = DemoSeedService.ZIBEI_CHARS[z];
+          zibeiIdx++;
+          const given = DemoSeedService.MALE_GIVEN_NAMES[g];
+          nameIdx++;
+          return '朱' + zibei + given;
+        }
+      }
+      throw new Error(`男名组合空间耗尽（${ZIBEI_LEN}×70 不足）`);
     };
     // [2026-08-16 修复] 女性姓名生成：旧实现 nextWifeName 用共享 nameIdx，且
     // 名字下标恒等于姓氏下标+3（ensureUnique 重试分支也恒差 5），组合空间只有 50 种，
@@ -404,22 +793,64 @@ export class DemoSeedService implements OnModuleInit {
     const ensureUnique = (baseName: string, isMale: boolean): string => {
       let nm = baseName;
       let attempt = 0;
-      while (usedNames.has(nm) && attempt < 500) {
+      while (usedNames.has(nm) && attempt < 5000) {
         if (isMale) {
-          const zibei = DemoSeedService.ZIBEI_CHARS[zibeiIdx % DemoSeedService.ZIBEI_CHARS.length];
+          // [2026-08-20 修复] nextName 改造后理论上 baseName 已是 unique，这里重试分支只作防御性兑现。
+          //   顺序递增 zibei 跳出周期，提供更长的 retry space。
           zibeiIdx++;
-          const given = DemoSeedService.MALE_GIVEN_NAMES[(nameIdx + attempt) % DemoSeedService.MALE_GIVEN_NAMES.length];
-          nm = '朱' + zibei + given;
+          const z = zibeiIdx % 28;
+          const given = DemoSeedService.MALE_GIVEN_NAMES[(nameIdx + attempt) % 70];
+          nm = '朱' + DemoSeedService.ZIBEI_CHARS[z] + given;
         } else {
           // 女性重试同样从完整组合池顺序取，保证与 usedNames 永不冲突（池容量 2500 >> 所需 ~740）
           nm = FEMALE_NAME_POOL[femaleNameCounter++ % FEMALE_NAME_POOL.length];
         }
         attempt++;
       }
+      if (usedNames.has(nm)) {
+        throw new Error('ensureUnique 5000 次重试仍撞名 ' + nm + '，需扩 names 池');
+      }
       usedNames.add(nm);
-      return nm;
+      return nm
     };
-    this.logger.log('  [3/5] 开始程序化繁衍生成新人物...');
+    // [2026-08-21] 为前5代历史人物自动补充子女，避免第6代人口突兀爆炸。
+    // 将每个第3-5代男性补齐到至少2个儿子，让家族树前5代更丰满、过渡更平滑。
+    const extraChildLinks: Array<{ familyKey: string; childName: string; birthOrder: number }> = [];
+    for (const figure of DemoSeedService.HISTORICAL_FIGURES) {
+      if (figure.gender !== 'male' || figure.generation < 3 || figure.generation > 5) continue;
+      const existingSons = DemoSeedService.HISTORICAL_FIGURES.filter(
+        (f) => f.gender === 'male' && f.father === figure.name,
+      ).length;
+      const targetSons = 2;
+      for (let i = existingSons; i < targetSons; i++) {
+        const sonGen = figure.generation + 1;
+        if (sonGen > 5) continue;
+        const sonBirth = figure.birth + 22 + i * 4;
+        const sonDeath = sonBirth + 55 + ((i * 7) % 20);
+        const zibei = DemoSeedService.ZIBEI_CHARS[(sonGen - 1) % DemoSeedService.ZIBEI_CHARS.length];
+        const given = DemoSeedService.MALE_GIVEN_NAMES[(i + figure.generation * 3) % DemoSeedService.MALE_GIVEN_NAMES.length];
+        const sonName = ensureUnique('朱' + zibei + given, true);
+        newPeopleData.push({
+          name: sonName, gender: 'male', birth: sonBirth, death: sonDeath,
+          gen: sonGen, branch: figure.branch || 'A', is_living: sonDeath >= DemoSeedService.CURRENT_YEAR,
+        });
+        totalCreated++;
+        const wifeName = ensureUnique(nextWifeName(), false);
+        const wBirth = sonBirth + 18 + (i % 5);
+        const wDeath = wBirth + 45 + ((i * 11) % 25);
+        newPeopleData.push({
+          name: wifeName, gender: 'female', birth: wBirth, death: wDeath,
+          gen: sonGen, branch: figure.branch || 'A', is_living: wDeath >= DemoSeedService.CURRENT_YEAR,
+        });
+        totalCreated++;
+        newFamiliesData.push({ key: 'F-' + sonName, husbandName: sonName, wifeName, childNames: [], childOrders: [] });
+        extraChildLinks.push({ familyKey: 'F-' + figure.name, childName: sonName, birthOrder: i + 1 });
+        if (sonGen === 5) {
+          breedingPool.push({ name: sonName, gen: sonGen, birth: sonBirth, branch: figure.branch || 'A', wifeName });
+        }
+      }
+    }
+    this.logger.log('  [3/5] 开始程序化繁衍生成新人物（已补充前5代子女 ' + totalCreated + ' 人）...');
     // 每对夫妻只允许一个 FamilyUnit（唯一约束 husband_id+wife_id+marriage_order），按丈夫名去重复用
     const familyByHusband = new Map<string, {key:string;husbandName:string;wifeName:string|null;childNames:string[];childOrders:number[];}>();
     const getCoupleFamily = (husbandName: string, wifeName: string | null) => {
@@ -432,15 +863,21 @@ export class DemoSeedService implements OnModuleInit {
       return fam;
     };
     let generation = 6;
-    let totalCreated = 0;
     const totalTarget = DemoSeedService.TARGET_POPULATION - DemoSeedService.HISTORICAL_FIGURES.length;
 
     const totalTargetByGen: Record<number, number> = {
-      6: 6, 7: 10, 8: 14, 9: 18, 10: 22, 11: 26, 12: 30, 13: 32, 14: 34, 15: 36,
-      16: 38, 17: 38, 18: 36, 19: 34, 20: 32, 21: 28, 22: 24, 23: 20, 24: 16,
-      25: 12, 26: 8, 27: 6, 28: 4, 29: 2,
+      6: 14, 7: 20, 8: 26, 9: 32, 10: 38, 11: 44, 12: 50, 13: 54, 14: 58, 15: 60,
+      16: 62, 17: 62, 18: 60, 19: 58, 20: 56, 21: 52, 22: 48, 23: 44, 24: 38,
+      25: 32, 26: 26, 27: 20, 28: 14, 29: 10, 30: 6,
     };
     const allMalesArr: Array<{name:string;gen:number;birth:number;branch:string;wifeName:string|null;}> = breedingPool.slice();
+    // [2026-08-20 修复] B 房 960 人失衡：
+    //   原算法 `fatherIdx = (i + generation * 7 + nameIdx) % allMalesArr.length`
+    //   是一个不均匀 hash，随者 allMalesArr 在代代繁衍中不断增长（房支继承自父亲），
+    //   会偏向某个 mod 位置，使得 B 房人数远超 A/C 房（曾观察 A=27 / B=960 / C=14）。
+    //   修复：显式按 1/3 拆分 A/B/C 三房，每代 targetNewMales 中 i % 3 决定本轮房支，
+    //   从该房支的男性池里就近选父亲（池空时托底任意男性，保证不中断繁衍）。
+    const BRANCHES = ['A', 'B', 'C'] as const;
     while (totalCreated < totalTarget && generation <= 30) {
       const targetNewMales = totalTargetByGen[generation] || 0;
       if (targetNewMales === 0 || allMalesArr.length === 0) {
@@ -448,8 +885,22 @@ export class DemoSeedService implements OnModuleInit {
         continue;
       }
       for (let i = 0; i < targetNewMales && totalCreated < totalTarget; i++) {
-        const fatherIdx = (i + generation * 7 + nameIdx) % allMalesArr.length;
-        const father = allMalesArr[fatherIdx];
+        // 1/3 拆分：i % 3 决定本轮儿子该入哪房
+        const targetBranch = BRANCHES[i % 3];
+        // 从该房支的男性池里就近选父亲
+        let father: typeof allMalesArr[number] | undefined;
+        for (let attempt = 0; attempt < allMalesArr.length; attempt++) {
+          const idx = (i + attempt) % allMalesArr.length;
+          if (allMalesArr[idx].branch === targetBranch) {
+            father = allMalesArr[idx];
+            break;
+          }
+        }
+        // 兜底：指定房支暂无可用男性（例如刚开启第 6 代时 B 房男性数 < i）
+        // 使用任意男性，代价是本轮失衡 1-2 人，下一代会重新平衡
+        if (!father) {
+          father = allMalesArr[i % allMalesArr.length];
+        }
         const fatherWife = father.wifeName;
         const sonName = ensureUnique(nextName(), true);
         const sonBirth = father.birth + 25 + ((i + generation) % 8);
@@ -540,6 +991,12 @@ export class DemoSeedService implements OnModuleInit {
         if (cId) newChildInserts.push({ family_id: fId, child_id: cId, birth_order: fam.childOrders[c] || (c + 1) });
       }
     }
+    // 补充的前5代子女：挂到对应历史人物/补充人物家庭中
+    for (const link of extraChildLinks) {
+      const fId = newFamilyIdMap.get(link.familyKey) ?? histFamilyIdMap.get(link.familyKey);
+      const cId = fullPersonMap.get(link.childName);
+      if (fId && cId) newChildInserts.push({ family_id: fId, child_id: cId, birth_order: link.birthOrder });
+    }
     if (newChildInserts.length > 0) {
       for (let i = 0; i < newChildInserts.length; i += CHUNK) {
         await this.prisma.familyChild.createMany({ data: newChildInserts.slice(i, i + CHUNK) });
@@ -611,6 +1068,44 @@ export class DemoSeedService implements OnModuleInit {
       this.logger.log('        depth=' + (currentDepth + 1) + ': ' + nextInserts.length + ' 条');
       currentDepth++;
     }
+
+    // 5.7) [2026-08-20] 把女性（嫁入妻子、女儿）也接入族根 ancestry 链。
+    //   原闭包表只沿 husband_id 链构造，嫁入妻子只有 self-record (depth=0)；
+    //   女儿仅 (ancestor=父, descendant=女儿, depth=1) 但无子女，无法被迭代扩展到
+    //   (ancestor=族根, descendant=女儿, depth=N)。导致后台 demographics 按世代分组时
+    //   所有女性都掉到链外，女性数 = 0，与房支分布完全不一致。
+    //   修复：为每个 family_unit.wife_id 建一条 (ancestor=族根, depth=丈夫的 depth) 记录，
+    //   同一女性亦作为某家庭 child（女儿）时本 SQL 也会自然覆盖（distinct 去重）。
+    //   幂等：ON CONFLICT DO NOTHING 兜底。
+    const root = await this.prisma.person.findFirst({
+      where: {
+        clan_id: clanId,
+        deleted_at: null,
+        descendant_links: { none: { depth: 1 } },
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+    if (root) {
+      const wifeInserts = await this.prisma.$queryRaw<Array<{ ancestor_id: bigint; descendant_id: bigint; depth: number }>>`
+        SELECT DISTINCT pa.ancestor_id, fu.wife_id AS descendant_id, pa.depth
+        FROM family_units fu
+        JOIN person_ancestry pa ON pa.descendant_id = fu.husband_id
+        WHERE fu.clan_id = ${clanId}
+          AND pa.ancestor_id = ${root.id}
+          AND fu.wife_id IS NOT NULL
+      `;
+      let wifeInserted = 0;
+      for (let i = 0; i < wifeInserts.length; i += CHUNK) {
+        const r = await this.prisma.personAncestry.createMany({
+          data: wifeInserts.slice(i, i + CHUNK),
+          skipDuplicates: true,
+        });
+        wifeInserted += r.count;
+      }
+      this.logger.log(`  [5.7] 女性 ancestry 链: ${wifeInserts.length} 条 (新插入 ${wifeInserted} 条)`);
+    }
+
     const totalPersonCount = await this.prisma.person.count({ where: { clan_id: clanId } });
     const totalFamilyCount = await this.prisma.familyUnit.count({ where: { clan_id: clanId } });
     const totalAncestryCount = await this.prisma.personAncestry.count({

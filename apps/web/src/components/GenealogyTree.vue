@@ -495,16 +495,16 @@ const viewModeConfig = computed(() => ({
     nameFontSize: 12,
     sublabelFontSize: 0,
     nodeSep: 36,
-    rankSep: 110,  // nodeHeight(64) + 间距(46)，预留配偶节点下方空间
+    rankSep: 90,  // nodeHeight(32) + 间距(58)，紧凑同时预留配偶节点下方空间
   },
   detailed: {
     nodeWidth: 34,
-    nodeHeight: 80,
+    nodeHeight: 60,
     avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 10,
     nodeSep: 36,
-    rankSep: 130,  // nodeHeight(80) + 间距(50)，预留配偶节点下方空间
+    rankSep: 96,  // nodeHeight(60) + 间距(36)，紧凑同时预留配偶节点下方空间
   },
   portrait: {
     nodeWidth: 80,
@@ -513,7 +513,7 @@ const viewModeConfig = computed(() => ({
     nameFontSize: 12,
     sublabelFontSize: 9,
     nodeSep: 32,
-    rankSep: 128,  // nodeHeight(72) + 间距(56)，预留配偶节点下方空间
+    rankSep: 110,  // nodeHeight(72) + 间距(38)，预留配偶节点下方空间
   },
   // [吊线图 2026-08-17] 传统世系吊线：子女按 child_links.mother_id 归属各妻子节点下；
   // 卡片显示排行 + 姓名 + 生卒年；过继/收养（child_type !== BIOLOGICAL）连线为虚线。
@@ -524,7 +524,7 @@ const viewModeConfig = computed(() => ({
     nameFontSize: 12,
     sublabelFontSize: 9,
     nodeSep: 32,
-    rankSep: 120,  // 预留妻子节点下方子女空间
+    rankSep: 100,  // 预留妻子节点下方子女空间
   },
   // [苏式 2026-08-19] 传统苏式谱法：竖排世系条目，字竖排、行间生卒年，
   // 卡片窄高（仿古谱"世系条"），适合纵向长卷阅读。
@@ -750,6 +750,10 @@ const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, numb
     id: String(node.id),
     label: displayName,
     data: {
+      // [世代浮窗跟随画布 2026-08-20] 节点世代深度（根 = 0，配偶 = -1 不参与浮窗定位）。
+      // 由 transformToG6Data 在 DFS 过程中直接写入；TreePage 通过 getMinimapSnapshot
+      // 读取该字段，按画布 y 投影到左侧世代浮窗。
+      generation: gen,
       gender: node.gender,
       is_living: node.is_living,
       birth_year: node.birth_date ? new Date(node.birth_date).getFullYear() : undefined,
@@ -1200,6 +1204,9 @@ const initGraph = async (data: GenealogyNode) => {
           id: sid,
           label: s.name,
           data: {
+            // [世代浮窗跟随画布 2026-08-20] 配偶节点标记为 -1，让 TreePage 在按 gen
+            // 聚合时忽略；否则这些节点会被当成"第 1 世"，污染浮窗最顶位置。
+            generation: -1,
             gender: s.gender,
             is_living: true,
             has_photo: false,
@@ -1220,6 +1227,7 @@ const initGraph = async (data: GenealogyNode) => {
           id: spouseNodeId,
           label: s.name,
           data: {
+            generation: -1,
             gender: s.gender,
             is_living: true,
             has_photo: false,
@@ -2659,6 +2667,9 @@ defineExpose({
           id: String(n.id),
           x: pos?.[0] ?? 0,
           y: pos?.[1] ?? 0,
+          // [世代浮窗跟随画布 2026-08-20] 节点世代深度（由 transformToG6Data 写入），
+          // 供 TreePage 把浮窗 item 按画布 y 投影到对应屏幕 y。配偶节点 gen=-1。
+          gen: typeof n.data?.generation === 'number' ? n.data.generation : 1,
           gender: n.data?.gender,
           isMain: n.data?.is_main_lineage === true,
           isLiving: n.data?.is_living === true,

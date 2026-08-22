@@ -34,13 +34,13 @@ export class DashboardController {
       pendingApplications,
     ] = await Promise.all([
       this.prisma.person.count({
-        where: { clan_id: clanId },
+        where: { clan_id: clanId, deleted_at: null },
       }),
       this.prisma.person.count({
-        where: { clan_id: clanId, is_living: true },
+        where: { clan_id: clanId, is_living: true, deleted_at: null },
       }),
       this.prisma.mediaArchive.count({
-        where: { clan_id: clanId },
+        where: { clan_id: clanId, deleted_at: null, media_type: 'image' },
       }),
       this.getStorageUsage(clanId),
       this.prisma.mediaReview.count({

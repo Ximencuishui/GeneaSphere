@@ -84,6 +84,8 @@ onMounted(() => {
 
 <template>
   <div class="orders-page">
+    <!-- 修谱工作流（顶部一目了然，并凸显与本页相关的"印刷出谱"节点） -->
+    <GenealogyWorkflowBar :highlight="['print']" />
     <ElCard>
       <template #header>
         <h2>印刷订单管理</h2>

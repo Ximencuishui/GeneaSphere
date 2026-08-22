@@ -20,6 +20,53 @@ const migrationStats = ref<any>(null)
 const loading = ref(false)
 const activeTab = ref('overview')
 
+/**
+ * 中文世系数：1→第一世，2→第二世，...，10→第十世，11→第十一世，...
+ * 与册谱世系表「第N世」表述一致。
+ */
+const CN_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+function genToChinese(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return String(n)
+  if (n < 10) return `第${CN_DIGITS[n]}世`
+  if (n === 10) return '第十世'
+  if (n < 20) return `第十${CN_DIGITS[n - 10]}世`
+  if (n < 100) {
+    const tens = Math.floor(n / 10)
+    const ones = n % 10
+    return ones === 0
+      ? `第${CN_DIGITS[tens]}十世`
+      : `第${CN_DIGITS[tens]}十${CN_DIGITS[ones]}世`
+  }
+  // >100 直接用阿拉伯数字
+  return `第${n}世`
+}
+
+/**
+ * 房支 A/B/C → 中文「长房/二房/三房」（参考《family-book.service.ts》中文房支命名）。
+ * 未知/null 退化为「未知」。
+ */
+const BRANCH_LABEL: Record<string, string> = {
+  A: '长房',
+  B: '二房',
+  C: '三房',
+}
+function branchToChinese(b: string): string {
+  return BRANCH_LABEL[b] ?? (b || '未知')
+}
+
+const generationRows = computed(() =>
+  (demographics.value?.by_generation ?? []).map((g: any) => ({
+    ...g,
+    generationLabel: genToChinese(g.generation),
+  })),
+)
+const branchRows = computed(() =>
+  (demographics.value?.by_branch ?? []).map((b: any) => ({
+    ...b,
+    branchLabel: branchToChinese(b.branch),
+  })),
+)
+
 const fetchOverview = async () => {
   loading.value = true
   try {
@@ -186,13 +233,23 @@ onMounted(() => {
       <el-tab-pane label="人口统计" name="demographics">
         <el-card v-if="demographics">
           <h4>按世代分布</h4>
-          <el-table :data="demographics.by_generation" stripe size="small">
-            <el-table-column prop="generation" label="世代" />
-            <el-table-column prop="total" label="总计" />
-            <el-table-column prop="male" label="男" />
-            <el-table-column prop="female" label="女" />
-            <el-table-column prop="living" label="在世" />
-            <el-table-column prop="deceased" label="已故" />
+          <el-table :data="generationRows" stripe size="small">
+            <el-table-column prop="generationLabel" label="世代" width="100" />
+            <el-table-column prop="total" label="总计" width="80" />
+            <el-table-column prop="male" label="男" width="80" />
+            <el-table-column prop="female" label="女" width="80" />
+            <el-table-column prop="living" label="在世" width="80" />
+            <el-table-column prop="deceased" label="已故" width="80" />
+          </el-table>
+
+          <h4 style="margin-top: 24px;">按房支分布</h4>
+          <el-table :data="branchRows" stripe size="small">
+            <el-table-column prop="branchLabel" label="房支" width="100" />
+            <el-table-column prop="total" label="总计" width="80" />
+            <el-table-column prop="male" label="男" width="80" />
+            <el-table-column prop="female" label="女" width="80" />
+            <el-table-column prop="living" label="在世" width="80" />
+            <el-table-column prop="deceased" label="已故" width="80" />
           </el-table>
         </el-card>
       </el-tab-pane>

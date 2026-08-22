@@ -67,6 +67,7 @@ export class GenealogyWorkflowService {
       personCount, // 族谱树已有族员数
       smsCount, // 短信发送记录数
       notificationCount, // 站内通知数
+      crowdsourceNoticeCount, // 已发送/关闭的众包通知文案数
       modReqCount, // 族员信息修改申请数
       modReqReviewedCount, // 已审核（通过/驳回）的修改申请数
       bioReviewedCount, // 已审核的生平传记数
@@ -85,6 +86,9 @@ export class GenealogyWorkflowService {
       this.prisma.person.count({ where: { clan_id: clanId } }),
       this.prisma.smsSendRecord.count({ where: { clan_id: clanId } }),
       this.prisma.notification.count({ where: { clan_id: clanId } }),
+      this.prisma.crowdsourceNotice.count({
+        where: { clan_id: clanId, status: { in: ['sent', 'closed'] } },
+      }),
       this.prisma.personModificationRequest.count({ where: { clan_id: clanId } }),
       this.prisma.personModificationRequest.count({
         where: { clan_id: clanId, status: { in: ['APPROVED', 'REJECTED'] } },
@@ -170,11 +174,13 @@ export class GenealogyWorkflowService {
         key: 'notify',
         label: '发通知族员',
         status: 'todo',
-        count: Math.max(smsCount, notificationCount),
+        count: Math.max(smsCount, notificationCount, crowdsourceNoticeCount),
         detail:
-          smsCount > 0 || notificationCount > 0
-            ? `已通过短信/微信/站内通知族员 ${Math.max(smsCount, notificationCount)} 次`
-            : '通知族员核对并补充个人信息（短信 / 微信 / 站内）',
+          crowdsourceNoticeCount > 0
+            ? `已发布 ${crowdsourceNoticeCount} 份修谱通知`
+            : smsCount > 0 || notificationCount > 0
+              ? `已产生 ${Math.max(smsCount, notificationCount)} 条短信/站内通知记录`
+              : '通知族员核对并补充个人信息（短信 / 微信 / 站内）',
         link: link('/announcements'),
       },
       {
@@ -252,6 +258,7 @@ export class GenealogyWorkflowService {
           personCount,
           smsCount,
           notificationCount,
+          crowdsourceNoticeCount,
           modReqCount,
           modReqReviewedCount,
           bioReviewedCount,
@@ -304,6 +311,7 @@ export class GenealogyWorkflowService {
       personCount: number;
       smsCount: number;
       notificationCount: number;
+      crowdsourceNoticeCount: number;
       modReqCount: number;
       modReqReviewedCount: number;
       bioReviewedCount: number;
@@ -316,7 +324,7 @@ export class GenealogyWorkflowService {
       case 'clan_created':
         return true;
       case 'notify':
-        return ctx.smsCount > 0 || ctx.notificationCount > 0;
+        return ctx.smsCount > 0 || ctx.notificationCount > 0 || ctx.crowdsourceNoticeCount > 0;
       case 'member_edit':
         return ctx.modReqCount > 0;
       case 'review':

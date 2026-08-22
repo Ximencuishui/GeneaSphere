@@ -14,10 +14,18 @@ export class AdminController {
   @ApiOperation({ summary: 'Get admin menu' })
   getMenu(@Request() req) {
     const menu = [
+      // 【家族概况】顶级直达项（无子菜单）：点击标题直接跳转至 /zupu/:slug
       {
-        title: '概况',
+        title: '家族概况',
+        path: '/zupu/:slug',
+      },
+      {
+        title: '族谱',
         children: [
-          { title: '控制面板', path: '/zupu/:slug/dashboard' },
+          // 原【数据概览】已合并到【家族概况】菜单
+          { title: '树谱', path: '/tree/:clanId' },
+          { title: '册谱', path: '/cepu/:clanId' },
+          { title: '旧谱', path: '/zupu/:slug/genealogy/old' },
         ],
       },
       {
@@ -53,8 +61,11 @@ export class AdminController {
         children: [
           { title: '隐私配置', path: '/zupu/:slug/settings/privacy' },
           { title: '字辈管理', path: '/zupu/:slug/settings/xipai' },
-          { title: '家族信息', path: '/zupu/:slug/settings/clan-info' },
+          // 原【家族信息】已合并到【家族概况】（页面右上角设置图标打开弹窗）
           { title: '云存储', path: '/zupu/:slug/settings/storage' },
+          // 家族公众号（原顶级分组，已合并到【家族管理】下）
+          { title: '公众号配置', path: '/zupu/:slug/wechat/config' },
+          { title: '公众号内容', path: '/zupu/:slug/wechat/content' },
         ],
       },
       {

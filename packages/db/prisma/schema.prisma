@@ -27,6 +27,8 @@ model User {
   audit_logs              AuditLog[]
   bio_reviews_author      BioReview[]                 @relation("BioAuthor")
   bio_reviews_reviewer    BioReview[]                 @relation("BioReviewer")
+  genealogy_drafts        GenealogyDraft[]            @relation("GenealogyDraftCreator")
+  crowdsource_notices     CrowdsourceNotice[]         @relation("CrowdsourceNoticeCreator")
   discussion_groups       DiscussionGroup[]           @relation("DiscussionGroupCreator")
   discussion_topics       GroupTopic[]                @relation("GroupTopicAuthor")
   discussion_replies      TopicReply[]                @relation("TopicReplyAuthor")
@@ -105,6 +107,13 @@ model Clan {
   name                     String                   @map("name")
   slug                     String?                  @unique @map("slug")
   description              String?                  @map("description")
+  // ========== 家族概况扩展字段（2026-08-20 菜单重构：迁移自 settings_json）==========
+  slogan                   String?                  @map("slogan") @db.VarChar(200)
+  origin_place             String?                  @map("origin_place") @db.VarChar(200)
+  logo_url                 String?                  @map("logo_url") @db.VarChar(500)
+  cover_url                String?                  @map("cover_url") @db.VarChar(500)
+  spirit                   String?                  @map("spirit") @db.Text
+  rules                    String?                  @map("rules") @db.Text
   admin_user_id            String                   @map("admin_user_id")
   settings_json            Json?                    @map("settings_json")
   created_at               DateTime                 @default(now()) @map("created_at")
@@ -162,6 +171,14 @@ model Clan {
 
   // ==================== 分享只读链接（二期） ====================
   share_links           ShareLink[]
+
+  // ==================== 修谱闭环（草稿 / 众包通知 / 旧谱项目）====================
+  genealogy_drafts    GenealogyDraft[]
+  crowdsource_notices CrowdsourceNotice[]
+
+  // ==================== 家族概况：理事会 / 修谱小组（2026-08-20 菜单重构）====================
+  council_members        ClanCouncilMember[]
+  revision_team_members  ClanRevisionTeamMember[]
 
   @@index([status])
   @@index([register_ip])
@@ -2321,6 +2338,7 @@ model GenealogyDocument {
   clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
   creator User @relation(fields: [created_by], references: [id], onDelete: Cascade)
 
+  @@unique([clan_id, version_number])
   @@index([clan_id, created_at])
   @@map("genealogy_documents")
 }
@@ -2375,4 +2393,90 @@ model ClanEventVideo {
   @@index([clan_id, created_at])
   @@index([status, created_at])
   @@map("clan_event_videos")
+}
+
+// =================== 修谱闭环：草稿 / 众包通知 / 旧谱电子化项目 ===================
+
+/// 族谱草稿（clan_created 阶段）
+/// 录入族谱名/版本号/起止世代/描述/封面，可保存/备份/提交定谱。
+model GenealogyDraft {
+  id               BigInt   @id @default(autoincrement()) @map("id")
+  clan_id          BigInt   @map("clan_id")
+  name             String   @map("name") @db.VarChar(200)
+  version          String?  @map("version") @db.VarChar(60)
+  generation_start Int?     @map("generation_start")
+  generation_end   Int?     @map("generation_end")
+  description      String?  @map("description") @db.Text
+  cover_image_url  String?  @map("cover_image_url") @db.Text
+  created_by       String   @map("created_by")
+  created_at       DateTime @default(now()) @map("created_at")
+  updated_at       DateTime @updatedAt @map("updated_at")
+
+  clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  creator User @relation("GenealogyDraftCreator", fields: [created_by], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, updated_at])
+  @@map("genealogy_drafts")
+}
+
+/// 众包通知文案（notify 阶段）
+/// 管理员创建的通知文案，生成 H5 token 后发送给族员扫码修改。
+model CrowdsourceNotice {
+  id          BigInt   @id @default(autoincrement()) @map("id")
+  clan_id     BigInt   @map("clan_id")
+  title       String   @map("title") @db.VarChar(200)
+  content     String   @map("content") @db.Text
+  start_at    DateTime? @map("start_at")
+  end_at      DateTime? @map("end_at")
+  status      String   @default("draft") @map("status") // draft | sent | closed
+  token       String   @unique @map("token") @db.VarChar(64)
+  sent_count  Int      @default(0) @map("sent_count")
+  created_by  String   @map("created_by")
+  created_at  DateTime @default(now()) @map("created_at")
+  updated_at  DateTime @updatedAt @map("updated_at")
+
+  clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  creator User @relation("CrowdsourceNoticeCreator", fields: [created_by], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, status])
+  @@index([clan_id, updated_at])
+  @@map("crowdsource_notices")
+}
+
+// =================== 家族概况：理事会 / 修谱小组（2026-08-20 菜单重构）===================
+
+/// 家族理事会成员
+model ClanCouncilMember {
+  id         BigInt   @id @default(autoincrement()) @map("id")
+  clan_id    BigInt   @map("clan_id")
+  name       String   @map("name") @db.VarChar(100)
+  contact    String   @map("contact") @db.VarChar(100)
+  position   String?  @map("position") @db.VarChar(100)
+  sort_order Int      @default(0) @map("sort_order")
+  remark     String?  @map("remark") @db.VarChar(500)
+  created_at DateTime @default(now()) @map("created_at")
+  updated_at DateTime @updatedAt @map("updated_at")
+
+  clan Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, sort_order])
+  @@map("clan_council_members")
+}
+
+/// 修谱小组成员
+model ClanRevisionTeamMember {
+  id         BigInt   @id @default(autoincrement()) @map("id")
+  clan_id    BigInt   @map("clan_id")
+  name       String   @map("name") @db.VarChar(100)
+  contact    String   @map("contact") @db.VarChar(100)
+  duty       String?  @map("duty") @db.VarChar(100)
+  sort_order Int      @default(0) @map("sort_order")
+  remark     String?  @map("remark") @db.VarChar(500)
+  created_at DateTime @default(now()) @map("created_at")
+  updated_at DateTime @updatedAt @map("updated_at")
+
+  clan Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, sort_order])
+  @@map("clan_revision_team_members")
 }

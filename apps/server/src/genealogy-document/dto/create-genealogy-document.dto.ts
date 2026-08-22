@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, IsInt, Min, Max, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsInt, Min, Max, MaxLength, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 import { GenealogyDocumentStyle } from '@prisma/client';
 
@@ -12,6 +12,11 @@ export class CreateGenealogyDocumentDto {
 
   @IsEnum(GenealogyDocumentStyle, { message: 'style 必须是有效的排版风格' })
   style!: GenealogyDocumentStyle;
+
+  @IsOptional()
+  @IsIn(['su', 'ou', 'shixi_table'], { message: 'layout 必须是 su（苏式）、ou（欧式）或 shixi_table（世系表）' })
+  @IsString()
+  layout?: 'su' | 'ou' | 'shixi_table';
 
   @IsOptional()
   @IsString()
