@@ -221,6 +221,9 @@ export class DemoSeedService implements OnModuleInit {
       // [2026-08-21] 补齐家族概况冷启动数据：精神、家规、口号、来源 + 理事会 + 修谱小组
       await this.seedClanOverview(demoClan.id);
 
+      // [2026-08-24] 补齐迁徙事件冷启动数据，让迁徙地图首次打开即有轨迹可展示
+      await this.seedMigrationEvents(demoClan.id, demoUser.id.toString());
+
       await this.seedPlatformAdmin();
     } catch (error) {
       this.logger.error('种子数据初始化失败:', error.message);
@@ -417,6 +420,181 @@ export class DemoSeedService implements OnModuleInit {
     }
   }
 
+  /**
+   * 迁徙事件冷启动：为演示家族生成若干标志性迁徙轨迹（幂等）。
+   * 事件覆盖朱熹先祖入闽、朱熹迁居考亭、后裔分迁婺源/杭州/福州/台湾等，
+   * 让迁徙地图首次打开即有 POI 与迁徙线可展示。
+   */
+  private async seedMigrationEvents(clanId: bigint, creatorId: string) {
+    const events: Array<{
+      personName?: string;
+      branch?: string;
+      from_location: string;
+      from_lat: number;
+      from_lng: number;
+      to_location: string;
+      to_lat: number;
+      to_lng: number;
+      event_year: number;
+      reason: 'WAR' | 'BUSINESS' | 'OFFICIAL' | 'RECLAMATION' | 'FAMINE' | 'OTHER';
+      description: string;
+    }> = [
+      {
+        branch: 'A',
+        from_location: '江西婺源',
+        from_lat: 29.248,
+        from_lng: 117.862,
+        to_location: '福建尤溪',
+        to_lat: 26.171,
+        to_lng: 118.193,
+        event_year: 1130,
+        reason: 'OFFICIAL',
+        description: '朱熹之父朱松任尤溪县尉，携家眷自婺源入闽，朱熹即生于尤溪。',
+      },
+      {
+        personName: '朱熹',
+        branch: 'A',
+        from_location: '福建尤溪',
+        from_lat: 26.171,
+        from_lng: 118.193,
+        to_location: '福建崇安',
+        to_lat: 27.756,
+        to_lng: 118.026,
+        event_year: 1143,
+        reason: 'OFFICIAL',
+        description: '朱松调任建州，朱熹随父迁居崇安五夫里，师从刘子翚、胡宪等。',
+      },
+      {
+        personName: '朱熹',
+        branch: 'A',
+        from_location: '福建崇安',
+        from_lat: 27.756,
+        from_lng: 118.026,
+        to_location: '福建建阳',
+        to_lat: 27.332,
+        to_lng: 118.12,
+        event_year: 1172,
+        reason: 'OTHER',
+        description: '朱熹卜居建阳考亭，在此讲学著述，世称“考亭学派”。',
+      },
+      {
+        personName: '朱铨',
+        branch: 'A',
+        from_location: '福建建阳',
+        from_lat: 27.332,
+        from_lng: 118.12,
+        to_location: '江西婺源',
+        to_lat: 29.248,
+        to_lng: 117.862,
+        event_year: 1210,
+        reason: 'OTHER',
+        description: '朱塾次子朱铨归守婺源祖业，开朱氏婺源支，为婺源朱氏始迁祖。',
+      },
+      {
+        branch: 'C',
+        from_location: '福建建阳',
+        from_lat: 27.332,
+        from_lng: 118.12,
+        to_location: '福建福州',
+        to_lat: 26.08,
+        to_lng: 119.306,
+        event_year: 1275,
+        reason: 'WAR',
+        description: '宋元鼎革之际，建阳朱氏季房一支避乱南迁福州。',
+      },
+      {
+        branch: 'A',
+        from_location: '江西婺源',
+        from_lat: 29.248,
+        from_lng: 117.862,
+        to_location: '浙江杭州',
+        to_lat: 30.274,
+        to_lng: 120.155,
+        event_year: 1368,
+        reason: 'WAR',
+        description: '元末战乱，婺源朱氏长房一支东迁杭州。',
+      },
+      {
+        branch: 'C',
+        from_location: '福建建阳',
+        from_lat: 27.332,
+        from_lng: 118.12,
+        to_location: '江苏苏州',
+        to_lat: 31.298,
+        to_lng: 120.585,
+        event_year: 1405,
+        reason: 'BUSINESS',
+        description: '明初社会安定，建阳朱氏季房从商迁苏州。',
+      },
+      {
+        branch: 'C',
+        from_location: '福建福州',
+        from_lat: 26.08,
+        from_lng: 119.306,
+        to_location: '台湾台北',
+        to_lat: 25.033,
+        to_lng: 121.565,
+        event_year: 1650,
+        reason: 'WAR',
+        description: '明清鼎革，福州朱氏季房一支东渡台湾，定居台北。',
+      },
+      {
+        branch: 'C',
+        from_location: '台湾台北',
+        from_lat: 25.033,
+        from_lng: 121.565,
+        to_location: '福建厦门',
+        to_lat: 24.479,
+        to_lng: 118.089,
+        event_year: 1985,
+        reason: 'OTHER',
+        description: '改革开放后，旅台宗亲回大陆定居厦门。',
+      },
+    ];
+
+    // 幂等：按 (from_location, to_location, event_year, branch) 去重
+    const existing = await this.prisma.migrationEvent.findMany({
+      where: { clan_id: clanId },
+      select: { from_location: true, to_location: true, event_year: true, branch: true },
+    });
+    const existingKeys = new Set(
+      existing.map((e) => `${e.from_location}|${e.to_location}|${e.event_year}|${e.branch ?? ''}`),
+    );
+
+    const personNameSet = new Set(events.map((e) => e.personName).filter((n): n is string => !!n));
+    const persons = await this.prisma.person.findMany({
+      where: { clan_id: clanId, full_name: { in: Array.from(personNameSet) } },
+      select: { id: true, full_name: true },
+    });
+    const personIdByName = new Map(persons.map((p) => [p.full_name, p.id]));
+
+    const newEvents = events
+      .filter((e) => !existingKeys.has(`${e.from_location}|${e.to_location}|${e.event_year}|${e.branch ?? ''}`))
+      .map((e) => ({
+        clan_id: clanId,
+        person_id: e.personName ? personIdByName.get(e.personName) ?? null : null,
+        branch: e.branch ?? null,
+        from_location: e.from_location,
+        from_lat: e.from_lat,
+        from_lng: e.from_lng,
+        to_location: e.to_location,
+        to_lat: e.to_lat,
+        to_lng: e.to_lng,
+        event_year: e.event_year,
+        reason: e.reason,
+        description: e.description,
+        creator_id: creatorId,
+      }));
+
+    if (newEvents.length === 0) {
+      this.logger.log('  迁徙事件冷启动数据已存在，跳过');
+      return;
+    }
+
+    await this.prisma.migrationEvent.createMany({ data: newEvents });
+    this.logger.log(`  ✅ 迁徙事件冷启动数据已创建：${newEvents.length} 条`);
+  }
+
   private async seedPlatformAdmin() {
     // 4 个角色的演示账号，统一密码 admin123，便于平台多角色权限测试。
     // 现有 seed 只创建 super 账号；此处扩展为完整 4 角色覆盖（幂等 upsert）。
@@ -462,7 +640,7 @@ export class DemoSeedService implements OnModuleInit {
     return `南宋理学家朱熹（1130-1200）后裔族谱演示，涵盖约 28 代、1000 位族人。\n\n演示族员「朱小小」：朱熹长房 30 世孙，2000 年生于福建武夷山，毕业于厦门大学软件工程系，现从事家族数字化工作。`;
   }
   private static readonly TARGET_POPULATION = 1000;
-  private static readonly CURRENT_YEAR = 2025;
+  private static readonly CURRENT_YEAR = 2026;
   private static readonly GENERATION_YEARS = 32;
   private static readonly ZIBEI_CHARS = ['熹','塾','埜','在','鉴','铨','潜','鋆','浚','洪','沐','深','桂','桐','森','柄','模','朴','梓','樾','楷','检','樽','栻','栉','栒','栋','梁','焕','炽','炜','炤','焘'];
   private static readonly MALE_GIVEN_NAMES = ['康','宁','安','平','泰','昌','盛','荣','华','耀','明','德','仁','义','礼','智','信','忠','孝','廉','邦','国','家','民','世','代','永','长','久','远','福','禄','寿','喜','财','源','海','山','川','林','涛','波','渊','文','武','斌','勇','强','伟','雄','辉','光','星','辰','天','地','宇','宙','鸿','志','远','翔','飞','龙','虎','豹','麟','凤','祺','瑞'];
@@ -904,7 +1082,11 @@ export class DemoSeedService implements OnModuleInit {
         const fatherWife = father.wifeName;
         const sonName = ensureUnique(nextName(), true);
         const sonBirth = father.birth + 25 + ((i + generation) % 8);
-        const sonDeath = sonBirth + 40 + ((nameIdx + i) % 50);
+        // 最近几代人增加存活概率，让修谱和理事会更有意义
+        const isRecentGen = generation >= 26;
+        const sonDeathBase = isRecentGen ? 85 : 40;
+        const sonDeathVar = isRecentGen ? 30 : 50;
+        const sonDeath = sonBirth + sonDeathBase + ((nameIdx + i) % sonDeathVar);
         newPeopleData.push({
           name: sonName, gender: 'male', birth: sonBirth, death: sonDeath,
           gen: generation, branch: father.branch, is_living: sonDeath >= DemoSeedService.CURRENT_YEAR,
@@ -912,7 +1094,9 @@ export class DemoSeedService implements OnModuleInit {
         totalCreated++;
         const wname = ensureUnique(nextWifeName(), false);
         const wBirth = sonBirth + 18 + ((nameIdx + i) % 8);
-        const wDeath = wBirth + 30 + ((nameIdx + i) % 55);
+        const wDeathBase = isRecentGen ? 80 : 30;
+        const wDeathVar = isRecentGen ? 25 : 55;
+        const wDeath = wBirth + wDeathBase + ((nameIdx + i) % wDeathVar);
         newPeopleData.push({
           name: wname, gender: 'female', birth: wBirth, death: wDeath,
           gen: generation, branch: father.branch, is_living: wDeath >= DemoSeedService.CURRENT_YEAR,
@@ -923,7 +1107,9 @@ export class DemoSeedService implements OnModuleInit {
         if ((nameIdx + i) % 2 === 0 && totalCreated < totalTarget) {
           const daughterName = ensureUnique(nextWifeName(), false);
           const dBirth = sonBirth + 3;
-          const dDeath = dBirth + 35 + ((nameIdx + i) % 50);
+          const dDeathBase = isRecentGen ? 82 : 35;
+          const dDeathVar = isRecentGen ? 28 : 50;
+          const dDeath = dBirth + dDeathBase + ((nameIdx + i) % dDeathVar);
           newPeopleData.push({
             name: daughterName, gender: 'female', birth: dBirth, death: dDeath,
             gen: generation, branch: father.branch, is_living: dDeath >= DemoSeedService.CURRENT_YEAR,
