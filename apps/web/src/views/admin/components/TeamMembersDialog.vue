@@ -17,7 +17,6 @@ import {
   Edit,
   Delete,
   Phone,
-  Position,
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{

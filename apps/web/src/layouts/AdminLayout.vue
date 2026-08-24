@@ -132,16 +132,7 @@ const menuItems = computed<MenuEntry[]>(() => [
     icon: 'DataLine',
     path: `/zupu/${clanSlug.value}`,
   },
-  {
-    title: '家族理事会',
-    icon: 'User',
-    path: `/zupu/${clanSlug.value}/council`,
-  },
-  {
-    title: '修谱小组',
-    icon: 'EditPen',
-    path: `/zupu/${clanSlug.value}/revision-team`,
-  },
+  // 家族理事会 / 修谱小组：已集成到「家族概况」页面内，通过卡片入口弹窗查看
   {
     title: '族谱',
     icon: 'Monitor',

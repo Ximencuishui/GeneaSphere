@@ -244,8 +244,7 @@ const routes: RouteRecordRaw[] = [
     props: true,
     children: [
       { path: '', name: 'admin-dashboard', component: () => import('@/views/admin/FamilyOverviewPage.vue'), meta: { title: '家族概况', requiresAuth: true, requiresAdmin: true } },
-      { path: 'council', name: 'admin-council', component: () => import('@/views/admin/CouncilPage.vue'), meta: { title: '家族理事会', requiresAuth: true, requiresAdmin: true } },
-      { path: 'revision-team', name: 'admin-revision-team', component: () => import('@/views/admin/RevisionTeamPage.vue'), meta: { title: '修谱小组', requiresAuth: true, requiresAdmin: true } },
+      // 家族理事会 / 修谱小组：已集成到 FamilyOverviewPage，通过入口卡片弹窗查看，不再保留独立路由
       { path: 'members', name: 'admin-members', component: () => import('@/views/admin/MembersPage.vue'), meta: { title: '族员管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/media', name: 'admin-media-reviews', component: () => import('@/views/admin/MediaReviewPage.vue'), meta: { title: '影像审核', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/bio', name: 'admin-bio-reviews', component: () => import('@/views/admin/BioReviewPage.vue'), meta: { title: '生平审核', requiresAuth: true, requiresAdmin: true } },
