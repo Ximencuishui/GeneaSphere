@@ -46,3 +46,25 @@ export const ZHUXIAOXIAO_GALLERY = [
 
 /** 家族封面图 */
 export const CLAN_COVER_IMAGE = `${PICSUM_BASE}/geneasphere-clan-zhuxi-cover/1200/400`
+
+/** 演示影像库图片（风景、人文、肖像），供相册/家族事件/迁徙地点配图使用 */
+export const DEMO_MEDIA_IMAGES = {
+  // 风景：迁徙地与故居
+  wuyuanVillage: `${PICSUM_BASE}/zhuxi-wuyuan-village/800/600`,
+  wuyishanCliff: `${PICSUM_BASE}/zhuxi-wuyishan-cliff/800/600`,
+  jianyangAcademy: `${PICSUM_BASE}/zhuxi-jianyang-academy/800/600`,
+  hangzhouWestLake: `${PICSUM_BASE}/zhuxi-hangzhou-westlake/800/600`,
+  fuzhouThreeLanes: `${PICSUM_BASE}/zhuxi-fuzhou-3lanes/800/600`,
+  suzhouGarden: `${PICSUM_BASE}/zhuxi-suzhou-garden/800/600`,
+  taipeiNight: `${PICSUM_BASE}/zhuxi-taipei-night/800/600`,
+  xiamenGulangyu: `${PICSUM_BASE}/zhuxi-xiamen-gulangyu/800/600`,
+  // 人文：祭祀与聚会
+  ancestorWorship1: `${PICSUM_BASE}/zhuxi-ancestor-worship-1/800/600`,
+  ancestorWorship2: `${PICSUM_BASE}/zhuxi-ancestor-worship-2/800/600`,
+  genealogyHall: `${PICSUM_BASE}/zhuxi-genealogy-hall/800/600`,
+  familyReunion: `${PICSUM_BASE}/zhuxi-family-reunion/800/600`,
+  // 肖像
+  zhuxiPortrait: `${PICSUM_BASE}/zhuxi-zhuxi-portrait/600/800`,
+  zhuquanPortrait: `${PICSUM_BASE}/zhuxi-zhuquan-portrait/600/800`,
+  zhuxiaoxiaoPhoto: `${PICSUM_BASE}/zhuxi-zhuxiaoxiao-photo/600/800`,
+}

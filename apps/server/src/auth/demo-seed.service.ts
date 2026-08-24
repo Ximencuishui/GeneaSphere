@@ -1,5 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaClient, Gender } from '@geneasphere/db';
+import {
+  ReviewStatus,
+  ApplicationStatus,
+  ModificationStatus,
+  RelationChangeStatus,
+} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import {
   ADMIN_AVATAR,
@@ -8,6 +14,7 @@ import {
   MALE_AVATAR,
   FEMALE_AVATAR,
   CLAN_COVER_IMAGE,
+  DEMO_MEDIA_IMAGES,
 } from './demo-assets';
 /**
  * 演示种子数据服务 - 朱熹族谱版（1000 人）
@@ -28,15 +35,41 @@ export class DemoSeedService implements OnModuleInit {
     ).map((p) => p.id);
     const personIdList = personIds.length > 0 ? personIds : [-1n];
 
-    // 2) 整段包进事务：任一步失败整体回滚，避免 familyUnit 残留撞 unique 约束
+    // 2) 整段包进事务：任一步失败整体回滚，避免 familyUnit 残留撞 unique 约束。
+    //    随着演示数据增多，删除 1000+ 人物及关联记录可能超过默认 5s 事务超时，
+    //    故将超时延长至 60s。
     await this.prisma.$transaction(async (tx) => {
-      // a) 删 familyChild：先按 family.clan_id 清；再扫孤儿（family.clan_id != clanId
+      // a) 删各类审批/申请记录（多表引用 person_id，必须先清）
+      await tx.familyRelationChange.deleteMany({ where: { clan_id: clanId } });
+      await tx.personModificationRequest.deleteMany({ where: { clan_id: clanId } });
+      await tx.mergeApplication.deleteMany({ where: { clan_id: clanId } });
+      await tx.bioReview.deleteMany({ where: { person_id: { in: personIdList } } });
+
+      // b) 删影像及关联审核（按 clan_id 清，避免旧数据残留）
+      await tx.mediaReview.deleteMany({ where: { media: { clan_id: clanId } } });
+      await tx.migrationLocationMedia.deleteMany({ where: { clan_id: clanId } });
+      await tx.mediaPersonLink.deleteMany({ where: { media: { clan_id: clanId } } });
+      await tx.mediaArchive.deleteMany({ where: { clan_id: clanId } });
+      await tx.clanAlbum.deleteMany({ where: { clan_id: clanId } });
+
+      // c) 删公告、家族大事件、迁徙事件、册谱卷宗等 clan 级数据
+      await tx.clanAnnouncement.deleteMany({ where: { clan_id: clanId } });
+      await tx.familyEvent.deleteMany({ where: { clan_id: clanId } });
+      await tx.migrationEvent.deleteMany({ where: { clan_id: clanId } });
+      await tx.bookAnnotation.deleteMany({ where: { volume: { clan_id: clanId } } });
+      await tx.bookVolume.deleteMany({ where: { clan_id: clanId } });
+      await tx.dataSnapshot.deleteMany({ where: { clan_id: clanId } });
+      await tx.privacySetting.deleteMany({ where: { clan_id: clanId } });
+      await tx.clanCouncilMember.deleteMany({ where: { clan_id: clanId } });
+      await tx.clanRevisionTeamMember.deleteMany({ where: { clan_id: clanId } });
+
+      // d) 删 familyChild：先按 family.clan_id 清；再扫孤儿（family.clan_id != clanId
       //    但 child_id 引用本家族 person 的记录），避免下次重建时 family_unit 还残留
       //    child 关系导致 UNIQUE 冲突
       await tx.familyChild.deleteMany({ where: { family: { clan_id: clanId } } });
       await tx.familyChild.deleteMany({ where: { child_id: { in: personIdList } } });
 
-      // b) 删 familyUnit：按 clan_id 清；再扫孤儿 family_unit（clan_id != 目标 clanId
+      // e) 删 familyUnit：按 clan_id 清；再扫孤儿 family_unit（clan_id != 目标 clanId
       //    但 husband/wife 引用本家族 person 的）—— 这是上次 TRUNCATE CASCADE 没清干净的
       //    来源。直接按 husband_id/wife_id IN personIdList 兜底，确保彻底干净
       await tx.familyUnit.deleteMany({ where: { clan_id: clanId } });
@@ -49,7 +82,7 @@ export class DemoSeedService implements OnModuleInit {
         },
       });
 
-      // c) 删 personAncestry（闭包表）：ancestor 或 descendant 任一引用本家族 person 即清
+      // f) 删 personAncestry（闭包表）：ancestor 或 descendant 任一引用本家族 person 即清
       await tx.personAncestry.deleteMany({
         where: {
           OR: [
@@ -59,9 +92,9 @@ export class DemoSeedService implements OnModuleInit {
         },
       });
 
-      // d) 最后才删 person，避免在 familyChild/familyUnit 还引用时触发外键报错
+      // g) 最后才删 person，避免在外键还引用时触发外键报错
       await tx.person.deleteMany({ where: { clan_id: clanId } });
-    });
+    }, { timeout: 60000 });
 
     this.logger.log(`已清空家族 ${clanId} 的人物/家庭/祖先关系（含孤儿记录兜底清理，共 ${personIds.length} 人）`);
   }
@@ -223,6 +256,13 @@ export class DemoSeedService implements OnModuleInit {
 
       // [2026-08-24] 补齐迁徙事件冷启动数据，让迁徙地图首次打开即有轨迹可展示
       await this.seedMigrationEvents(demoClan.id, demoUser.id.toString());
+
+      // [2026-08-24] 补齐图片影像类演示数据：相册、影像、人物关联、家族大事件、迁徙地点配图
+      await this.seedMediaDemoData(demoClan.id, demoUser.id.toString());
+
+      // [2026-08-24] 补齐公告与各类审批演示数据
+      await this.seedAnnouncements(demoClan.id, demoUser.id.toString());
+      await this.seedReviewAndApprovalData(demoClan.id, demoUser.id.toString(), demoMemberUser.id.toString());
 
       await this.seedPlatformAdmin();
     } catch (error) {
@@ -595,6 +635,619 @@ export class DemoSeedService implements OnModuleInit {
     this.logger.log(`  ✅ 迁徙事件冷启动数据已创建：${newEvents.length} 条`);
   }
 
+  /**
+   * 图片影像类冷启动：为演示家族生成相册、影像、人物关联、家族大事件、迁徙地点配图（幂等）。
+   * 覆盖影像库、家族相册、家族大事件、迁徙地图 POI 配图等模块。
+   */
+  private async seedMediaDemoData(clanId: bigint, creatorId: string) {
+    // 1) 创建相册（幂等：按名称去重）
+    const albumSeeds = [
+      { name: '宗祠故居', description: '宗祠、故居与祖地风貌', cover_url: DEMO_MEDIA_IMAGES.genealogyHall },
+      { name: '祭祖大典', description: '清明、冬至祭祖活动影像', cover_url: DEMO_MEDIA_IMAGES.ancestorWorship1 },
+      { name: '历代先祖', description: '重点历史人物肖像与简介', cover_url: DEMO_MEDIA_IMAGES.zhuxiPortrait },
+      { name: '家族聚会', description: '宗亲联谊与家族活动', cover_url: DEMO_MEDIA_IMAGES.familyReunion },
+      { name: '迁徙风光', description: '迁徙沿途与定居地风光', cover_url: DEMO_MEDIA_IMAGES.hangzhouWestLake },
+    ];
+    const existingAlbums = await this.prisma.clanAlbum.findMany({
+      where: { clan_id: clanId },
+      select: { id: true, name: true },
+    });
+    const existingAlbumNames = new Set(existingAlbums.map((a) => a.name));
+    const albumsToCreate = albumSeeds.filter((a) => !existingAlbumNames.has(a.name));
+    const createdAlbums = await this.prisma.clanAlbum.createManyAndReturn({
+      data: albumsToCreate.map((a) => ({
+        clan_id: clanId,
+        name: a.name,
+        description: a.description,
+        cover_url: a.cover_url,
+        default_privacy: 'clan' as const,
+        creator_id: creatorId,
+      })),
+    });
+    const allAlbums = [...existingAlbums, ...createdAlbums];
+    const albumIdByName = new Map(allAlbums.map((a) => [a.name, a.id]));
+    if (createdAlbums.length > 0) {
+      this.logger.log(`  ✅ 家族相册已创建：${createdAlbums.length} 个`);
+    }
+
+    // 2) 创建影像（幂等：按 file_url + clan_id 去重）
+    const mediaSeeds = [
+      // 宗祠故居
+      { key: 'wuyuanVillage', album: '宗祠故居', category: '风景', taken_year: 2024, taken_location: '江西婺源', description: '婺源朱氏祖地古村风貌' },
+      { key: 'wuyishanCliff', album: '宗祠故居', category: '风景', taken_year: 2024, taken_location: '福建武夷山', description: '崇安五夫里故居周边武夷山景' },
+      { key: 'jianyangAcademy', album: '宗祠故居', category: '风景', taken_year: 2023, taken_location: '福建建阳', description: '建阳考亭书院旧址' },
+      { key: 'genealogyHall', album: '宗祠故居', category: '建筑', taken_year: 2024, taken_location: '福建建阳', description: '朱氏宗祠正殿' },
+      // 祭祖大典
+      { key: 'ancestorWorship1', album: '祭祖大典', category: '活动', taken_year: 2024, taken_location: '福建建阳', description: '清明朱氏宗亲祭祖仪式' },
+      { key: 'ancestorWorship2', album: '祭祖大典', category: '活动', taken_year: 2023, taken_location: '江西婺源', description: '冬至婺源支祭祖典礼' },
+      // 历代先祖
+      { key: 'zhuxiPortrait', album: '历代先祖', category: '肖像', taken_year: 1200, taken_location: '福建建阳', description: '朱熹画像' },
+      { key: 'zhuquanPortrait', album: '历代先祖', category: '肖像', taken_year: 1260, taken_location: '江西婺源', description: '朱铨画像，婺源朱氏始迁祖' },
+      { key: 'zhuxiaoxiaoPhoto', album: '历代先祖', category: '肖像', taken_year: 2024, taken_location: '福建武夷山', description: '朱熹第 30 世孙朱小小' },
+      // 家族聚会
+      { key: 'familyReunion', album: '家族聚会', category: '活动', taken_year: 2024, taken_location: '福建厦门', description: '海峡两岸朱氏宗亲联谊会' },
+      // 迁徙风光
+      { key: 'hangzhouWestLake', album: '迁徙风光', category: '风景', taken_year: 2023, taken_location: '浙江杭州', description: '婺源支东迁杭州，西湖春色' },
+      { key: 'fuzhouThreeLanes', album: '迁徙风光', category: '风景', taken_year: 2022, taken_location: '福建福州', description: '建阳季房避乱迁福州，三坊七巷' },
+      { key: 'suzhouGarden', album: '迁徙风光', category: '风景', taken_year: 2021, taken_location: '江苏苏州', description: '建阳季房从商迁苏州，园林风光' },
+      { key: 'taipeiNight', album: '迁徙风光', category: '风景', taken_year: 2020, taken_location: '台湾台北', description: '福州支东渡台湾，台北夜景' },
+      { key: 'xiamenGulangyu', album: '迁徙风光', category: '风景', taken_year: 2024, taken_location: '福建厦门', description: '旅台宗亲回大陆定居厦门，鼓浪屿' },
+    ] as const;
+
+    const existingMedia = await this.prisma.mediaArchive.findMany({
+      where: { clan_id: clanId, file_url: { in: mediaSeeds.map((m) => DEMO_MEDIA_IMAGES[m.key]) } },
+      select: { id: true, file_url: true, album_id: true },
+    });
+    const existingMediaUrls = new Set(existingMedia.map((m) => m.file_url));
+    const mediaToCreate = mediaSeeds.filter((m) => !existingMediaUrls.has(DEMO_MEDIA_IMAGES[m.key]));
+
+    const createdMedia = await this.prisma.mediaArchive.createManyAndReturn({
+      data: mediaToCreate.map((m) => {
+        const url = DEMO_MEDIA_IMAGES[m.key];
+        return {
+          clan_id: clanId,
+          uploader_id: creatorId,
+          file_url: url,
+          display_url: url,
+          thumb_url: url,
+          taken_year: m.taken_year,
+          taken_location: m.taken_location,
+          description: m.description,
+          category: m.category,
+          media_type: 'image',
+          file_size: 0n,
+          album_id: albumIdByName.get(m.album) ?? null,
+          privacy_level: 'clan' as const,
+        };
+      }),
+    });
+    const allMedia = [...existingMedia, ...createdMedia];
+    const mediaIdByUrl = new Map(allMedia.map((m) => [m.file_url, m.id]));
+    if (createdMedia.length > 0) {
+      this.logger.log(`  ✅ 影像文件已创建：${createdMedia.length} 张`);
+    }
+
+    // 更新相册封面计数（createManyAndReturn 未触发计数，手动补齐）
+    for (const album of allAlbums) {
+      const count = allMedia.filter((m) => m.album_id === album.id).length;
+      if (count > 0) {
+        await this.prisma.clanAlbum.update({
+          where: { id: album.id },
+          data: { photo_count: count },
+        });
+      }
+    }
+
+    // 3) 人物关联：肖像 ↔ 族谱人物（幂等：按 media_id + person_id）
+    const personLinks = [
+      { url: DEMO_MEDIA_IMAGES.zhuxiPortrait, personName: '朱熹' },
+      { url: DEMO_MEDIA_IMAGES.zhuquanPortrait, personName: '朱铨' },
+      { url: DEMO_MEDIA_IMAGES.zhuxiaoxiaoPhoto, personName: '朱小小' },
+    ];
+    const personNameSet = new Set(personLinks.map((p) => p.personName));
+    const persons = await this.prisma.person.findMany({
+      where: { clan_id: clanId, full_name: { in: Array.from(personNameSet) } },
+      select: { id: true, full_name: true },
+    });
+    const personIdByName = new Map(persons.map((p) => [p.full_name, p.id]));
+
+    const linkInserts = personLinks
+      .map((p) => ({ media_id: mediaIdByUrl.get(p.url), person_id: personIdByName.get(p.personName) }))
+      .filter((p): p is { media_id: bigint; person_id: bigint } => !!p.media_id && !!p.person_id);
+
+    if (linkInserts.length > 0) {
+      const result = await this.prisma.mediaPersonLink.createMany({ data: linkInserts, skipDuplicates: true });
+      if (result.count > 0) {
+        this.logger.log(`  ✅ 影像人物关联已创建：${result.count} 条`);
+      }
+    }
+
+    // 4) 家族大事件（幂等：按 event_name + event_year + clan_id 去重）
+    const familyEventSeeds = [
+      { event_name: '朱熹诞生', event_type: 'birth' as const, event_year: 1130, location: '福建尤溪', description: '南宋理学家朱熹出生于尤溪郑氏草堂。' },
+      { event_name: '朱熹进士及第', event_type: 'other' as const, event_year: 1148, location: '临安', description: '朱熹绍兴十八年进士及第，授泉州同安主簿。' },
+      { event_name: '迁居建阳考亭', event_type: 'other' as const, event_year: 1172, location: '福建建阳', description: '朱熹卜居建阳考亭，创立考亭学派。' },
+      { event_name: '朱熹逝世', event_type: 'death' as const, event_year: 1200, location: '福建建阳', description: '朱熹卒于建阳考亭，享年七十一岁。' },
+      { event_name: '朱氏宗亲联谊会', event_type: 'gathering' as const, event_year: 2024, location: '福建厦门', description: '海峡两岸朱熹后裔齐聚厦门，共叙宗谊。' },
+    ];
+    const existingEvents = await this.prisma.familyEvent.findMany({
+      where: { clan_id: clanId },
+      select: { event_name: true, event_year: true },
+    });
+    const existingEventKeys = new Set(existingEvents.map((e) => `${e.event_name}|${e.event_year}`));
+    const familyReunionMediaId = mediaIdByUrl.get(DEMO_MEDIA_IMAGES.familyReunion);
+    const eventsToCreate = familyEventSeeds
+      .filter((e) => !existingEventKeys.has(`${e.event_name}|${e.event_year}`))
+      .map((e) => ({
+        clan_id: clanId,
+        event_name: e.event_name,
+        event_type: e.event_type,
+        event_year: e.event_year,
+        event_date: null,
+        location: e.location,
+        description: e.description,
+        created_by: creatorId,
+        media_ids: e.event_name === '朱氏宗亲联谊会' && familyReunionMediaId
+          ? [familyReunionMediaId.toString()]
+          : [],
+      }));
+
+    if (eventsToCreate.length > 0) {
+      await this.prisma.familyEvent.createMany({
+        data: eventsToCreate.map((e) => ({
+          ...e,
+          media_ids: e.media_ids.length > 0 ? (JSON.stringify(e.media_ids) as any) : null,
+        })),
+      });
+      this.logger.log(`  ✅ 家族大事件冷启动数据已创建：${eventsToCreate.length} 条`);
+    }
+
+    // 5) 迁徙地点配图（幂等：按 location_name + media_id）
+    const locationMediaLinks = [
+      { location: '江西婺源', url: DEMO_MEDIA_IMAGES.wuyuanVillage },
+      { location: '福建建阳', url: DEMO_MEDIA_IMAGES.jianyangAcademy },
+      { location: '福建崇安', url: DEMO_MEDIA_IMAGES.wuyishanCliff },
+      { location: '浙江杭州', url: DEMO_MEDIA_IMAGES.hangzhouWestLake },
+      { location: '福建福州', url: DEMO_MEDIA_IMAGES.fuzhouThreeLanes },
+      { location: '江苏苏州', url: DEMO_MEDIA_IMAGES.suzhouGarden },
+      { location: '台湾台北', url: DEMO_MEDIA_IMAGES.taipeiNight },
+      { location: '福建厦门', url: DEMO_MEDIA_IMAGES.xiamenGulangyu },
+    ];
+    const locationMediaInserts = locationMediaLinks
+      .map((l) => ({ location_name: l.location, media_id: mediaIdByUrl.get(l.url) }))
+      .filter((l): l is { location_name: string; media_id: bigint } => !!l.media_id);
+
+    // 迁徙地点配图表没有唯一约束，需先查询再过滤，避免重复插入
+    const existingLocationMedia = await this.prisma.migrationLocationMedia.findMany({
+      where: { clan_id: clanId },
+      select: { location_name: true, media_id: true },
+    });
+    const existingLocationKeys = new Set(
+      existingLocationMedia.map((l) => `${l.location_name}|${l.media_id}`),
+    );
+    const newLocationMedia = locationMediaInserts.filter(
+      (l) => !existingLocationKeys.has(`${l.location_name}|${l.media_id}`),
+    );
+
+    if (newLocationMedia.length > 0) {
+      const result = await this.prisma.migrationLocationMedia.createMany({
+        data: newLocationMedia.map((l) => ({
+          clan_id: clanId,
+          location_name: l.location_name,
+          media_id: l.media_id,
+          display_order: 0,
+          linked_by: creatorId,
+        })),
+      });
+      if (result.count > 0) {
+        this.logger.log(`  ✅ 迁徙地点配图已创建：${result.count} 条`);
+      }
+    }
+  }
+
+  /**
+   * 公告冷启动：为演示家族生成若干公告（幂等：按标题去重）。
+   * 覆盖置顶/普通、已发布/草稿状态，让「公告管理」页面首次打开即有数据。
+   */
+  private async seedAnnouncements(clanId: bigint, creatorId: string) {
+    const announcementSeeds = [
+      {
+        title: '2025 乙巳年清明祭祖大典通知',
+        content:
+          '各位宗亲：\n\n' +
+          '岁在乙巳，清明将至。谨定于 2025 年 4 月 4 日（清明节）上午 9 时，在建阳朱氏宗祠举行清明祭祖大典。\n\n' +
+          '届时将进行三献礼、诵读家训、合影留念等环节。请各房支代表提前 30 分钟到场，统一佩戴黄色绶带。\n\n' +
+          '理事会联系人：朱国栋 13800001001',
+        cover_url: DEMO_MEDIA_IMAGES.ancestorWorship1,
+        is_pinned: true,
+        is_active: true,
+      },
+      {
+        title: '族谱数字化录入志愿者招募',
+        content:
+          '为完成本次族谱续修，修谱小组现招募录入志愿者 10 名。\n\n' +
+          '要求：\n1. 熟悉电脑基本操作；\n2. 每周可保证 2 小时以上在线时间；\n3. 有耐心、细心，对家族文化有热情。\n\n' +
+          '有意者请联系修谱小组主编朱文斌 13800002001。',
+        cover_url: DEMO_MEDIA_IMAGES.genealogyHall,
+        is_pinned: false,
+        is_active: true,
+      },
+      {
+        title: '朱氏宗亲联谊会暨奖学金颁发仪式',
+        content:
+          '兹定于 2025 年 8 月 15 日在厦门举行朱氏宗亲联谊会，届时将为 2025 年度考取重点大学的朱氏学子颁发奖学金。\n\n' +
+          '请符合条件的学生于 7 月 31 日前向理事会提交成绩单及录取通知书复印件。',
+        cover_url: DEMO_MEDIA_IMAGES.familyReunion,
+        is_pinned: true,
+        is_active: true,
+      },
+      {
+        title: '宗祠修缮募捐倡议书（草稿）',
+        content:
+          '宗祠自上次修缮至今已逾二十载，屋面漏水、梁柱虫蛀，亟待整修。经理事会商议，拟发起修缮募捐。\n\n' +
+          '本倡议书尚在修订中，正式发布日期另行通知。',
+        cover_url: null,
+        is_pinned: false,
+        is_active: false,
+      },
+      {
+        title: '关于规范族谱信息修改流程的通知',
+        content:
+          '为进一步保证族谱信息的准确性，自即日起，所有族员提交的人物信息修改申请，均需经过管理员审核后方可生效。\n\n' +
+          '请各位宗亲在「个人中心-我的家族」中提交修改，并填写完整修改原因，以便快速审核。',
+        cover_url: null,
+        is_pinned: false,
+        is_active: true,
+      },
+    ];
+
+    const existingTitles = await this.prisma.clanAnnouncement.findMany({
+      where: { clan_id: clanId },
+      select: { title: true },
+    });
+    const existingTitleSet = new Set(existingTitles.map((a) => a.title));
+    const newAnnouncements = announcementSeeds.filter((a) => !existingTitleSet.has(a.title));
+
+    if (newAnnouncements.length > 0) {
+      const now = new Date();
+      await this.prisma.clanAnnouncement.createMany({
+        data: newAnnouncements.map((a, idx) => ({
+          clan_id: clanId,
+          title: a.title,
+          content: a.content,
+          cover_url: a.cover_url,
+          is_pinned: a.is_pinned,
+          is_active: a.is_active,
+          published_at: a.is_active ? new Date(now.getTime() - idx * 24 * 60 * 60 * 1000) : null,
+          created_by: creatorId,
+        })),
+      });
+      this.logger.log(`  ✅ 公告演示数据已创建：${newAnnouncements.length} 条`);
+    } else {
+      this.logger.log('  公告演示数据已存在，跳过');
+    }
+  }
+
+  /**
+   * 审批类数据冷启动：影像审核、生平审核、认亲申请、家庭关系变更、信息修改申请。
+   * 全部幂等：按业务唯一键去重，重复启动不会重复创建。
+   */
+  private async seedReviewAndApprovalData(
+    clanId: bigint,
+    adminUserId: string,
+    memberUserId: string,
+  ) {
+    // 依赖影像与人物数据
+    const mediaList = await this.prisma.mediaArchive.findMany({
+      where: { clan_id: clanId },
+      select: { id: true, file_url: true, description: true, category: true },
+      orderBy: { id: 'asc' },
+      take: 10,
+    });
+    const personList = await this.prisma.person.findMany({
+      where: { clan_id: clanId },
+      select: { id: true, full_name: true },
+      orderBy: { id: 'asc' },
+      take: 12,
+    });
+    if (mediaList.length === 0 || personList.length < 3) {
+      this.logger.warn('  缺少影像或人物数据，跳过审批演示数据创建');
+      return;
+    }
+
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+
+    // ---------- 1) 影像审核 ----------
+    const mediaReviewSeeds = [
+      { mediaIdx: 0, status: ReviewStatus.PENDING },
+      { mediaIdx: 1, status: ReviewStatus.PENDING },
+      { mediaIdx: 2, status: ReviewStatus.APPROVED, reviewedAt: yesterday },
+      { mediaIdx: 3, status: ReviewStatus.REJECTED, reviewedAt: twoDaysAgo, rejectReason: '图像模糊，请重新上传高清版本' },
+      { mediaIdx: 4, status: ReviewStatus.APPROVED, reviewedAt: yesterday },
+    ];
+    const existingMediaReviewIds = new Set(
+      (
+        await this.prisma.mediaReview.findMany({
+          where: { media_id: { in: mediaList.map((m) => m.id) } },
+          select: { media_id: true },
+        })
+      ).map((r) => r.media_id.toString()),
+    );
+    const mediaReviewsToCreate = mediaReviewSeeds
+      .filter((s) => !existingMediaReviewIds.has(mediaList[s.mediaIdx]?.id.toString()))
+      .map((s) => {
+        const media = mediaList[s.mediaIdx];
+        return {
+          media_id: media.id,
+          status: s.status,
+          reviewer_id: s.status !== ReviewStatus.PENDING ? adminUserId : null,
+          reviewed_at: s.reviewedAt ?? null,
+          reject_reason: s.rejectReason ?? null,
+        };
+      });
+    if (mediaReviewsToCreate.length > 0) {
+      await this.prisma.mediaReview.createMany({ data: mediaReviewsToCreate });
+      this.logger.log(`  ✅ 影像审核演示数据已创建：${mediaReviewsToCreate.length} 条`);
+    }
+
+    // ---------- 2) 生平审核 ----------
+    const bioReviewSeeds = [
+      { personIdx: 0, title: '朱熹生平补录', status: ReviewStatus.APPROVED, reviewedAt: yesterday },
+      { personIdx: 1, title: '朱铨迁婺源事迹补充', status: ReviewStatus.PENDING },
+      { personIdx: 2, title: '朱小小大学经历更正', status: ReviewStatus.PENDING },
+      { personIdx: 3, title: '朱鉴功名信息补充', status: ReviewStatus.REJECTED, reviewedAt: twoDaysAgo, rejectReason: '缺少权威文献出处' },
+    ];
+    const existingBioReviewKeys = new Set(
+      (
+        await this.prisma.bioReview.findMany({
+          where: { person_id: { in: personList.map((p) => p.id) } },
+          select: { person_id: true, title: true },
+        })
+      ).map((r) => `${r.person_id}|${r.title}`),
+    );
+    const bioReviewsToCreate = bioReviewSeeds
+      .filter((s) => {
+        const person = personList[s.personIdx];
+        return person && !existingBioReviewKeys.has(`${person.id}|${s.title}`);
+      })
+      .map((s) => {
+        const person = personList[s.personIdx];
+        return {
+          person_id: person.id,
+          author_id: memberUserId,
+          title: s.title,
+          content: `关于 ${person.full_name} 的生平信息补充与勘误，请管理员审核。`,
+          status: s.status,
+          reviewer_id: s.status !== ReviewStatus.PENDING ? adminUserId : null,
+          reviewed_at: s.reviewedAt ?? null,
+          reject_reason: s.rejectReason ?? null,
+        };
+      });
+    if (bioReviewsToCreate.length > 0) {
+      await this.prisma.bioReview.createMany({ data: bioReviewsToCreate });
+      this.logger.log(`  ✅ 生平审核演示数据已创建：${bioReviewsToCreate.length} 条`);
+    }
+
+    // ---------- 3) 认亲申请 ----------
+    const mergeAppSeeds = [
+      {
+        originPlace: '江西婺源',
+        xipaiInfo: ['铨', '洪', '桐'],
+        ancestorName: '朱铨',
+        status: ApplicationStatus.PENDING,
+        matchedPersonIdx: 1,
+        matchScore: 82,
+      },
+      {
+        originPlace: '福建福州',
+        xipaiInfo: ['鋆', '深', '柄'],
+        ancestorName: '朱鋆',
+        status: ApplicationStatus.APPROVED,
+        matchedPersonIdx: 5,
+        matchScore: 75,
+        reviewedAt: yesterday,
+      },
+      {
+        originPlace: '浙江杭州',
+        xipaiInfo: ['鉴', '浚', '桂'],
+        ancestorName: '朱鉴',
+        status: ApplicationStatus.NEEDS_MANUAL_REVIEW,
+        matchedPersonIdx: 0,
+        matchScore: 45,
+      },
+      {
+        originPlace: '台湾台北',
+        xipaiInfo: ['柄', '模', '朴'],
+        ancestorName: '朱柄',
+        status: ApplicationStatus.REJECTED,
+        matchedPersonIdx: 7,
+        matchScore: 28,
+        reviewedAt: twoDaysAgo,
+        rejectReason: '字辈与家族字辈表不匹配，无法确认血缘',
+      },
+    ];
+    const existingMergeKeys = new Set(
+      (
+        await this.prisma.mergeApplication.findMany({
+          where: { clan_id: clanId },
+          select: { applicant_id: true, origin_place: true },
+        })
+      ).map((a) => `${a.applicant_id}|${a.origin_place}`),
+    );
+    const mergeAppsToCreate = mergeAppSeeds
+      .filter((s, idx) => {
+        const key = `${memberUserId}|${s.originPlace}`;
+        return !existingMergeKeys.has(key) && personList[s.matchedPersonIdx];
+      })
+      .map((s, idx) => ({
+        clan_id: clanId,
+        applicant_id: memberUserId,
+        origin_place: s.originPlace,
+        xipai_info: s.xipaiInfo,
+        ancestor_name: s.ancestorName,
+        migration_history: `先祖自${s.originPlace}迁出，历经数代，现申请归宗。`,
+        matched_person_id: personList[s.matchedPersonIdx].id,
+        match_score: s.matchScore,
+        match_details: `字辈匹配度 ${s.matchScore}%，建议${s.matchScore > 50 ? '通过' : '人工核查'}影印资料`,
+        status: s.status,
+        reviewed_by: s.status !== ApplicationStatus.PENDING ? adminUserId : null,
+        reviewed_at: s.reviewedAt ?? null,
+        reject_reason: s.rejectReason ?? null,
+        created_at: new Date(now.getTime() - idx * 12 * 60 * 60 * 1000),
+      }));
+    if (mergeAppsToCreate.length > 0) {
+      await this.prisma.mergeApplication.createMany({ data: mergeAppsToCreate });
+      this.logger.log(`  ✅ 认亲申请演示数据已创建：${mergeAppsToCreate.length} 条`);
+    }
+
+    // ---------- 4) 家庭关系变更 ----------
+    const relationChangeSeeds = [
+      {
+        personIdx: 2,
+        targetPersonIdx: 3,
+        changeType: 'spouse' as const,
+        previousState: { spouse_name: '未知' },
+        currentState: { spouse_name: '陈氏' },
+        status: RelationChangeStatus.pending,
+        changeReason: '补充配偶信息',
+      },
+      {
+        personIdx: 4,
+        targetPersonIdx: 5,
+        changeType: 'child' as const,
+        previousState: { children: [] },
+        currentState: { children: ['朱沐'] },
+        status: RelationChangeStatus.approved,
+        changeReason: '补充子女信息',
+        reviewedAt: yesterday,
+      },
+      {
+        personIdx: 6,
+        targetPersonIdx: 7,
+        changeType: 'custody' as const,
+        previousState: { custody: '未知' },
+        currentState: { custody: '随父生活' },
+        status: RelationChangeStatus.needs_manual,
+        changeReason: '抚养关系变更，需线下确认',
+        needsManual: true,
+      },
+      {
+        personIdx: 8,
+        targetPersonIdx: 9,
+        changeType: 'marriage' as const,
+        previousState: { marriage_status: '未婚' },
+        currentState: { marriage_status: '已婚' },
+        status: RelationChangeStatus.rejected,
+        changeReason: '更正婚姻状态',
+        reviewedAt: twoDaysAgo,
+        rejectReason: '缺少结婚证或族内证明',
+      },
+    ];
+    const existingRelationKeys = new Set(
+      (
+        await this.prisma.familyRelationChange.findMany({
+          where: { clan_id: clanId },
+          select: { person_id: true, change_type: true, created_at: true },
+        })
+      ).map((r) => `${r.person_id}|${r.change_type}|${r.created_at.getTime()}`),
+    );
+    const relationChangesToCreate = relationChangeSeeds
+      .filter((s) => personList[s.personIdx] && personList[s.targetPersonIdx])
+      .map((s, idx) => {
+        const createdAt = new Date(now.getTime() - idx * 6 * 60 * 60 * 1000);
+        return {
+          clan_id: clanId,
+          person_id: personList[s.personIdx].id,
+          operator_user_id: memberUserId,
+          change_type: s.changeType,
+          previous_state: s.previousState,
+          current_state: s.currentState,
+          privacy_level: 'admin' as const,
+          change_reason: s.changeReason,
+          target_person_id: personList[s.targetPersonIdx].id,
+          target_user_id: null as string | null,
+          status: s.status,
+          approved_by: s.status !== RelationChangeStatus.pending && s.status !== RelationChangeStatus.needs_manual ? adminUserId : null,
+          reviewed_at: s.reviewedAt ?? null,
+          reject_reason: s.rejectReason ?? null,
+          needs_manual: s.needsManual ?? false,
+          created_at: createdAt,
+        };
+      })
+      .filter((r) => !existingRelationKeys.has(`${r.person_id}|${r.change_type}|${r.created_at.getTime()}`));
+    if (relationChangesToCreate.length > 0) {
+      await this.prisma.familyRelationChange.createMany({ data: relationChangesToCreate });
+      this.logger.log(`  ✅ 家庭关系变更演示数据已创建：${relationChangesToCreate.length} 条`);
+    }
+
+    // ---------- 5) 信息修改申请 ----------
+    const modificationSeeds = [
+      {
+        personIdx: 2,
+        fieldName: 'birth_place',
+        oldValue: '福建武夷山',
+        newValue: '福建建阳',
+        reason: '出生地登记错误',
+        status: ModificationStatus.PENDING,
+      },
+      {
+        personIdx: 3,
+        fieldName: 'full_name',
+        oldValue: '朱鉴',
+        newValue: '朱鑑',
+        reason: '正字繁体写法',
+        status: ModificationStatus.APPROVED,
+        reviewedAt: yesterday,
+      },
+      {
+        personIdx: 4,
+        fieldName: 'death_place',
+        oldValue: '',
+        newValue: '福建建阳',
+        reason: '补充逝世地点',
+        status: ModificationStatus.REJECTED,
+        reviewedAt: twoDaysAgo,
+        rejectReason: '无确凿史料支持',
+      },
+    ];
+    const existingModificationKeys = new Set(
+      (
+        await this.prisma.personModificationRequest.findMany({
+          where: { clan_id: clanId },
+          select: { person_id: true, field_name: true, new_value: true },
+        })
+      ).map((r) => `${r.person_id}|${r.field_name}|${r.new_value}`),
+    );
+    const modificationsToCreate = modificationSeeds
+      .filter((s) => personList[s.personIdx])
+      .filter((s) => {
+        const person = personList[s.personIdx];
+        return !existingModificationKeys.has(`${person.id}|${s.fieldName}|${s.newValue}`);
+      })
+      .map((s) => {
+        const person = personList[s.personIdx];
+        return {
+          person_id: person.id,
+          clan_id: clanId,
+          requester_user_id: memberUserId,
+          field_name: s.fieldName,
+          old_value: s.oldValue,
+          new_value: s.newValue,
+          reason: s.reason,
+          status: s.status,
+          reviewer_id: s.status !== ModificationStatus.PENDING ? adminUserId : null,
+          reviewed_at: s.reviewedAt ?? null,
+          reject_reason: s.rejectReason ?? null,
+        };
+      });
+    if (modificationsToCreate.length > 0) {
+      await this.prisma.personModificationRequest.createMany({ data: modificationsToCreate });
+      this.logger.log(`  ✅ 信息修改申请演示数据已创建：${modificationsToCreate.length} 条`);
+    }
+  }
+
   private async seedPlatformAdmin() {
     // 4 个角色的演示账号，统一密码 admin123，便于平台多角色权限测试。
     // 现有 seed 只创建 super 账号；此处扩展为完整 4 角色覆盖（幂等 upsert）。
@@ -929,6 +1582,17 @@ export class DemoSeedService implements OnModuleInit {
     const usedMalePairs = new Set<string>();
     const newPeopleData: any[] = [];
     const newFamiliesData: Array<{key:string;husbandName:string;wifeName:string|null;childNames:string[];childOrders:number[];}> = [];
+    // 每对夫妻只允许一个 FamilyUnit（唯一约束 husband_id+wife_id+marriage_order），按丈夫名去重复用
+    const familyByHusband = new Map<string, {key:string;husbandName:string;wifeName:string|null;childNames:string[];childOrders:number[];} >();
+    const getCoupleFamily = (husbandName: string, wifeName: string | null) => {
+      let fam = familyByHusband.get(husbandName);
+      if (!fam) {
+        fam = { key: 'F-' + husbandName, husbandName, wifeName, childNames: [], childOrders: [] };
+        familyByHusband.set(husbandName, fam);
+        newFamiliesData.push(fam);
+      }
+      return fam;
+    };
     let totalCreated = 0;
     let nameIdx = 0;
     let zibeiIdx = 5;
@@ -1021,7 +1685,7 @@ export class DemoSeedService implements OnModuleInit {
           gen: sonGen, branch: figure.branch || 'A', is_living: wDeath >= DemoSeedService.CURRENT_YEAR,
         });
         totalCreated++;
-        newFamiliesData.push({ key: 'F-' + sonName, husbandName: sonName, wifeName, childNames: [], childOrders: [] });
+        getCoupleFamily(sonName, wifeName);
         extraChildLinks.push({ familyKey: 'F-' + figure.name, childName: sonName, birthOrder: i + 1 });
         if (sonGen === 5) {
           breedingPool.push({ name: sonName, gen: sonGen, birth: sonBirth, branch: figure.branch || 'A', wifeName });
@@ -1029,17 +1693,6 @@ export class DemoSeedService implements OnModuleInit {
       }
     }
     this.logger.log('  [3/5] 开始程序化繁衍生成新人物（已补充前5代子女 ' + totalCreated + ' 人）...');
-    // 每对夫妻只允许一个 FamilyUnit（唯一约束 husband_id+wife_id+marriage_order），按丈夫名去重复用
-    const familyByHusband = new Map<string, {key:string;husbandName:string;wifeName:string|null;childNames:string[];childOrders:number[];}>();
-    const getCoupleFamily = (husbandName: string, wifeName: string | null) => {
-      let fam = familyByHusband.get(husbandName);
-      if (!fam) {
-        fam = { key: 'F-' + husbandName, husbandName, wifeName, childNames: [], childOrders: [] };
-        familyByHusband.set(husbandName, fam);
-        newFamiliesData.push(fam);
-      }
-      return fam;
-    };
     let generation = 6;
     const totalTarget = DemoSeedService.TARGET_POPULATION - DemoSeedService.HISTORICAL_FIGURES.length;
 
