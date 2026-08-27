@@ -90,6 +90,8 @@ export interface GenealogyNode {
   death_date?: string;
   birth_year?: number;
   death_year?: number;
+  /** [树谱卡片 2026-08-26] 称谓/身份注释，如“皇后”“肃王/辽王” */
+  title?: string;
   children?: GenealogyNode[];
   avatar_url?: string;
   thumbnail_url?: string;

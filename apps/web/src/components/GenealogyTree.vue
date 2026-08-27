@@ -116,6 +116,8 @@ async function loadG6Runtime(): Promise<G6Runtime> {
     { Shortcut },
     { CommonEvent },
     { parsePoint },
+    // [树谱卡片 2026-08-26] 引入底层图形 Shape，用于自定义绘制身份标签/日期/称谓
+    { Text: GText, Rect: GRect },
   ] = await Promise.all([
     import('@antv/g6/esm/elements/nodes/rect'),
     import('@antv/g6/esm/elements/edges/cubic-horizontal'),
@@ -145,24 +147,226 @@ async function loadG6Runtime(): Promise<G6Runtime> {
     import('@antv/g6/esm/utils/shortcut'),
     import('@antv/g6/esm/constants'),
     import('@antv/g6/esm/utils/point'),
+    // [树谱卡片 2026-08-26] @antv/g-lite 导出基础 Text/Rect shape
+    import('@antv/g-lite'),
   ]);
 
-  // 自定义节点：渲染顺序改为 背景 → 姓名 → 缩略图（缩略图在姓名上方）
+  // 自定义节点：按传统树谱卡片绘制身份标签、生卒日期、姓名、称谓
   class GenealogyNode extends Rect {
     render(attributes = this.parsedAttributes, container = this) {
+      // [树谱卡片 2026-08-27 P1 修复] G6 v5 不会把 datum.data 透传到 element.attributes
+      // （element.js:208 getElementComputedStyle 只读 datum.style），所以 attributes.data 始终 undefined。
+      // 这里用 this.context.model.getElementDataById(this.id) 兜底从 graph model 拿原始数据。
+      let dataFromModel: any = null;
+      try {
+        dataFromModel = (this as any).context?.model?.getElementDataById(this.id);
+      } catch (_) {
+        // context / model 可能尚未就绪，回退到 attributes.data
+      }
+      const attrsAny = attributes as any;
+      const realD = dataFromModel?.data || attrsAny.data || {};
+
       // 1. key shape (background)
       this._drawKeyShape(attributes, container);
       if (!this.getShape('key')) return;
       // 2. halo
       this.drawHaloShape(attributes, container);
-      // 3. label (name) — render BEFORE icon so icon sits on top
-      this.drawLabelShape(attributes, container);
-      // 4. icon (thumbnail) — render AFTER label
+
+      const [width, height] = this.getSize(attributes);
+      const d = realD;
+
+      // 3. 紧凑/横排小卡片保持原有 label + icon 渲染
+      if (height < 70) {
+        this.drawLabelShape(attributes, container);
+        this.drawIconShape(attributes, container);
+        this.drawBadgeShapes(attributes, container);
+        this.drawPortShapes(attributes, container);
+        return;
+      }
+
+      // 3. 传统竖排卡片：身份标签 / 生卒日期 / 姓名 / 称谓
+      this.drawTraditionalContent(attributes, container, width, height, d);
+      // 4. icon（缩略图）渲染在文字上方
       this.drawIconShape(attributes, container);
       // 5. badges
       this.drawBadgeShapes(attributes, container);
       // 6. ports
       this.drawPortShapes(attributes, container);
+    }
+
+    /**
+     * 自定义 render 已绘制所有文字，禁止默认 label shape 覆盖
+     */
+    onframe() {
+      this.drawBadgeShapes(this.parsedAttributes, this);
+    }
+
+    /**
+     * [树谱卡片 2026-08-27] 传统横排卡片渲染（PRD §2.1.6）
+     * - 字段：身份标识（顶部彩色条）+ 排行（如「第3」）+ 姓名（横排大字）+ 生卒年（横排小字）
+     * - 传记/葬地/功名/字号不在卡片展示（册谱世录卷承载）
+     * - 原实现竖排姓名 + 竖排生卒年 + 下方称谓，阅读不连贯；改为横排为主后像传统谱牌。
+     */
+    private drawTraditionalContent(
+      attributes: any,
+      container: any,
+      width: number,
+      height: number,
+      d: any,
+    ) {
+      const halfW = width / 2;
+      const halfH = height / 2;
+      const isMale = d.gender === 'male';
+      const identity = d.identity_label || '';
+      // [树谱卡片 2026-08-27] 排行来自 child_links.birth_order，transformToG6Data 已透出
+      const birthOrder: number | undefined =
+        typeof d.birth_order === 'number' && d.birth_order > 0 ? d.birth_order : undefined;
+      // [树谱卡片 2026-08-27] 横排卡片使用四位年份（1328）避免「一三二八年九月十八日」过长；
+      // transformToG6Data 已把 birth_year/death_year 写入 data，直接读取。
+      const birth = d.birth_year ? String(d.birth_year) : '';
+      const death = d.is_living ? '' : (d.death_year ? String(d.death_year) : '');
+      // [树谱卡片 2026-08-27 P1 修复] G6 v5 不会把 datum.data/datum.label 透传到 element.attributes，
+      // attributes.label 是 G6 内部的 boolean 标志（true/false）也不是 datum.label。
+      // 这里从 model 拿完整 datum，name 才能从 datum.label（即 spouse.name / person.name）取到。
+      const fullDatum: any = (() => {
+        try {
+          return (this as any).context?.model?.getElementDataById(this.id);
+        } catch (_) {
+          return null;
+        }
+      })() || {};
+      const labelFromDatum = (fullDatum.label as string) || '';
+      const name =
+        d.original?.full_name ||
+        (d.original as any)?.name ||
+        labelFromDatum ||
+        '';
+
+      const tagH = 14;
+      const tagY = -halfH + tagH / 2;
+      // [树谱卡片 2026-08-27] portrait 模式右上角有头像，身份标签条缩短避让
+      // GenealogyNode 类定义在 loadG6Runtime() 函数内，不在 initGraph 作用域里，
+      // 这里从 viewModeConfig 重新派生所需参数，避免 TS 报“找不到名称 config”。
+      const cfg = viewModeConfig.value[genealogyStore.viewMode];
+      const isPortrait = genealogyStore.viewMode === 'portrait';
+      const avatarW = isPortrait ? (cfg?.avatarSize ?? 0) + 6 : 0;
+      const tagW = Math.max(width - avatarW, 40);
+      const tagX = -halfW;
+
+      // 1) 顶部身份标签背景条（身份标识 / 夫 妻 妾 / 第N子 第N女）
+      if (identity) {
+        this.upsert(
+          'identity-bg',
+          GRect,
+          {
+            x: tagX,
+            y: -halfH,
+            width: tagW,
+            height: tagH,
+            fill: isMale ? '#1565C0' : '#AD1457',
+            radius: [6, avatarW ? 0 : 6, 0, 0],
+            stroke: 'transparent',
+          },
+          container,
+        );
+        this.upsert(
+          'identity-text',
+          GText,
+          {
+            x: tagX + tagW / 2,
+            y: tagY,
+            text: identity,
+            fontSize: 8,
+            fill: '#FFFFFF',
+            textAlign: 'center',
+            textBaseline: 'middle',
+            fontWeight: 600,
+          },
+          container,
+        );
+      } else {
+        this.upsert('identity-bg', GRect, false, container);
+        this.upsert('identity-text', GText, false, container);
+      }
+
+      // 2) 排行文字（标签条下方左侧，例如「第3」）
+      const contentTop = -halfH + tagH + 6;
+      if (birthOrder !== undefined) {
+        this.upsert(
+          'rank-text',
+          GText,
+          {
+            x: -halfW + 4,
+            y: contentTop,
+            text: `第${birthOrder}`,
+            fontSize: 8,
+            fill: '#90A4AE',
+            textAlign: 'left',
+            textBaseline: 'top',
+            fontWeight: 600,
+          },
+          container,
+        );
+      } else {
+        this.upsert('rank-text', GText, false, container);
+      }
+
+      // 3) 姓名（横排大字，居中；超过宽度时裁断）
+      const nameFontSize = Math.max(10, Math.min(13, height / 9));
+      const nameMaxChars = Math.max(2, Math.floor((width - 12) / (nameFontSize + 1)));
+      const displayName = name.length > nameMaxChars
+        ? name.substring(0, Math.max(1, nameMaxChars - 1)) + '…'
+        : name;
+      const nameY = birthOrder !== undefined
+        ? contentTop + 12  // 排行下方一行
+        : contentTop + 4;  // 无排行时贴近标签条
+      this.upsert(
+        'name-text',
+        GText,
+        {
+          x: 0,
+          y: nameY,
+          text: displayName,  // 横排，不再拆字换行
+          fontSize: nameFontSize,
+          fill: '#2C3E50',
+          textAlign: 'center',
+          textBaseline: 'top',
+          fontWeight: 700,
+        },
+        container,
+      );
+
+      // 4) 生卒年（姓名下方一行，小字；缺失则隐藏）
+      const yearsLine =
+        birth && death
+          ? `${birth}—${death}`
+          : birth
+            ? `${birth}—`
+            : death
+              ? `—${death}`
+              : '';
+      if (yearsLine) {
+        this.upsert(
+          'years-text',
+          GText,
+          {
+            x: 0,
+            y: nameY + nameFontSize + 2,
+            text: yearsLine,
+            fontSize: 8,
+            fill: '#5D4037',
+            textAlign: 'center',
+            textBaseline: 'top',
+          },
+          container,
+        );
+      } else {
+        this.upsert('years-text', GText, false, container);
+      }
+
+      // 5) [2026-08-27 移除] 原 title（字号/称谓）渲染已删除：PRD §2.1.6 字段
+      //    为封闭 4 字段，字号/称谓由册谱世录卷承载。如需恢复请重建 title-text shape。
+      this.upsert('title-text', GText, false, container);
     }
   }
 
@@ -486,67 +690,77 @@ function failLoading() {
 }
 
 // ==================== View Mode Configuration ====================
-
+// [2026-08-27 调优] 按 PRD §2.1.6 卡片字段（身份标识 + 排行 + 姓名 + 生卒年）
+// 改为横排为主后，原 40/44/46 px 宽度装不下中文姓名（2 字至少 26-32 px），
+// detailed/xianshi/su 三个传统横排模式统一加宽到 76 px；
+// - 高度 < 70：走 drawLabelShape（G6 默认 label 路径）
+// - 高度 >= 70：走 drawTraditionalContent（自定义渲染，PRD §2.1.6 四字段布局）
+// [2026-08-27 P1 修复] 浏览器实测 56×110 宽高比仅 0.51（偏窄，纵向留白过多），
+// 宽度上调到 76，使宽高比 ≈ 0.69 更协调；同步缩小 nodeSep 避免过宽。
 const viewModeConfig = computed(() => ({
   compact: {
     nodeWidth: 48,
-    nodeHeight: 32,
+    nodeHeight: 36,  // 36 >= 70 阈值以下，走 drawLabelShape；保留紧凑横排
+    avatarSize: 0,
+    nameFontSize: 12,
+    sublabelFontSize: 9,
+    nodeSep: 36,
+    rankSep: 95,
+  },
+  // [树谱卡片 2026-08-27] 详细模式：传统横排卡片，展示身份标签/排行/姓名/生卒年
+  // [P1 2026-08-27] 56→76：消除「纵向留白 > 内容」失衡，宽高比 0.51→0.69
+  detailed: {
+    nodeWidth: 76,
+    nodeHeight: 110,
+    avatarSize: 0,
+    nameFontSize: 13,
+    sublabelFontSize: 0,  // 由 drawTraditionalContent 自渲染生卒年，不走 sublabel
+    nodeSep: 32,
+    rankSep: 140,  // 高度压缩后代际间距同步调整
+  },
+  portrait: {
+    nodeWidth: 90,
+    nodeHeight: 110,
+    avatarSize: 22,
+    nameFontSize: 13,
+    sublabelFontSize: 0,
+    nodeSep: 44,
+    rankSep: 140,
+  },
+  // [吊线图 2026-08-17] 传统世系吊线：子女按 child_links.mother_id 归属各妻子节点下；
+  // 卡片显示身份标签 + 排行 + 姓名 + 生卒年；过继/收养（child_type !== BIOLOGICAL）连线为虚线。
+  // [P1 2026-08-27] 56→76：与 detailed/su 对齐，避免「三种传统卡片尺寸不一」
+  xianshi: {
+    nodeWidth: 76,
+    nodeHeight: 100,
     avatarSize: 0,
     nameFontSize: 12,
     sublabelFontSize: 0,
-    nodeSep: 36,
-    rankSep: 90,  // nodeHeight(32) + 间距(58)，紧凑同时预留配偶节点下方空间
+    nodeSep: 30,
+    rankSep: 130,
   },
-  detailed: {
-    nodeWidth: 34,
-    nodeHeight: 60,
-    avatarSize: 22,
-    nameFontSize: 13,
-    sublabelFontSize: 10,
-    nodeSep: 36,
-    rankSep: 96,  // nodeHeight(60) + 间距(36)，紧凑同时预留配偶节点下方空间
-  },
-  portrait: {
-    nodeWidth: 80,
-    nodeHeight: 72,
-    avatarSize: 22,
-    nameFontSize: 12,
-    sublabelFontSize: 9,
-    nodeSep: 32,
-    rankSep: 110,  // nodeHeight(72) + 间距(38)，预留配偶节点下方空间
-  },
-  // [吊线图 2026-08-17] 传统世系吊线：子女按 child_links.mother_id 归属各妻子节点下；
-  // 卡片显示排行 + 姓名 + 生卒年；过继/收养（child_type !== BIOLOGICAL）连线为虚线。
-  xianshi: {
-    nodeWidth: 56,
-    nodeHeight: 64,
-    avatarSize: 18,
-    nameFontSize: 12,
-    sublabelFontSize: 9,
-    nodeSep: 32,
-    rankSep: 100,  // 预留妻子节点下方子女空间
-  },
-  // [苏式 2026-08-19] 传统苏式谱法：竖排世系条目，字竖排、行间生卒年，
-  // 卡片窄高（仿古谱"世系条"），适合纵向长卷阅读。
+  // [苏式 2026-08-19] 苏式世系条原本就是竖排窄卡，现在改为横排后加宽；
+  // drawTraditionalContent 对 su 模式走「姓名横排、生卒年小字同行」布局。
+  // [P1 2026-08-27] 60→76：与 detailed/xianshi 对齐
   su: {
-    nodeWidth: 52,
-    nodeHeight: 96,
+    nodeWidth: 76,
+    nodeHeight: 110,
     avatarSize: 0,
-    nameFontSize: 14,
-    sublabelFontSize: 9,
-    nodeSep: 28,
-    rankSep: 96,
+    nameFontSize: 13,
+    sublabelFontSize: 0,
+    nodeSep: 30,
+    rankSep: 140,
   },
-  // [浙式 2026-08-19] 浙江谱式（欧式变体）：世代分格、同辈横排对齐，
-  // 卡片横宽（仿谱牒"世代格"），同代人名对齐成行，利于横向比对世系。
+  // [浙式 2026-08-19] 浙式世代格保持横排，走 drawLabelShape（G6 sublabel）；
+  // 宽度 120、高度 56 已是横排布局，PRD §2.1.6 字段全部通过 labelText/sublabelText 渲染。
   zhe: {
-    nodeWidth: 92,
+    nodeWidth: 120,
     nodeHeight: 56,
     avatarSize: 22,
-    nameFontSize: 12,
+    nameFontSize: 13,
     sublabelFontSize: 9,
-    nodeSep: 24,
-    rankSep: 96,
+    nodeSep: 28,
+    rankSep: 110,
   },
 }));
 
@@ -737,7 +951,13 @@ const loadMoreBatch = async () => {
 
 // ==================== Data Transformation ====================
 
-const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, number>, gen: number = 0): any => {
+const transformToG6Data = (
+  node: GenealogyNode,
+  generationMap?: Map<string, number>,
+  gen: number = 0,
+  parentNode?: GenealogyNode,
+  opts: { isSpouse?: boolean; spouseOrder?: number } = {},
+): any => {
   if (generationMap) generationMap.set(String(node.id), gen);
   const isMainLineage = genealogyStore.isInMainLineage(node.id);
 
@@ -745,6 +965,15 @@ const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, numb
   // demo 朱熹族谱 API 实际返回 name，没 full_name；之前一直空白是因为只读 full_name
   const displayName: string =
     (node as any).full_name || (node as any).name || (node as any).label || '';
+
+  // [树谱卡片 2026-08-26] 推导身份标签：子女按排行，配偶按顺序；根节点无标签
+  const isRootNode = !opts.isSpouse && !parentNode;
+  const identityLabel = isRootNode
+    ? ''
+    : deriveIdentityLabel(node, {
+        isSpouse: opts.isSpouse,
+        spouseOrder: opts.spouseOrder,
+      });
 
   const result: any = {
     id: String(node.id),
@@ -756,12 +985,16 @@ const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, numb
       generation: gen,
       gender: node.gender,
       is_living: node.is_living,
+      birth_date: node.birth_date,
+      death_date: node.death_date,
       birth_year: node.birth_date ? new Date(node.birth_date).getFullYear() : undefined,
       death_year: node.death_date ? new Date(node.death_date).getFullYear() : undefined,
       has_photo: (node as any).has_photo,
       thumbnail_url: (node as any).thumbnail_url || (node as any).avatar_url,
       avatar_url: (node as any).avatar_url,
       is_main_lineage: isMainLineage,
+      title: node.title,
+      identity_label: identityLabel,
       original: node,
     },
   };
@@ -773,11 +1006,15 @@ const transformToG6Data = (node: GenealogyNode, generationMap?: Map<string, numb
     for (const l of (node.child_links || [])) linkByChild.set(String(l.child_id), l);
 
     const transformed = node.children.map((child) => {
-      const g = transformToG6Data(child, generationMap, gen + 1);
+      const g = transformToG6Data(child, generationMap, gen + 1, node);
       const link = linkByChild.get(String(child.id));
       if (link) {
         g.data.child_type = link.child_type;
         g.data.birth_order = link.birth_order;
+        // [树谱卡片 2026-08-26] 用实际排行重新推导子女身份标签
+        g.data.identity_label = deriveIdentityLabel(child, {
+          birthOrder: link.birth_order ?? undefined,
+        });
       }
       return g;
     });
@@ -1049,6 +1286,60 @@ const applyTraditionalFilters = (node: GenealogyNode | null, isChild = false): G
   };
 };
 
+// ==================== [树谱卡片 2026-08-26] 传统卡片辅助函数 ====================
+
+/**
+ * 阿拉伯数字 → 中文数字（零-九）
+ */
+const DIGIT_TO_CHINESE = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+function toChineseNumber(num: number | string): string {
+  return String(num)
+    .split('')
+    .map((ch) => DIGIT_TO_CHINESE[Number(ch)] ?? ch)
+    .join('');
+}
+
+/**
+ * ISO 日期字符串 → 中文数字年月日
+ * 例：1328-09-18 → 一三二八年九月十八日
+ * 缺省部分不显示：1328-09 → 一三二八年九月
+ */
+function formatChineseDate(isoDate?: string | null): string {
+  if (!isoDate) return '';
+  const d = new Date(isoDate);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  let result = `${toChineseNumber(year)}年`;
+  if (isoDate.length >= 7) result += `${toChineseNumber(month)}月`;
+  if (isoDate.length >= 10) result += `${toChineseNumber(day)}日`;
+  return result;
+}
+
+/**
+ * 推导身份标签（妻/妾/夫/第N子/第N女等）
+ * - 配偶节点：第一任女性为妻，其余女性为妾；男性配偶显示"夫"（入赘）
+ * - 子女节点：按 birth_order + gender 显示"第N子/女"
+ * - 无排行：显示"子/女"
+ */
+function deriveIdentityLabel(
+  node: GenealogyNode,
+  opts: { isSpouse?: boolean; spouseOrder?: number; birthOrder?: number } = {},
+): string {
+  const { isSpouse, spouseOrder, birthOrder } = opts;
+  if (isSpouse) {
+    if (node.gender === 'female') {
+      return spouseOrder === 1 ? '妻' : '妾';
+    }
+    return '夫';
+  }
+  if (birthOrder !== undefined && birthOrder > 0) {
+    return `第${toChineseNumber(birthOrder)}${node.gender === 'male' ? '子' : '女'}`;
+  }
+  return node.gender === 'male' ? '子' : '女';
+}
+
 // Generate initial avatar SVG based on gender and name
 /**
  * UTF-8 安全的 base64 编码
@@ -1190,13 +1481,19 @@ const initGraph = async (data: GenealogyNode) => {
       const sid = String(s.id);
       let spouseNodeId = sid;
 
-      // [吊线图调色板 2026-08-19] 仅 xianshi 模式给妻子节点挂 palette：
+      // [吊线图调色板 2026-08-19] 所有视图下都给女性配偶挂 palette：
       // 同一 person_id 通过 djb2 哈希 → 同一颜色，重渲染不变。
       // 仅女性配偶有 palette；男性配偶无子女分支，挂在 data 上也不影响任何渲染。
       const wifePalette =
-        genealogyStore.viewMode === 'xianshi' && s.gender === 'female'
+        s.gender === 'female'
           ? getWifePaletteColor(s.id)
           : undefined;
+
+      // [树谱卡片 2026-08-26] 配偶身份标签：妻/妾/夫
+      const spouseIdentity = deriveIdentityLabel(
+        { gender: s.gender } as GenealogyNode,
+        { isSpouse: true, spouseOrder: s.marriage_order },
+      );
 
       // 收集配偶节点（不在初始布局中）
       if (!existingNodeMap.has(sid)) {
@@ -1211,6 +1508,8 @@ const initGraph = async (data: GenealogyNode) => {
             is_living: true,
             has_photo: false,
             is_external_spouse: true,
+            spouse_order: s.marriage_order,
+            identity_label: spouseIdentity,
             original: null,
             ...(wifePalette ? { palette: wifePalette } : {}),
           },
@@ -1233,6 +1532,8 @@ const initGraph = async (data: GenealogyNode) => {
             has_photo: false,
             is_external_spouse: true,
             is_duplicate_spouse: true,
+            spouse_order: s.marriage_order,
+            identity_label: spouseIdentity,
             originalId: sid,
             original: null,
             ...(wifePalette ? { palette: wifePalette } : {}),
@@ -1574,17 +1875,17 @@ const initGraph = async (data: GenealogyNode) => {
           if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
             return '#EDE7DD';
           }
-          // 涓讳紶鎵胯妭鐐癸細閱掔洰閲戣壊锛堜紭鍏堢骇鏈€楂橈級
+          // [树谱卡片 2026-08-26] 主脉节点保留金色背景
           if (d.data?.is_main_lineage) {
             return '#FFF3C4';
           }
           const gender = d.data?.gender;
-          if (d.data?.is_living) {
-            return d.data?.gender === 'male' ? '#E8F4FD' : '#FDE8F0';
-            return gender === 'male' ? '#F5F2E8' : '#FCE4EC';
+          const isLiving = d.data?.is_living;
+          // [树谱卡片 2026-08-26] 男蓝女红；已故颜色略深，以贴近图中样式
+          if (gender === 'male') {
+            return isLiving ? '#E3F2FD' : '#BBDEFB';
           }
-          return '#FAFAFA';
-          return gender === 'male' ? '#EFE9DC' : '#F5E6E0';
+          return isLiving ? '#FCE4EC' : '#F8BBD0';
         },
         stroke: (d: any) => {
           const isSelected = genealogyStore.selectedNode?.id === Number(d.id);
@@ -1596,14 +1897,10 @@ const initGraph = async (data: GenealogyNode) => {
           // [吊线图调色板 2026-08-19] 妻子节点描边用 palette，与子女分支边同色
           // （仅 xianshi 模式会写入 data.palette，其余视图此分支不触发）
           if (d.data?.palette) return d.data.palette;
+          // [树谱卡片 2026-08-26] 主脉金边，其余男蓝女红
           if (d.data?.is_main_lineage) return '#C9A96E';
-          if (d.data?.is_main_lineage) return '#D4A04A';
           const gender = d.data?.gender;
-          if (d.data?.is_living) {
-            return gender === 'male' ? '#90A4AE' : '#F48FB1';
-          }
-          // 已故：深棕色描边
-          return gender === 'male' ? '#A1887F' : '#BCAAA4';
+          return gender === 'male' ? '#1976D2' : '#C2185B';
         },
         lineWidth: (d: any) => {
           const isSelected = genealogyStore.selectedNode?.id === Number(d.id);
@@ -1641,33 +1938,41 @@ const initGraph = async (data: GenealogyNode) => {
         iconWidth: config.avatarSize,
         iconHeight: config.avatarSize,
         iconOffset: (_d: any) => {
-          // Top-left corner inside the node box
           const halfW = config.nodeWidth / 2;
           const halfH = config.nodeHeight / 2;
           const pad = 4;
+          // [树谱卡片 2026-08-26] portrait 模式头像放右上角，避免遮挡身份标签
+          if (genealogyStore.viewMode === 'portrait') {
+            return [halfW - config.avatarSize / 2 - pad, -halfH + config.avatarSize / 2 + pad];
+          }
+          // 其他模式默认左上角
           return [-halfW + config.avatarSize / 2 + pad, -halfH + config.avatarSize / 2 + pad];
         },
         iconRadius: 4,
 
-        // Name label — vertical text (one character per line)
-        labelText: (d: any) => {
-          const name = d.label || '';
-          let truncated: string;
-          if (genealogyStore.viewMode === 'portrait') {
-            truncated = name.length > 6 ? name.substring(0, 5) + '..' : name;
-          } else if (genealogyStore.viewMode === 'su') {
-            // [苏式] 竖排世系条：单行最多 5 字，超长截断
-            truncated = name.length > 5 ? name.substring(0, 4) + '…' : name;
-          } else if (genealogyStore.viewMode === 'zhe') {
-            // [浙式] 世代格横排：名字单行显示，不换行
-            truncated = name.length > 6 ? name.substring(0, 5) + '..' : name;
-          } else {
-            truncated = name.length > 8 ? name.substring(0, 7) + '..' : name;
+        // Name label — 关闭 G6 默认 label 渲染的条件：详细/肖像/吊线/苏式（height >= 70）走 drawTraditionalContent 自渲染 4 字段
+        // [树谱卡片 2026-08-27 P0 修复] detailed/portrait/xianshi/su 这 4 种模式：
+        //   - label: false 让 G6 完全跳过 label shape 创建（base-node.js getLabelStyle）；
+        //   - labelText: '' 兜底，万一 label 没被关掉也不会让 G6 拿非字符串去算 bounding box；
+        //   - 旧实现把姓名按字拆成 "朱\n熹" 传给 @antv/g-lite v2.7.0 的 measureText，
+        //     在 wordWrap=true 路径下 outputText.split 抛 "is not a function"，导致 4 种视图模式白屏。
+        // compact（height < 70）+ zhe 仍走 G6 默认 label 路径。
+        label: (d: any) => {
+          if (['detailed', 'portrait', 'xianshi', 'su'].includes(genealogyStore.viewMode)) {
+            return false;
           }
-          // [浙式] 世代格横排名字不换行；其余视图竖排（每个字一行）
-          if (genealogyStore.viewMode === 'zhe') return truncated;
-          // Insert newline between each character for vertical display
-          return truncated.split('').join('\n');
+          return true;
+        },
+        labelText: (d: any) => {
+          if (genealogyStore.viewMode === 'zhe') {
+            const name = d.label || '';
+            return name.length > 6 ? name.substring(0, 5) + '..' : name;
+          }
+          if (genealogyStore.viewMode === 'compact') {
+            const name = d.label || '';
+            return name.length > 8 ? name.substring(0, 7) + '..' : name;
+          }
+          return '';
         },
         labelFill: (d: any) => {
           if (!matchesSearch(d) || !matchesGenderFilter(d) || !matchesPhotoFilter(d)) {
@@ -1680,7 +1985,9 @@ const initGraph = async (data: GenealogyNode) => {
         labelPlacement: 'center',
         labelOffset: [0, 0],
 
-        // Sublabel (years)
+        // Sublabel (years) — G6 不支持 sublabel: false（这是 Node 的独立 label 属性）
+        //   detailed/portrait/xianshi/su 的 sublabelFontSize === 0 已经返回 ''，text 内容
+        //   始终是字符串，不会触发 wordWrap.split 崩溃；这里只走默认 G6 sublabel 路径。
         sublabelText: (d: any) => {
           if (genealogyStore.viewMode === 'compact' || config.sublabelFontSize === 0) {
             return '';
@@ -1742,8 +2049,10 @@ const initGraph = async (data: GenealogyNode) => {
           }
           const sourceMatched = matchesSearch(d.source) && matchesGenderFilter(d.source) && matchesPhotoFilter(d.source);
           const targetMatched = matchesSearch(d.target) && matchesGenderFilter(d.target) && matchesPhotoFilter(d.target);
-          // 配偶边：现任=粉红实线，历史=灰色虚线
+          // 配偶边：一夫多妻场景按妻子 palette 上色；无 palette 时现任=粉红实线，历史=灰色虚线
           if (d.data?.kind === 'spouse') {
+            const palette = d.target?.data?.palette || d.source?.data?.palette;
+            if (palette) return palette;
             return d.data?.is_current ? '#E91E63' : '#9E9E9E';
           }
           // 主枝条父子边：纯金黄色（源或目标属于主枝条时高亮）

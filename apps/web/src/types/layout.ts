@@ -64,6 +64,8 @@ export interface LayoutEdge {
 export interface EdgePath {
   points: Point[];
   type: 'cubic' | 'line' | 'orthogonal';
+  /** 一夫多妻婚姻汇聚点坐标（仅 spouse 边使用），用于按妻子颜色绘制分岔段 */
+  junction?: Point;
 }
 
 // ==================== 布局结果 ====================
@@ -96,11 +98,14 @@ export interface LayoutConfig {
   nodeSep: number | 'auto';      // 同代节点间距
   rankSep: number | 'auto';      // 代际间距
   spouseGap: number;             // 配偶节点间距
+  marriageJunctionOffset: number; // 丈夫节点底部到婚姻汇聚点的垂线长度
+  edgeHorizontalSeparation: number; // 同层水平边段最小错开距离
   
   // 布局行为
   mainLineageCenter: boolean;    // 主脉是否居中
   spouseOptimization: boolean;   // 是否优化配偶位置
   generationAlign: boolean;      // 同代节点是否对齐
+  resolveSubtreeOverlap: boolean; // 是否启用布局后子树扫描线推开
   
   // 自适应配置
   autoFit: {
@@ -134,9 +139,14 @@ export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   nodeSep: 'auto',
   rankSep: 'auto',
   spouseGap: 32,
+  marriageJunctionOffset: 16,
+  // [2026-08-27 调优] 之前默认 6 px 太近，同层水平边段仍会贴近；
+  // 调到 10 后梳状布线肉眼可辨，避免边段重合。
+  edgeHorizontalSeparation: 10,
   mainLineageCenter: true,
   spouseOptimization: true,
   generationAlign: true,
+  resolveSubtreeOverlap: true,
   autoFit: {
     enabled: true,
     padding: 40,

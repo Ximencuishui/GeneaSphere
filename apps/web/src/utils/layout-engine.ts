@@ -30,6 +30,7 @@ import type {
   LayoutConfig,
   LayoutOptions,
   BoundingBox,
+  Point,
 } from '@/types/layout';
 import { DEFAULT_LAYOUT_CONFIG } from '@/types/layout';
 
@@ -276,15 +277,28 @@ export class LayoutEngine {
       this.positionSpouseNodes(nodePositions, nodeMap, spouseByMain, edges, childrenByParent, rankSep, nodeSep);
     }
 
-    // 10. 主脉后处理对齐
+    // 10. 主脉后处理对齐（先对齐，再检测重叠）
     if (config.mainLineageCenter) {
       this.alignMainLineage(nodePositions, nodeMap, spouseByMain, childrenByParent);
     }
 
-    // 11. 计算正交路由点
+    // 11. 子树外接矩形扫描线推开（修复配偶子树与主树分支的重叠）
+    if (config.resolveSubtreeOverlap) {
+      this.resolveSubtreeOverlap(nodePositions, nodeMap, childrenByParent, spouseByMain, nodeSep);
+    }
+
+    // 12. 计算正交路由点（父子边）
     this.computeOrthogonalEdgePaths(nodePositions, edges);
 
-    // 12. 整体平移使布局居中
+    // 13. 计算配偶边正交路径（含婚姻汇聚点分岔）
+    this.computeSpouseEdgePaths(nodePositions, spouseByMain);
+
+    // 14. 同层水平边段错开
+    if (config.edgeHorizontalSeparation > 0) {
+      this.resolveEdgeHorizontalOverlaps(edges);
+    }
+
+    // 15. 整体平移使布局居中
     const positions = Array.from(nodePositions.values());
     const bounds = getBoundingBox(positions);
     const contentWidth = bounds.maxX - bounds.minX;
@@ -293,9 +307,10 @@ export class LayoutEngine {
     for (const [, pos] of nodePositions) {
       pos.x += offsetX;
     }
+    this.shiftEdgePathsX(edges, offsetX);
 
-    // 13. 主传承再居中（强制主脉 x=0 作为视觉锚点）
-    // 即使 12 步整体平移了，主脉在 alignMainLineage 阶段可能因子树轮廓不对称而偏离 0
+    // 16. 主传承再居中（强制主脉 x=0 作为视觉锚点）
+    // 即使 15 步整体平移了，主脉在 alignMainLineage 阶段可能因子树轮廓不对称而偏离 0
     // 此步骤用最终的主脉平均 x 反向平移回 0
     if (config.mainLineageCenter) {
       const mainXValues: number[] = [];
@@ -311,28 +326,9 @@ export class LayoutEngine {
           for (const [, pos] of nodePositions) {
             pos.x -= mainAvgX;
           }
+          this.shiftEdgePathsX(edges, -mainAvgX);
         }
       }
-    }
-
-    // 14. 重新计算配偶边路径
-    // alignMainLineage / 整体平移会改变节点的最终坐标，而 positionSpouseNodes
-    // 阶段算出的 path 仍是旧坐标，必须同步修正，否则夫妻牵引线会偏离或消失。
-    for (const edge of edges) {
-      if (edge.kind !== 'spouse') continue;
-      const sourcePos = nodePositions.get(edge.source);
-      const targetPos = nodePositions.get(edge.target);
-      if (!sourcePos || !targetPos) continue;
-      const isSourceMain = sourcePos.x <= targetPos.x;
-      const mainPos = isSourceMain ? sourcePos : targetPos;
-      const spousePos = isSourceMain ? targetPos : sourcePos;
-      edge.path = {
-        points: [
-          { x: mainPos.x + mainPos.width / 2, y: mainPos.y },
-          { x: spousePos.x - spousePos.width / 2, y: spousePos.y },
-        ],
-        type: 'orth',
-      };
     }
 
     const finalPositions = Array.from(nodePositions.values());
@@ -423,6 +419,11 @@ export class LayoutEngine {
 
   /**
    * 配偶节点定位（含继子女子树）
+   *
+   * v4 优化：
+   * 1. 配偶按子树有效宽度排列，避免继子女子树侵入丈夫其他分支；
+   * 2. 一夫多妻场景引入婚姻汇聚点，丈夫 → 汇聚点 → 各配偶，走线呈梳状；
+   * 3. spouse 边 path 包含完整正交点，并记录 junction 坐标供渲染按妻子颜色分岔。
    */
   private positionSpouseNodes(
     nodePositions: Map<string, NodePosition>,
@@ -441,6 +442,16 @@ export class LayoutEngine {
 
       mainSpouseEdges.sort((a, b) => (a.marriageOrder ?? 0) - (b.marriageOrder ?? 0));
 
+      // 先计算每位配偶的有效宽度（含继子女子树），避免子树与后续配偶重叠
+      const spouseEffectiveWidths: Map<string, number> = new Map();
+      for (const edge of mainSpouseEdges) {
+        const spouseId = edge.source === mainId ? edge.target : edge.source;
+        const spouseNode = nodeMap.get(spouseId);
+        const spouseWidth = spouseNode?.width ?? this.config.nodeWidth;
+        const subtreeW = this.computeSubtreeWidth(spouseId, nodeMap, childrenByParent);
+        spouseEffectiveWidths.set(spouseId, Math.max(spouseWidth, subtreeW));
+      }
+
       let currentX = mainPos.x + mainPos.width / 2 + spouseGap;
       let totalSpouseWidth = 0;
 
@@ -450,8 +461,11 @@ export class LayoutEngine {
         const spouseNode = nodeMap.get(spouseId);
         const spouseWidth = spouseNode?.width ?? this.config.nodeWidth;
         const spouseHeight = spouseNode?.height ?? this.config.nodeHeight;
+        const effectiveWidth = spouseEffectiveWidths.get(spouseId) ?? spouseWidth;
 
-        const spouseCenterX = currentX + spouseWidth / 2;
+        // 配偶卡片居中于有效宽度区域
+        const effectiveCenterX = currentX + effectiveWidth / 2;
+        const spouseCenterX = effectiveCenterX;
 
         nodePositions.set(spouseId, {
           id: spouseId,
@@ -461,31 +475,16 @@ export class LayoutEngine {
           height: spouseHeight,
         });
 
-        // 配偶边路径
-        const mainRightEdge = mainPos.x + mainPos.width / 2;
-        const spouseLeftEdge = spouseCenterX - spouseWidth / 2;
-        const sourceIsMain = edge.source === mainId;
-        edge.path = {
-          points: sourceIsMain
-            ? [
-                { x: mainRightEdge, y: mainPos.y },
-                { x: spouseLeftEdge, y: mainPos.y },
-              ]
-            : [
-                { x: spouseLeftEdge, y: mainPos.y },
-                { x: mainRightEdge, y: mainPos.y },
-              ],
-          type: 'orth',
-        };
+        // 配偶边路径将在节点位置最终确定后统一计算（避免 alignMainLineage / 整体平移后坐标失效）
 
-        // 继子女子树：从配偶节点向下延伸
+        // 继子女子树：从配偶节点正下方延伸，以配偶卡片中心为轴
         const spouseChildren = childrenByParent.get(spouseId) || [];
         if (spouseChildren.length > 0) {
           this.layoutSpouseSubtree(spouseId, spouseCenterX, mainPos.y + rankSep, nodePositions, nodeMap, childrenByParent, rankSep, nodeSep);
         }
 
-        totalSpouseWidth += spouseWidth + (i < mainSpouseEdges.length - 1 ? spouseGap : 0);
-        currentX += spouseWidth + spouseGap;
+        totalSpouseWidth += effectiveWidth + (i < mainSpouseEdges.length - 1 ? spouseGap : 0);
+        currentX += effectiveWidth + spouseGap;
       }
 
       // 更新主节点有效宽度
@@ -724,7 +723,7 @@ export class LayoutEngine {
               { x: parentBottomX, y: parentBottomY },
               { x: childTopX, y: childTopY },
             ],
-            type: 'orth',
+            type: 'orthogonal',
           };
         } else {
           childEdges[0].path = {
@@ -733,7 +732,7 @@ export class LayoutEngine {
               { x: parentBottomX, y: childTopY },
               { x: childTopX, y: childTopY },
             ],
-            type: 'orth',
+            type: 'orthogonal',
           };
         }
       } else {
@@ -758,9 +757,363 @@ export class LayoutEngine {
               { x: childTopX, y: branchY },
               { x: childTopX, y: childTopY },
             ],
-            type: 'orth',
+            type: 'orthogonal',
           };
         }
+      }
+    }
+  }
+
+  /**
+   * 计算配偶边正交路径（含婚姻汇聚点分岔）
+   *
+   * 在节点位置最终确定后调用（alignMainLineage / resolveSubtreeOverlap 之后）。
+   *
+   * [2026-08-27 P0 修复] 一夫多妻场景的水平段重叠
+   * 旧实现：所有妻子共享同一 junction Y（rawJunctionY 经 spouseTopY/mainBottomY 钳制后），
+   *   多位妻子在同一 Y 的水平段完全重合，违反 PRD §2.7.3 第 5 条「同层边水平段错开」。
+   * 修复：对每位妻子按 marriageOrder 沿垂直方向 stagger 分配独立 junction Y，
+   *   从源头保证每位妻子的水平段落在不同 Y 层。
+   */
+  private computeSpouseEdgePaths(
+    nodePositions: Map<string, NodePosition>,
+    spouseByMain: Map<string, LayoutEdge[]>,
+  ) {
+    // [2026-08-27 修复] junctionOffset 之前被 void 掉（行 776-777）导致配置无效。
+    // 语义：junctionOffset 表示汇聚点与丈夫底部的距离（向上偏移量），
+    // junctionY 落在 [spouseTop, husbandBottom] 之间以满足梳状布线的视觉区间限制：
+    // - 默认 junctionOffset = 16，junction 位于丈夫底部偏上 16px；
+    // - 如果夫妻同高（junctionOffset 超过可用范围），junction 退化到丈夫底本身；
+    // - 如果 junctionOffset 为 0，junction 位于丈夫底（传统谱牒“夫底”连线起点）。
+    const junctionOffset = this.config.marriageJunctionOffset ?? 16;
+    // [2026-08-27 P0 修复] 同一丈夫的多位妻子 junction Y 的垂直错开间距
+    const verticalGap = this.config.edgeHorizontalSeparation ?? 10;
+
+    for (const [mainId, mainSpouseEdges] of spouseByMain) {
+      const mainPos = nodePositions.get(mainId);
+      if (!mainPos) continue;
+
+      const sorted = [...mainSpouseEdges].sort(
+        (a, b) => (a.marriageOrder ?? 0) - (b.marriageOrder ?? 0),
+      );
+
+      const mainBottomY = mainPos.y + mainPos.height / 2;
+      // junctionY 初始值：丈夫底部偏上 junctionOffset 处（梳状分岔汇聚点）。
+      const rawJunctionY = mainBottomY - junctionOffset;
+
+      // [2026-08-27 P0 修复] 先收集每位妻子的「自然」junction Y（未经错开）。
+      // 同代妻子若都位于同一 Y（positionSpouseNodes 默认把妻子 y=mainPos.y），
+      // 它们的 naturalJunctionY 会相等，必须错开。
+      interface JunctionCandidate {
+        edge: LayoutEdge;
+        spousePos: NodePosition;
+        spouseTopY: number;
+        naturalJunctionY: number;
+      }
+      const candidates: JunctionCandidate[] = [];
+      for (const edge of sorted) {
+        const spouseId = edge.source === mainId ? edge.target : edge.source;
+        const spousePos = nodePositions.get(spouseId);
+        if (!spousePos) continue;
+        const spouseTopY = spousePos.y - spousePos.height / 2;
+        const naturalJunctionY = Math.max(
+          spouseTopY,
+          Math.min(mainBottomY, rawJunctionY),
+        );
+        candidates.push({
+          edge,
+          spousePos,
+          spouseTopY,
+          naturalJunctionY,
+        });
+      }
+
+      // [2026-08-27 P0 修复] 按 naturalJunctionY 分组，组内按 marriageOrder stagger。
+      // 关键约束：jY ∈ [spouseTopY, mainBottomY - 2]，
+      // 超出此区间的偏移会被钳制，但至少保证视觉上彼此分离 verticalGap px。
+      const assignedJunctionY = new Map<string, number>();
+      // 按 (junction Y rounded, spouseTopY) 二元组分组；同组内 stagger
+      const groupKey = (c: JunctionCandidate) =>
+        `${Math.round(c.naturalJunctionY)}_${Math.round(c.spouseTopY)}`;
+      const groups = new Map<string, JunctionCandidate[]>();
+      for (const c of candidates) {
+        const key = groupKey(c);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(c);
+      }
+      for (const [, group] of groups) {
+        if (group.length === 1) {
+          assignedJunctionY.set(group[0].edge.id, group[0].naturalJunctionY);
+          continue;
+        }
+        // 多个候选人共享同一组：按 marriageOrder 索引居中分配 junction Y。
+        // group[i].junctionY = naturalJunctionY + (i - (n-1)/2) * verticalGap
+        // 这样保证组内 jY 间距 = verticalGap，且整体相对 naturalJunctionY 对称。
+        const n = group.length;
+        for (let i = 0; i < n; i++) {
+          const c = group[i];
+          const offset = (i - (n - 1) / 2) * verticalGap;
+          let jY = c.naturalJunctionY + offset;
+          // 钳制在合法区间：spouseTopY ≤ jY ≤ mainBottomY - 2
+          // 否则路径会与节点边界相交
+          jY = Math.max(c.spouseTopY, Math.min(mainBottomY - 2, jY));
+          assignedJunctionY.set(c.edge.id, jY);
+        }
+      }
+
+      for (const edge of sorted) {
+        const jY = assignedJunctionY.get(edge.id);
+        if (jY === undefined) continue;
+        const spouseId = edge.source === mainId ? edge.target : edge.source;
+        const c = candidates.find(x => x.edge.id === edge.id);
+        if (!c) continue;
+
+        const sourceIsMain = edge.source === mainId;
+        edge.path = {
+          points: sourceIsMain
+            ? [
+                { x: mainPos.x, y: mainBottomY },
+                { x: mainPos.x, y: jY },
+                { x: c.spousePos.x, y: jY },
+                { x: c.spousePos.x, y: c.spouseTopY },
+              ]
+            : [
+                { x: c.spousePos.x, y: c.spouseTopY },
+                { x: c.spousePos.x, y: jY },
+                { x: mainPos.x, y: jY },
+                { x: mainPos.x, y: mainBottomY },
+              ],
+          type: 'orthogonal',
+          junction: { x: mainPos.x, y: jY },
+        };
+      }
+    }
+  }
+
+  /**
+   * 子树外接矩形扫描线推开
+   *
+   * 在 alignMainLineage 之后调用，检测同一 Y 层各子树外接矩形是否重叠，
+   * 若重叠则将右侧子树整体右推，同步推开其配偶与继子女子树。
+   */
+  private resolveSubtreeOverlap(
+    nodePositions: Map<string, NodePosition>,
+    nodeMap: Map<string, LayoutNode>,
+    childrenByParent: Map<string, string[]>,
+    spouseByMain: Map<string, LayoutEdge[]>,
+    nodeSep: number,
+  ) {
+    const subtreeBounds = new Map<string, BoundingBox>();
+
+    const computeBounds = (nodeId: string): BoundingBox => {
+      const cached = subtreeBounds.get(nodeId);
+      if (cached) return cached;
+
+      const pos = nodePositions.get(nodeId);
+      if (!pos) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+
+      let minX = pos.x - pos.width / 2;
+      let maxX = pos.x + pos.width / 2;
+      let minY = pos.y - pos.height / 2;
+      let maxY = pos.y + pos.height / 2;
+
+      const children = childrenByParent.get(nodeId) || [];
+      for (const childId of children) {
+        const childBounds = computeBounds(childId);
+        minX = Math.min(minX, childBounds.minX);
+        maxX = Math.max(maxX, childBounds.maxX);
+        minY = Math.min(minY, childBounds.minY);
+        maxY = Math.max(maxY, childBounds.maxY);
+      }
+
+      // 配偶节点及其子树一并纳入当前节点子树范围
+      const spouseEdges = spouseByMain.get(nodeId) || [];
+      for (const edge of spouseEdges) {
+        const spouseId = edge.source === nodeId ? edge.target : edge.source;
+        const spouseBounds = computeBounds(spouseId);
+        minX = Math.min(minX, spouseBounds.minX);
+        maxX = Math.max(maxX, spouseBounds.maxX);
+        minY = Math.min(minY, spouseBounds.minY);
+        maxY = Math.max(maxY, spouseBounds.maxY);
+      }
+
+      const bounds: BoundingBox = { minX, minY, maxX, maxY };
+      subtreeBounds.set(nodeId, bounds);
+      return bounds;
+    };
+
+    // 只处理参与主布局的节点（generation >= 0），配偶节点随主节点移动
+    for (const [id, node] of nodeMap) {
+      if ((node.generation ?? 0) < 0) continue;
+      computeBounds(id);
+    }
+
+    // 按子树根节点 Y 坐标分组
+    const nodesByY = new Map<number, { id: string; bounds: BoundingBox }[]>();
+    for (const [id, bounds] of subtreeBounds) {
+      const pos = nodePositions.get(id);
+      if (!pos) continue;
+      const y = pos.y;
+      if (!nodesByY.has(y)) nodesByY.set(y, []);
+      nodesByY.get(y)!.push({ id, bounds });
+    }
+
+    // 扫描线推开
+    for (const [, items] of nodesByY) {
+      items.sort((a, b) => a.bounds.minX - b.bounds.minX);
+      let prevMaxX = -Infinity;
+      for (const item of items) {
+        if (item.bounds.minX < prevMaxX + nodeSep) {
+          const dx = prevMaxX + nodeSep - item.bounds.minX;
+          this.shiftSubtree(item.id, dx, nodePositions, childrenByParent, spouseByMain);
+          item.bounds.minX += dx;
+          item.bounds.maxX += dx;
+        }
+        prevMaxX = item.bounds.maxX;
+      }
+    }
+  }
+
+  /**
+   * 整体平移子树（递归包含子女、配偶、继子女）
+   */
+  private shiftSubtree(
+    nodeId: string,
+    dx: number,
+    nodePositions: Map<string, NodePosition>,
+    childrenByParent: Map<string, string[]>,
+    spouseByMain: Map<string, LayoutEdge[]>,
+    visited = new Set<string>(),
+  ) {
+    if (visited.has(nodeId)) return;
+    visited.add(nodeId);
+
+    const pos = nodePositions.get(nodeId);
+    if (pos) pos.x += dx;
+
+    const children = childrenByParent.get(nodeId) || [];
+    for (const childId of children) {
+      this.shiftSubtree(childId, dx, nodePositions, childrenByParent, spouseByMain, visited);
+    }
+
+    const spouseEdges = spouseByMain.get(nodeId) || [];
+    for (const edge of spouseEdges) {
+      const spouseId = edge.source === nodeId ? edge.target : edge.source;
+      const spousePos = nodePositions.get(spouseId);
+      if (spousePos) spousePos.x += dx;
+      this.shiftSubtree(spouseId, dx, nodePositions, childrenByParent, spouseByMain, visited);
+    }
+  }
+
+  /**
+   * 同层水平边段错开
+   *
+   * 扫描所有边中的水平线段，若同一 Y 坐标的水平段 X 范围重叠，
+   * 则交替向上 / 向下微调 Y 坐标，避免多条连线重合。
+   */
+  private resolveEdgeHorizontalOverlaps(edges: LayoutEdge[]) {
+    const sep = this.config.edgeHorizontalSeparation;
+    if (sep <= 0) return;
+
+    interface Segment {
+      edge: LayoutEdge;
+      index: number;
+      y: number;
+      x1: number;
+      x2: number;
+    }
+
+    const segments: Segment[] = [];
+    for (const edge of edges) {
+      if (!edge.path?.points || edge.path.points.length < 2) continue;
+      const pts = edge.path.points;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        if (p1.y === p2.y) {
+          segments.push({
+            edge,
+            index: i,
+            y: p1.y,
+            x1: Math.min(p1.x, p2.x),
+            x2: Math.max(p1.x, p2.x),
+          });
+        }
+      }
+    }
+
+    const byY = new Map<number, Segment[]>();
+    for (const seg of segments) {
+      if (!byY.has(seg.y)) byY.set(seg.y, []);
+      byY.get(seg.y)!.push(seg);
+    }
+
+    for (const [, ySegments] of byY) {
+      if (ySegments.length <= 1) continue;
+      ySegments.sort((a, b) => a.x1 - b.x1);
+
+      // 上 / 下两条独立轨道，分别记录已占据的最右 X
+      let upperUntil = -Infinity;
+      let lowerUntil = -Infinity;
+      let sign = 1; // 1 = 往上偏, -1 = 往下偏
+      for (const seg of ySegments) {
+        // 优先塞到未冲突的那条轨道
+        let useUpper: boolean;
+        if (sign === 1 && seg.x1 >= upperUntil + sep) {
+          useUpper = true;
+        } else if (sign === -1 && seg.x1 >= lowerUntil + sep) {
+          useUpper = false;
+        } else if (seg.x1 >= upperUntil + sep) {
+          useUpper = true;
+          sign = 1;
+        } else if (seg.x1 >= lowerUntil + sep) {
+          useUpper = false;
+          sign = -1;
+        } else {
+          useUpper = sign === 1;
+          sign *= -1;
+        }
+
+        const delta = useUpper ? -sep : sep;
+        const pts = seg.edge.path!.points;
+        const a = pts[seg.index];
+        const b = pts[seg.index + 1];
+        a.y += delta;
+        b.y += delta;
+
+        // 联动调整相邻垂直段端点 Y，保证正交连接不被破坏
+        // 左端点 a：左侧相邻垂直段是 pts[index-1] → a
+        if (seg.index - 1 >= 0) {
+          pts[seg.index - 1].y += delta;
+        }
+        // 右端点 b：右侧相邻垂直段是 b → pts[index+2]
+        if (seg.index + 2 < pts.length) {
+          pts[seg.index + 2].y += delta;
+        }
+
+        if (useUpper) {
+          upperUntil = seg.x2;
+        } else {
+          lowerUntil = seg.x2;
+        }
+      }
+    }
+  }
+
+  /**
+   * 整体平移所有边的路径 X 坐标
+   *
+   * 节点位置在整体居中 / 主脉再居中时被平移，边 path 必须同步平移，
+   * 否则牵引线会偏离节点。
+   */
+  private shiftEdgePathsX(edges: LayoutEdge[], dx: number) {
+    for (const edge of edges) {
+      if (!edge.path?.points) continue;
+      for (const p of edge.path.points) {
+        p.x += dx;
+      }
+      if (edge.path.junction) {
+        edge.path.junction.x += dx;
       }
     }
   }

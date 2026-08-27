@@ -53,6 +53,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/demo/tree-multi-wife',
+    name: 'demo-tree-multi-wife',
+    component: () => import('@/views/TreeMultiWifeDemoPage.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/cepu/:clanId',
     name: 'cepu',
     component: () => import('@/views/CepuPage.vue'),

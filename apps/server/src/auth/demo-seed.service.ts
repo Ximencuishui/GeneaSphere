@@ -40,8 +40,20 @@ export class DemoSeedService implements OnModuleInit {
     //    故将超时延长至 60s。
     await this.prisma.$transaction(async (tx) => {
       // a) 删各类审批/申请记录（多表引用 person_id，必须先清）
-      await tx.familyRelationChange.deleteMany({ where: { clan_id: clanId } });
-      await tx.personModificationRequest.deleteMany({ where: { clan_id: clanId } });
+      //    familyRelationChange 的 person_id/target_person_id 非级联外键，需按
+      //    person 兜底删除（兼容 clan_id 不一致的残留记录，避免删 person 时外键报错）
+      await tx.familyRelationChange.deleteMany({
+        where: {
+          OR: [
+            { clan_id: clanId },
+            { person_id: { in: personIdList } },
+            { target_person_id: { in: personIdList } },
+          ],
+        },
+      });
+      await tx.personModificationRequest.deleteMany({
+        where: { OR: [{ clan_id: clanId }, { person_id: { in: personIdList } }] },
+      });
       await tx.mergeApplication.deleteMany({ where: { clan_id: clanId } });
       await tx.bioReview.deleteMany({ where: { person_id: { in: personIdList } } });
 
@@ -62,6 +74,7 @@ export class DemoSeedService implements OnModuleInit {
       await tx.privacySetting.deleteMany({ where: { clan_id: clanId } });
       await tx.clanCouncilMember.deleteMany({ where: { clan_id: clanId } });
       await tx.clanRevisionTeamMember.deleteMany({ where: { clan_id: clanId } });
+      await tx.xipai.deleteMany({ where: { clan_id: clanId } });
 
       // d) 删 familyChild：先按 family.clan_id 清；再扫孤儿（family.clan_id != clanId
       //    但 child_id 引用本家族 person 的记录），避免下次重建时 family_unit 还残留
@@ -92,7 +105,20 @@ export class DemoSeedService implements OnModuleInit {
         },
       });
 
-      // g) 最后才删 person，避免在外键还引用时触发外键报错
+      // g) 最后兜底：所有可能引用了 person_id 的表全部按 personIdList 清一遍，
+      //    防止新增的非级联外键（如 family_relation_changes_person_id）遗漏，
+      //    确保删 person 时不再触发任何 P2003 外键约束报错
+      await tx.personModificationRequest.deleteMany({ where: { person_id: { in: personIdList } } });
+      await tx.mergeApplication.deleteMany({ where: { matched_person_id: { in: personIdList } } });
+      await tx.bioReview.deleteMany({ where: { person_id: { in: personIdList } } });
+      await tx.familyRelationChange.deleteMany({ where: { OR: [{ person_id: { in: personIdList } }, { target_person_id: { in: personIdList } }] } });
+      await tx.videoProject.deleteMany({ where: { target_person_id: { in: personIdList } } });
+      await tx.lineageVideoProject.deleteMany({ where: { center_person_id: { in: personIdList } } });
+      await tx.migrationEvent.deleteMany({ where: { person_id: { in: personIdList } } });
+      await tx.personUserLink.deleteMany({ where: { person_id: { in: personIdList } } });
+      await tx.familyBookProject.deleteMany({ where: { start_person_id: { in: personIdList } } });
+
+      // h) 最后才删 person
       await tx.person.deleteMany({ where: { clan_id: clanId } });
     }, { timeout: 60000 });
 
@@ -458,6 +484,35 @@ export class DemoSeedService implements OnModuleInit {
       });
       this.logger.log(`  ✅ 修谱小组成员已创建：${newRevision.length} 人`);
     }
+
+    // 4) 字辈表（幂等：按 clan_id+generation 判断，表结构 @@unique([clan_id, generation])）
+    //    第 N 世用字 = ZIBEI_CHARS[N-1]，与种子人物“朱+字辈+名”的命名规则保持一致。
+    const existingXipai = await this.prisma.xipai.findMany({
+      where: { clan_id: clanId },
+      select: { generation: true },
+    });
+    const existingXipaiGens = new Set(existingXipai.map((x) => x.generation));
+
+    const newXipai = DemoSeedService.ZIBEI_CHARS.map((char, idx) => {
+      const generation = idx + 1;
+      return {
+        generation,
+        character: char,
+        note: idx === 0 ? '始迁祖朱熹（字元晦，号晦庵）用字' : `朱熹后裔第 ${generation} 世用字`,
+      };
+    }).filter((x) => !existingXipaiGens.has(x.generation));
+
+    if (newXipai.length > 0) {
+      await this.prisma.xipai.createMany({
+        data: newXipai.map((x) => ({
+          clan_id: clanId,
+          generation: x.generation,
+          character: x.character,
+          note: x.note,
+        })),
+      });
+      this.logger.log(`  ✅ 字辈表已创建：${newXipai.length} 个字辈（第 1~${DemoSeedService.ZIBEI_CHARS.length} 世）`);
+    }
   }
 
   /**
@@ -683,7 +738,7 @@ export class DemoSeedService implements OnModuleInit {
       // 历代先祖
       { key: 'zhuxiPortrait', album: '历代先祖', category: '肖像', taken_year: 1200, taken_location: '福建建阳', description: '朱熹画像' },
       { key: 'zhuquanPortrait', album: '历代先祖', category: '肖像', taken_year: 1260, taken_location: '江西婺源', description: '朱铨画像，婺源朱氏始迁祖' },
-      { key: 'zhuxiaoxiaoPhoto', album: '历代先祖', category: '肖像', taken_year: 2024, taken_location: '福建武夷山', description: '朱熹第 30 世孙朱小小' },
+      { key: 'zhuxiaoxiaoPhoto', album: '历代先祖', category: '肖像', taken_year: 2024, taken_location: '福建武夷山', description: '朱熹第 36 世孙朱小小' },
       // 家族聚会
       { key: 'familyReunion', album: '家族聚会', category: '活动', taken_year: 2024, taken_location: '福建厦门', description: '海峡两岸朱氏宗亲联谊会' },
       // 迁徙风光
@@ -1290,16 +1345,25 @@ export class DemoSeedService implements OnModuleInit {
 
   /** 构造演示家族的完整 description（含朱小小介绍） */
   private buildClanDescription(): string {
-    return `南宋理学家朱熹（1130-1200）后裔族谱演示，涵盖约 28 代、1000 位族人。\n\n演示族员「朱小小」：朱熹长房 30 世孙，2000 年生于福建武夷山，毕业于厦门大学软件工程系，现从事家族数字化工作。`;
+    return `南宋理学家朱熹（1130-1200）后裔族谱演示，涵盖约 36 代、千余位族人。\n\n演示族员「朱小小」：朱熹长房 36 世孙，2000 年生于福建武夷山，毕业于厦门大学软件工程系，现从事家族数字化工作。`;
   }
-  private static readonly TARGET_POPULATION = 1000;
+  private static readonly TARGET_POPULATION = 5000;
   private static readonly CURRENT_YEAR = 2026;
-  private static readonly GENERATION_YEARS = 32;
-  private static readonly ZIBEI_CHARS = ['熹','塾','埜','在','鉴','铨','潜','鋆','浚','洪','沐','深','桂','桐','森','柄','模','朴','梓','樾','楷','检','樽','栻','栉','栒','栋','梁','焕','炽','炜','炤','焘'];
+  private static readonly GENERATION_YEARS = 25;
+  private static readonly ZIBEI_CHARS = ['熹','塾','埜','在','鉴','铨','潜','鋆','浚','洪','沐','深','桂','桐','森','柄','模','朴','梓','樾','楷','检','樽','栻','栉','栒','栋','梁','焕','炽','炜','炤','焘','煜','烨','炳'];
   private static readonly MALE_GIVEN_NAMES = ['康','宁','安','平','泰','昌','盛','荣','华','耀','明','德','仁','义','礼','智','信','忠','孝','廉','邦','国','家','民','世','代','永','长','久','远','福','禄','寿','喜','财','源','海','山','川','林','涛','波','渊','文','武','斌','勇','强','伟','雄','辉','光','星','辰','天','地','宇','宙','鸿','志','远','翔','飞','龙','虎','豹','麟','凤','祺','瑞'];
   private static readonly MARRIAGE_SURNAMES = ['刘','陈','张','王','李','赵','黄','周','吴','徐','孙','胡','高','林','何','郭','马','罗','梁','宋','郑','谢','韩','唐','冯','于','董','萧','程','曹','袁','邓','许','傅','沈','曾','彭','吕','苏','卢','蒋','蔡','贾','丁','魏','薛','叶','阎','余','潘'];
   private static readonly FEMALE_GIVEN_NAMES = ['娘','姑','英','华','芳','芬','萍','莉','梅','兰','菊','竹','莲','荷','玉','珍','珠','翠','凤','鸾','燕','莺','蝶','娥','媛','婷','娟','秀','惠','敏','慧','巧','美','丽','倩','仪','静','娴','淑','贤','德','贞','婉','柔','云','霞','月','星','瑶','琼'];
   private static readonly BIRTH_PLACES = ['婺源','徽州','建阳','崇安','武夷山','杭州','福州','江西婺源','安徽歙县','福建建瓯','浙江淳安','江苏苏州'];
+  /**
+   * 生成某年份的随机完整日期（月 1-12、日 1-28，避开 2/30 等非法日期），
+   * 让演示族员的出生年月日与卒日更真实，不再全部固定为 1 月 1 日 / 12 月 31 日。
+   */
+  private static randomDateInYear(year: number): Date {
+    const month = Math.floor(Math.random() * 12) + 1;
+    const day = Math.floor(Math.random() * 28) + 1;
+    return new Date(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
   private static readonly HISTORICAL_FIGURES: HistoricalFigure[] = [
     { name: '朱熹', gender: 'male', birth: 1130, death: 1200, generation: 1, branch: 'A' },
     { name: '刘氏', gender: 'female', birth: 1132, death: 1195, generation: 1, branch: 'A' },
@@ -1485,8 +1549,8 @@ export class DemoSeedService implements OnModuleInit {
       clan_id: clanId,
       full_name: f.name,
       gender: f.gender as Gender,
-      birth_date: new Date(`${f.birth}-01-01`),
-      death_date: f.death ? new Date(`${f.death}-12-31`) : null,
+      birth_date: DemoSeedService.randomDateInYear(f.birth),
+      death_date: f.death ? DemoSeedService.randomDateInYear(f.death) : null,
       is_living: !f.death || f.death >= DemoSeedService.CURRENT_YEAR,
       birth_place: DemoSeedService.BIRTH_PLACES[f.generation % DemoSeedService.BIRTH_PLACES.length],
       migration_branch: f.branch,
@@ -1677,14 +1741,17 @@ export class DemoSeedService implements OnModuleInit {
           gen: sonGen, branch: figure.branch || 'A', is_living: sonDeath >= DemoSeedService.CURRENT_YEAR,
         });
         totalCreated++;
-        const wifeName = ensureUnique(nextWifeName(), false);
-        const wBirth = sonBirth + 18 + (i % 5);
-        const wDeath = wBirth + 45 + ((i * 11) % 25);
-        newPeopleData.push({
-          name: wifeName, gender: 'female', birth: wBirth, death: wDeath,
-          gen: sonGen, branch: figure.branch || 'A', is_living: wDeath >= DemoSeedService.CURRENT_YEAR,
-        });
-        totalCreated++;
+        // 补充子女全部为历史人物（生卒于13-14世纪），全部已故，妻子概率也统一为70%
+        const wifeName = Math.random() < 0.7 ? ensureUnique(nextWifeName(), false) : null;
+        if (wifeName) {
+          const wBirth = sonBirth + 18 + (i % 5);
+          const wDeath = wBirth + 45 + ((i * 11) % 25);
+          newPeopleData.push({
+            name: wifeName, gender: 'female', birth: wBirth, death: wDeath,
+            gen: sonGen, branch: figure.branch || 'A', is_living: wDeath >= DemoSeedService.CURRENT_YEAR,
+          });
+          totalCreated++;
+        }
         getCoupleFamily(sonName, wifeName);
         extraChildLinks.push({ familyKey: 'F-' + figure.name, childName: sonName, birthOrder: i + 1 });
         if (sonGen === 5) {
@@ -1697,11 +1764,25 @@ export class DemoSeedService implements OnModuleInit {
     const totalTarget = DemoSeedService.TARGET_POPULATION - DemoSeedService.HISTORICAL_FIGURES.length;
 
     const totalTargetByGen: Record<number, number> = {
-      6: 14, 7: 20, 8: 26, 9: 32, 10: 38, 11: 44, 12: 50, 13: 54, 14: 58, 15: 60,
-      16: 62, 17: 62, 18: 60, 19: 58, 20: 56, 21: 52, 22: 48, 23: 44, 24: 38,
-      25: 32, 26: 26, 27: 20, 28: 14, 29: 10, 30: 6,
+      // [2026-08-24] 重新设计：从第 6 代 8 人平滑增长到第 16-17 代峰值 44 人，
+      // 再缓慢回落到第 33 代，覆盖到近现代（第 33 代约生于 2000-2010，在世人员集中于此）。
+      6: 8, 7: 12, 8: 16, 9: 20, 10: 24,
+      11: 28, 12: 32, 13: 36, 14: 40, 15: 42,
+      16: 44, 17: 44, 18: 42, 19: 40, 20: 38,
+      21: 34, 22: 30, 23: 26, 24: 22, 25: 18,
+      26: 16, 27: 14, 28: 12, 29: 10, 30: 8,
+      31: 6, 32: 5, 33: 4, 34: 4, 35: 3,
     };
     const allMalesArr: Array<{name:string;gen:number;birth:number;branch:string;wifeName:string|null;}> = breedingPool.slice();
+    // [2026-08-24 修复] 血缘链推进：按世代维护男性池，父亲必须取自上一代男性，
+    // 保证后代血缘深度逐代 +1，能真实延伸到第 30 代近现代。
+    // 旧逻辑从全代池（allMalesArr）就近选父，会导致大多数儿子扎堆挂在早期几代男性
+    // 名下，血缘深度只到 ~10 代就断（第 11 代之后人数为 0，再次出现“断崖”）。
+    const malesByGen = new Map<number, Array<{name:string;gen:number;birth:number;branch:string;wifeName:string|null;}>>();
+    for (const m of breedingPool) {
+      if (!malesByGen.has(m.gen)) malesByGen.set(m.gen, []);
+      malesByGen.get(m.gen)!.push(m);
+    }
     // [2026-08-20 修复] B 房 960 人失衡：
     //   原算法 `fatherIdx = (i + generation * 7 + nameIdx) % allMalesArr.length`
     //   是一个不均匀 hash，随者 allMalesArr 在代代繁衍中不断增长（房支继承自父亲），
@@ -1709,7 +1790,7 @@ export class DemoSeedService implements OnModuleInit {
     //   修复：显式按 1/3 拆分 A/B/C 三房，每代 targetNewMales 中 i % 3 决定本轮房支，
     //   从该房支的男性池里就近选父亲（池空时托底任意男性，保证不中断繁衍）。
     const BRANCHES = ['A', 'B', 'C'] as const;
-    while (totalCreated < totalTarget && generation <= 30) {
+    while (totalCreated < totalTarget && generation <= 35) {
       const targetNewMales = totalTargetByGen[generation] || 0;
       if (targetNewMales === 0 || allMalesArr.length === 0) {
         generation++;
@@ -1718,54 +1799,72 @@ export class DemoSeedService implements OnModuleInit {
       for (let i = 0; i < targetNewMales && totalCreated < totalTarget; i++) {
         // 1/3 拆分：i % 3 决定本轮儿子该入哪房
         const targetBranch = BRANCHES[i % 3];
-        // 从该房支的男性池里就近选父亲
+        // 从上一代男性池（同房支）就近选父亲，保证血缘链逐代推进
+        const prevGenPool = malesByGen.get(generation - 1) || [];
         let father: typeof allMalesArr[number] | undefined;
-        for (let attempt = 0; attempt < allMalesArr.length; attempt++) {
-          const idx = (i + attempt) % allMalesArr.length;
-          if (allMalesArr[idx].branch === targetBranch) {
-            father = allMalesArr[idx];
-            break;
+        if (prevGenPool.length > 0) {
+          for (let attempt = 0; attempt < prevGenPool.length; attempt++) {
+            const idx = (i + attempt) % prevGenPool.length;
+            if (prevGenPool[idx].branch === targetBranch) {
+              father = prevGenPool[idx];
+              break;
+            }
           }
-        }
-        // 兜底：指定房支暂无可用男性（例如刚开启第 6 代时 B 房男性数 < i）
-        // 使用任意男性，代价是本轮失衡 1-2 人，下一代会重新平衡
-        if (!father) {
-          father = allMalesArr[i % allMalesArr.length];
+          if (!father) father = prevGenPool[i % prevGenPool.length];
+        } else {
+          // 兜底：上一代池为空时（如刚开启第 6 代）使用全局池，保证不中断繁衍
+          for (let attempt = 0; attempt < allMalesArr.length; attempt++) {
+            const idx = (i + attempt) % allMalesArr.length;
+            if (allMalesArr[idx].branch === targetBranch) {
+              father = allMalesArr[idx];
+              break;
+            }
+          }
+          if (!father) father = allMalesArr[i % allMalesArr.length];
         }
         const fatherWife = father.wifeName;
         const sonName = ensureUnique(nextName(), true);
-        const sonBirth = father.birth + 25 + ((i + generation) % 8);
-        // 最近几代人增加存活概率，让修谱和理事会更有意义
-        const isRecentGen = generation >= 26;
-        const sonDeathBase = isRecentGen ? 85 : 40;
-        const sonDeathVar = isRecentGen ? 30 : 50;
-        const sonDeath = sonBirth + sonDeathBase + ((nameIdx + i) % sonDeathVar);
+        const sonBirth = father.birth + 23 + ((i + generation) % 5);
+        // [2026-08-24 修复] 在世率按【出生年份】判定而非世代序号：
+        //   旧逻辑按 generation>=25 就给 4% 在世，但第 27-33 代出生在 1796-1931 年，
+        //   到 2026 年早已超过寿命上限（230 岁），导致大量“僵尸在世”不合理数据。
+        //   新逻辑：仅 1950 年后出生者才可能在世，且出生越晚在世概率越高。
+        const yearsOld = DemoSeedService.CURRENT_YEAR - sonBirth;
+        const livingProbability = sonBirth >= 1950
+          ? Math.min(0.85, (sonBirth - 1950) * 0.03)
+          : 0;
+        const isLiving = livingProbability > 0 && Math.random() < livingProbability;
+        const sonDeath = sonBirth + 50 + ((nameIdx + i) % 40);
         newPeopleData.push({
           name: sonName, gender: 'male', birth: sonBirth, death: sonDeath,
-          gen: generation, branch: father.branch, is_living: sonDeath >= DemoSeedService.CURRENT_YEAR,
+          gen: generation, branch: father.branch, is_living: isLiving,
         });
         totalCreated++;
-        const wname = ensureUnique(nextWifeName(), false);
-        const wBirth = sonBirth + 18 + ((nameIdx + i) % 8);
-        const wDeathBase = isRecentGen ? 80 : 30;
-        const wDeathVar = isRecentGen ? 25 : 55;
-        const wDeath = wBirth + wDeathBase + ((nameIdx + i) % wDeathVar);
-        newPeopleData.push({
-          name: wname, gender: 'female', birth: wBirth, death: wDeath,
-          gen: generation, branch: father.branch, is_living: wDeath >= DemoSeedService.CURRENT_YEAR,
-        });
-        totalCreated++;
+        // [2026-08-24 修复] 妻子概率固定 65%，优先保代数深度（不随世代变化）
+        const wifeProbability = 0.65;
+        const wname = Math.random() < wifeProbability ? ensureUnique(nextWifeName(), false) : null;
+        if (wname) {
+          const wBirth = sonBirth + 18 + ((nameIdx + i) % 8);
+          const wDeath = wBirth + 45 + ((nameIdx + i) % 50);
+          const wLiving = isLiving && Math.random() < 0.7; // 妻子在世率略低于丈夫
+          newPeopleData.push({
+            name: wname, gender: 'female', birth: wBirth, death: wDeath,
+            gen: generation, branch: father.branch, is_living: wLiving,
+          });
+          totalCreated++;
+        }
         // 儿子自己的小家庭（含女儿作为子女）
         const sonFam = getCoupleFamily(sonName, wname);
-        if ((nameIdx + i) % 2 === 0 && totalCreated < totalTarget) {
+        // [2026-08-24 修复] 女儿概率降低（30%生0个，25%生1个，45%生2个）
+        const daughterCount = wname ? (Math.random() < 0.70 ? 0 : Math.random() < 0.65 ? 1 : 2) : 0;
+        for (let d = 0; d < daughterCount && totalCreated < totalTarget; d++) {
           const daughterName = ensureUnique(nextWifeName(), false);
-          const dBirth = sonBirth + 3;
-          const dDeathBase = isRecentGen ? 82 : 35;
-          const dDeathVar = isRecentGen ? 28 : 50;
-          const dDeath = dBirth + dDeathBase + ((nameIdx + i) % dDeathVar);
+          const dBirth = sonBirth + 3 + d;
+          const dDeath = dBirth + 45 + ((nameIdx + i) % 45);
+          const dLiving = isLiving && Math.random() < 0.6;
           newPeopleData.push({
             name: daughterName, gender: 'female', birth: dBirth, death: dDeath,
-            gen: generation, branch: father.branch, is_living: dDeath >= DemoSeedService.CURRENT_YEAR,
+            gen: generation, branch: father.branch, is_living: dLiving,
           });
           totalCreated++;
           sonFam.childNames.push(daughterName);
@@ -1776,6 +1875,9 @@ export class DemoSeedService implements OnModuleInit {
         fatherFam.childNames.push(sonName);
         fatherFam.childOrders.push(fatherFam.childNames.length);
         allMalesArr.push({name: sonName, gen: generation, birth: sonBirth, branch: father.branch, wifeName: wname});
+        // 同步进入本代男性池，供下一代选父（保证血缘链逐代推进）
+        if (!malesByGen.has(generation)) malesByGen.set(generation, []);
+        malesByGen.get(generation)!.push({name: sonName, gen: generation, birth: sonBirth, branch: father.branch, wifeName: wname});
       }
       generation++;
     }
@@ -1785,8 +1887,9 @@ export class DemoSeedService implements OnModuleInit {
       clan_id: clanId,
       full_name: p.name,
       gender: p.gender as Gender,
-      birth_date: new Date(p.birth + '-01-01'),
-      death_date: p.death ? new Date(p.death + '-12-31') : null,
+      birth_date: DemoSeedService.randomDateInYear(p.birth),
+      // 在世人员无卒日（death 为未来年份的模拟寿命，不应写入 death_date）
+      death_date: p.is_living ? null : DemoSeedService.randomDateInYear(p.death),
       is_living: p.is_living,
       birth_place: DemoSeedService.BIRTH_PLACES[p.gen % DemoSeedService.BIRTH_PLACES.length],
       migration_branch: p.branch,
@@ -1882,7 +1985,10 @@ export class DemoSeedService implements OnModuleInit {
     }
     this.logger.log('        depth=1: ' + depth1Inserts.length + ' 条');
     let currentDepth = 1;
-    const MAX_DEPTH = 30;
+    // [2026-08-24 修复] MAX_DEPTH 从 30 提升到 38：繁衍循环已覆盖到第 35 代（generation<=35），
+    // 血缘链若仍被硬编码截断在 30，第 31-35 代族人会全部掉到链外（断崖复现）。
+    // 取 38 略高于繁衍上限，确保链完整覆盖又不至于无限扩张。
+    const MAX_DEPTH = 38;
     while (currentDepth < MAX_DEPTH) {
       const currentRecords = await this.prisma.personAncestry.findMany({
         where: { depth: currentDepth },
