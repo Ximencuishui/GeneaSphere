@@ -137,8 +137,13 @@ export default defineConfig({
           // 强制合并到单一 chunk 后所有 lodash 函数在同一作用域，声明顺序受控。
           'vendor-lodash': ['lodash-es'],
 
-          // axios + 业务工具
-          'vendor-utils': ['axios'],
+          // axios 不再独占 manualChunks：
+          // axios 内部某些内部模块（如 defaults / helpers）使用了与业务代码（request.ts 的
+          // 错误码常量 const h = {UNAUTHORIZED: ...}）同名的局部变量 `h`。
+          // 强制独占 chunk 后 Rollup 的 hoistTranscripts 会把 chunk 中的 `var h` 提升为
+          // module-scope，与 request chunk 中的 `const h` 冲突（Identifier h already declared）。
+          // 取消独占后，axios 被内联到使用方 chunk，自然复用同一作用域。
+          // 'vendor-utils': ['axios'],
         },
       },
     },
