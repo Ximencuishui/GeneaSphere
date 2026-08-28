@@ -8,6 +8,9 @@ import type {
   UserProfile,
   UserSetting,
   UserNotification,
+  UserBadgeCounts,
+  UserApplicationsResponse,
+  UserApplicationCategory,
 } from '@/types';
 import type {
   LinkedPerson,
@@ -192,9 +195,52 @@ export const useUserCenterStore = defineStore('userCenter', () => {
     settings.value = null;
     notifications.value = [];
     unreadCount.value = 0;
+    badgeCounts.value = null;
     linkedPersons.value = [];
     relationHistory.value = [];
     privacyPreference.value = null;
+  }
+
+  // ============ P0：徽章计数 ============
+
+  const badgeCounts = ref<UserBadgeCounts | null>(null);
+
+  async function fetchBadgeCounts(): Promise<UserBadgeCounts | null> {
+    if (!isLoggedIn.value) {
+      badgeCounts.value = null;
+      return null;
+    }
+    try {
+      const data = (await userApi.badges.counts()) as unknown as UserBadgeCounts;
+      badgeCounts.value = data;
+      return data;
+    } catch (err) {
+      console.error('[userCenter] fetchBadgeCounts failed:', err);
+      return null;
+    }
+  }
+
+  // ============ P0：我的申请 ============
+
+  const applications = ref<UserApplicationsResponse>({});
+
+  async function fetchApplications(
+    params: { category?: UserApplicationCategory; status?: string; page?: number; pageSize?: number } = {},
+  ): Promise<UserApplicationsResponse | null> {
+    try {
+      const data = (await userApi.applications.list(params)) as unknown as UserApplicationsResponse;
+      // 只在 category 指定或首次全量加载时覆盖，避免并发请求互相覆盖
+      if (params.category) {
+        const merged: UserApplicationsResponse = { ...applications.value, [params.category]: data[params.category] };
+        applications.value = merged;
+      } else {
+        applications.value = data;
+      }
+      return data;
+    } catch (err) {
+      console.error('[userCenter] fetchApplications failed:', err);
+      return null;
+    }
   }
 
   // ============ 柔性家庭关系更新 ============
@@ -264,6 +310,8 @@ export const useUserCenterStore = defineStore('userCenter', () => {
     settings,
     notifications,
     unreadCount,
+    badgeCounts,
+    applications,
     loading,
     saving,
     isLoggedIn,
@@ -292,6 +340,9 @@ export const useUserCenterStore = defineStore('userCenter', () => {
     fetchUnreadCount,
     fetchNotifications,
     markNotificationRead,
+    // P0
+    fetchBadgeCounts,
+    fetchApplications,
     reset,
   };
 });

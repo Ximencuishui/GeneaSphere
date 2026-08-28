@@ -1,0 +1,6 @@
+﻿
+        const usedMalePairs = new Set();
+                if (!usedMalePairs.has(pair)) {
+                    usedMalePairs.add(pair);
+
+

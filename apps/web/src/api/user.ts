@@ -11,6 +11,10 @@ import type {
   UserToolHistoryItem,
   UserGroup,
   UserVideo,
+  UserBadgeCounts,
+  UserApplicationsResponse,
+  UserApplicationCategory,
+  UserClanAnnouncement,
 } from '@/types';
 
 const trimId = (s: string | number) => String(s);
@@ -136,6 +140,40 @@ export const userApi = {
       request.get<{ data: UserNotification[] }, { data: UserNotification[] }>('/api/user/notifications'),
     markRead: (id: string | number) =>
       request.post(`/api/user/notifications/${trimId(id)}/read`),
+  },
+
+  // ========== P0：徽章计数 & 我的申请 ==========
+  badges: {
+    counts: () =>
+      request.get<UserBadgeCounts, UserBadgeCounts>('/api/user/badge-counts'),
+  },
+  applications: {
+    list: (params?: {
+      category?: UserApplicationCategory;
+      status?: string;
+      page?: number;
+      pageSize?: number;
+    }) =>
+      request.get<UserApplicationsResponse, UserApplicationsResponse>(
+        '/api/user/applications',
+        { params },
+      ),
+  },
+  announcements: {
+    // 族员侧公告列表：走 /api/user/clan-announcements（按主家族自动定位）
+    list: (params?: { page?: number; pageSize?: number }) =>
+      request.get<
+        {
+          data: (UserClanAnnouncement & { is_read: boolean })[];
+          pagination: Pagination<UserClanAnnouncement>['pagination'];
+        },
+        {
+          data: (UserClanAnnouncement & { is_read: boolean })[];
+          pagination: Pagination<UserClanAnnouncement>['pagination'];
+        }
+      >('/api/user/clan-announcements', { params }),
+    markRead: (id: string | number) =>
+      request.post(`/api/user/clan-announcements/${trimId(id)}/read`),
   },
 };
 

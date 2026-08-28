@@ -1,0 +1,14 @@
+﻿node.exe : npm warn Unknown project config "node-linker". This will stop working in the next major version of npm. See 
+`npm help npmrc` for supported config options.
+所在位置 行:1 字符: 1
++ & "D:\nodejs/node.exe" "D:\nodejs/node_modules/npm/bin/npx-cli.js" ts ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm warn Unknown project config "public-hoist-pattern". This will stop working in the next major version of npm. See `n
+pm help npmrc` for supported config options.
+npm warn Unknown project config "hoist-pattern". This will stop working in the next major version of npm. See `npm help
+ npmrc` for supported config options.
+npm warn Unknown project config "shamefully-hoist". This will stop working in the next major version of npm. See `npm h
+elp npmrc` for supported config options.

@@ -1,0 +1,22 @@
+﻿    const ensureUnique = (baseName: string, isMale: boolean): string => {
+      let nm = baseName;
+      let attempt = 0;
+      while (usedNames.has(nm) && attempt < 500) {
+        if (isMale) {
+          const zibei = DemoSeedService.ZIBEI_CHARS[zibeiIdx % DemoSeedService.ZIBEI_CHARS.length];
+          zibeiIdx++;
+          const given = DemoSeedService.MALE_GIVEN_NAMES[(nameIdx + attempt) % DemoSeedService.MALE_GIVEN_NAMES.length];
+          nm = '朱' + zibei + given;
+        } else {
+          // 女性重试同样从完整组合池顺序取，保证与 usedNames 永不冲突（池容量 2500 >> 所需 ~740）
+          nm = FEMALE_NAME_POOL[femaleNameCounter++ % FEMALE_NAME_POOL.length];
+        }
+        attempt++;
+      }
+      usedNames.add(nm);
+      return nm;
+    };
+    this.logger.log('  [3/5] 开始程序化繁衍生成新人物...');
+    // 每对夫妻只允许一个 FamilyUnit（唯一约束 husband_id+wife_id+marriage_order），按丈夫名去重复用
+    const familyByHusband = new Map<string, {key:string;husbandName:string;wifeName:string|null;childNames:string[];childOrders:number[];}>();
+    const getCoupleFamily = (husbandName: string, wifeName: string | null) => {

@@ -3,7 +3,17 @@ import { nextTick, ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserCenterStore } from '@/stores/userCenter'
 import { useAuthStore } from '@/stores/auth'
-import { User, OfficeBuilding, CircleCheck, Connection, Tickets, PictureFilled, Tools, Notebook, List, ChatLineRound, UserFilled, EditPen, Collection, VideoCamera, VideoPlay, House, Setting, FolderOpened, Share, SwitchButton, Search } from '@element-plus/icons-vue'
+import { SwitchButton, Search } from '@element-plus/icons-vue'
+import { iconMap } from './iconMap'
+import {
+  filterMenuByRole,
+  getUserCenterMenuGroups,
+  searchMenu,
+  shouldShowAdminEntry,
+  type ClanContext,
+} from './userCenterMenu'
+import { BREADCRUMB_ROOT, USER_CENTER_EMPTY_TEXT } from './menuCopy'
+import { isGroup, isLeaf, type MenuEntry, type MenuLeaf, type MenuGroup } from './menuTypes'
 import PageLoader, { type PageLoaderLog } from '@/components/PageLoader.vue'
 
 const route = useRoute()
@@ -15,105 +25,53 @@ const authStore = useAuthStore()
 const mobileSidebarVisible = ref(false)
 // 移动端通知抽屉
 const mobileNotifyVisible = ref(false)
-// 菜单搜索关键词（方案 B）
+// 菜单搜索关键词（与 AdminLayout 同方案：空组隐藏）
 const menuKeyword = ref('')
 
-// 方案 B：菜单搜索过滤（空组隐藏）
-const filteredMenuGroups = computed(() => {
-  const kw = menuKeyword.value.trim().toLowerCase()
-  if (!kw) return menuGroups.value
-  return menuGroups.value
-    .map((g) => ({ ...g, children: g.children.filter((c) => c.title.toLowerCase().includes(kw)) }))
-    .filter((g) => g.children.length > 0)
+// 当前主家族上下文（供给菜单生成与裁剪纯函数）
+// 严格收紧 slug 字段为 string | undefined，兼容后端可能的 null 返回
+const clanContext = computed<ClanContext | null>(() => {
+  const c = userStore.profile?.primary_clan
+  if (!c) return null
+  return {
+    slug: c.slug ?? undefined,
+    id: c.id ?? undefined,
+    role: (c.role ?? undefined) as ClanContext['role'],
+  }
 })
+
+// 顶层生成：依赖主家族上下文（加入家族/未加入）
+const rawMenuGroups = computed<MenuEntry[]>(() =>
+  getUserCenterMenuGroups({ clan: clanContext.value }),
+)
+
+// 角色裁剪：EDITOR 在家族事务隐藏“我的验证/我的申请”，未加入家族隐藏依赖家族上下文项
+const roleFilteredGroups = computed<MenuEntry[]>(() =>
+  filterMenuByRole(rawMenuGroups.value, clanContext.value),
+)
+
+// 搜索过滤（仅子项命中，逻辑与 AdminLayout 一致）
+const filteredMenuEntries = computed<MenuEntry[]>(() =>
+  searchMenu(roleFilteredGroups.value, menuKeyword.value),
+)
+
+const leafMenuEntries = computed<MenuLeaf[]>(() =>
+  filteredMenuEntries.value.filter(isLeaf),
+)
+const groupMenuEntries = computed<MenuGroup[]>(() =>
+  filteredMenuEntries.value.filter(isGroup),
+)
 
 // 通知面板
 const notifyVisible = ref(false)
 
-const iconMap: Record<string, any> = {
-  User,
-  OfficeBuilding,
-  CircleCheck,
-  Connection,
-  Tickets,
-  PictureFilled,
-  Tools,
-  Notebook,
-  List,
-  ChatLineRound,
-  UserFilled,
-  EditPen,
-  Collection,
-  VideoCamera,
-  VideoPlay,
-  House,
-  Setting,
-  FolderOpened,
-  Share,
-}
-
 /**
- * 侧边菜单（分类归拢）：
- * - 族谱（树谱/册谱 + 家族相关）置顶，树谱/册谱路径按主家族动态生成；
- * - 其余按"我的内容 / 互动与工具 / 账户与服务"归拢，避免菜单过多过散。
+ * 侧边菜单（与族谱管理后台对齐）
+ * - 数据源统一走 ./userCenterMenu 纯函数（已抽离）；
+ * - 本处只负责：按当前路由推导高亮、面包屑、当前菜单项等响应式 UI 状态。
+ * - “家族事务”分组仅在已加入家族时可见；
+ * - “首页 / 家族概况”作为顶级直达项（leaf）渲染，与 AdminLayout 同构。
  */
-const menuGroups = computed(() => {
-  const clan = userStore.profile?.primary_clan
-  const key = clan ? clan.slug || clan.id : ''
-  const genealogyChildren = clan
-    ? [
-        { title: '家族概况', icon: 'OfficeBuilding', path: '/user-center/clan-overview' },
-        { title: '树谱', icon: 'Share', path: `/tree/${key}` },
-        { title: '册谱', icon: 'Notebook', path: `/cepu/${key}` },
-        { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
-        { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
-      ]
-    : [
-        { title: '浏览家族', icon: 'OfficeBuilding', path: '/clans' },
-        { title: '我的家族', icon: 'OfficeBuilding', path: '/user-center/families' },
-        { title: '家庭关系', icon: 'Connection', path: '/user-center/family-relation' },
-      ]
-  return [
-    {
-      name: '族谱',
-      icon: 'Collection',
-      children: genealogyChildren,
-    },
-    {
-      name: '我的内容',
-      icon: 'FolderOpened',
-      children: [
-        { title: '我的时光', icon: 'PictureFilled', path: '/user-center/timeline' },
-        { title: '家庭图册', icon: 'Notebook', path: '/user-center/family-book' },
-        { title: '我的音像墙', icon: 'VideoCamera', path: '/user-center/videos' },
-        { title: '我的标注', icon: 'EditPen', path: '/user-center/annotations' },
-        { title: '我的记忆贡献', icon: 'Collection', path: '/user-center/memory-contributions' },
-        { title: '个人空间', icon: 'House', path: '/user-center/personal-space/albums' },
-      ],
-    },
-    {
-      name: '互动与工具',
-      icon: 'Tools',
-      children: [
-        { title: '我的工具箱', icon: 'Tools', path: '/user-center/toolbox' },
-        { title: '我的小组', icon: 'ChatLineRound', path: '/user-center/groups' },
-        { title: '寻找小伙伴', icon: 'UserFilled', path: '/user-center/buddies' },
-        { title: '直系血缘视频', icon: 'VideoPlay', path: '/user-center/lineage-video' },
-      ],
-    },
-    {
-      name: '账户与服务',
-      icon: 'User',
-      children: [
-        { title: '个人资料', icon: 'User', path: '/user-center/profile' },
-        { title: '我的验证', icon: 'CircleCheck', path: '/user-center/verify' },
-        { title: '验证记录', icon: 'Tickets', path: '/user-center/verify/records' },
-        { title: '我的订单', icon: 'List', path: '/user-center/orders' },
-        { title: '设置', icon: 'Setting', path: '/user-center/settings' },
-      ],
-    },
-  ]
-})
 
 // 子页面 → 所属菜单项（前缀匹配，用于详情页的高亮与面包屑）
 const subPageMap: [RegExp, string][] = [
@@ -125,7 +83,41 @@ const subPageMap: [RegExp, string][] = [
   [/^\/user-center\/family-book\/(preview\/)?\d+/, '/user-center/family-book'],
   [/^\/user-center\/personal-space\//, '/user-center/personal-space/albums'],
   [/^\/user-center\/family-relation\/history/, '/user-center/family-relation'],
+  // 我的验证二级页（tab 化后保持高亮）
+  [/^\/user-center\/verify(\/|$)/, '/user-center/verify'],
+  // 我的申请二级页
+  [/^\/user-center\/my-applications(\/|$)/, '/user-center/my-applications'],
+  // 家族公告详情
+  [/^\/user-center\/announcements\/[^/]+/, '/user-center/announcements'],
 ]
+
+/** 在给定菜单集合中查找路径精确匹配的项（涵盖 leaf 与 group 子项） */
+const matchInEntries = (
+  items: MenuEntry[],
+  path: string,
+): MenuLeaf | null => {
+  for (const entry of items) {
+    if (isLeaf(entry) && entry.path === path) return entry
+    if (isGroup(entry)) {
+      const child = entry.children.find((c) => c.path === path)
+      if (child) return child
+    }
+  }
+  return null
+}
+
+/**
+ * 从菜单中查找路径精确匹配的项。
+ * 优先查角色裁剪后的菜单；若找不到（如 EDITOR 直达被隐藏的
+ * “我的申请/我的验证”时），回退到未裁剪的完整菜单，
+ * 保证面包屑/高亮在 URL 直达时仍能正确解析。
+ */
+const findMenuItem = (path: string) =>
+  matchInEntries(filteredMenuEntries.value, path) ||
+  matchInEntries(rawMenuGroups.value, path)
+
+/** 首页（无对应菜单项时的回退/面包屑目标） */
+const HOME_MENU = { title: '首页', path: '/user-center' }
 
 const activeMenu = computed(() => {
   // 精确命中直接返回
@@ -137,17 +129,6 @@ const activeMenu = computed(() => {
   return route.path
 })
 
-const findMenuItem = (path: string) => {
-  for (const group of menuGroups.value) {
-    const item = group.children.find((m) => m.path === path)
-    if (item) return item
-  }
-  return null
-}
-
-/** 首页（无对应菜单项时的回退/面包屑目标） */
-const HOME_MENU = { title: '首页', path: '/user-center' }
-
 const currentMenu = computed(() => {
   // 首页本身没有子菜单项，直接回退到"首页"
   if (route.path === '/user-center') return HOME_MENU
@@ -155,6 +136,7 @@ const currentMenu = computed(() => {
   return findMenuItem(activeMenu.value) || HOME_MENU
 })
 
+// 同步计算“当前主家族角色”与“管理员入口可见性”
 const roleTagType = computed(() => {
   const role = userStore.profile?.primary_clan?.role
   if (role === 'OWNER') return 'danger'
@@ -217,6 +199,18 @@ function gotoAdminDashboard() {
 }
 
 /**
+ * 读取徽章计数（供侧边菜单使用）
+ * - badgeKey 与 MenuLeaf.badgeKey 对齐，与 UserBadgeCounts 字段一致；
+ * - 未加载时返回 0，避免渲染抖动。
+ */
+function getBadgeCount(key: string): number {
+  const b = userStore.badgeCounts
+  if (!b) return 0
+  const v = (b as any)[key]
+  return typeof v === 'number' ? v : 0
+}
+
+/**
  * 用户中心全局加载阶段机：避免初次进入时侧边栏头像/名字/家族名空白，
  * 让用户清楚看到"正在拉取资料 → 设置 → 通知 → 渲染子页面"的进度。
  *
@@ -275,9 +269,9 @@ async function loadUserCenter() {
       )
     }
 
-    // ========== 阶段2：settings + notifications（并行） ==========
+    // ========== 阶段2：settings + notifications + badges（并行） ==========
     centerStage.value = 'settings'
-    pushCenterLog('开始并行加载设置与通知')
+    pushCenterLog('开始并行加载设置、通知与徽章')
     await Promise.all([
       userStore
         .fetchSettings()
@@ -297,6 +291,21 @@ async function loadUserCenter() {
         })
         .catch((err) => {
           pushCenterLog(`通知加载失败：${err?.message || err}`, 'error')
+        }),
+      userStore
+        .fetchBadgeCounts()
+        .then((b) => {
+          if (b) {
+            pushCenterLog(
+              `徽章已就绪（公告 ${b.announcements} / 申请 ${b.applications} / 验证 ${b.verify}）`,
+              'success',
+            )
+          } else {
+            pushCenterLog('徽章接口未返回数据，侧栏将不显示徽章', 'warn')
+          }
+        })
+        .catch((err) => {
+          pushCenterLog(`徽章加载失败：${err?.message || err}`, 'error')
         }),
     ])
 
@@ -430,18 +439,24 @@ watch(
           @select="handleMenuSelect"
           mode="vertical"
         >
-          <ElMenuItem index="/user-center">
-            <ElIcon><HomeFilled /></ElIcon>
-            <span>首页</span>
+          <!-- 顶级直达项（首页 / 家族概况） -->
+          <ElMenuItem
+            v-for="leaf in leafMenuEntries"
+            :key="leaf.path"
+            :index="leaf.path"
+          >
+            <ElIcon><component :is="iconMap[leaf.icon]" /></ElIcon>
+            <span>{{ leaf.title }}</span>
           </ElMenuItem>
+          <!-- 顶级分组 -->
           <ElSubMenu
-            v-for="group in filteredMenuGroups"
-            :key="group.name"
-            :index="group.name"
+            v-for="group in groupMenuEntries"
+            :key="group.title"
+            :index="group.title"
           >
             <template #title>
               <ElIcon><component :is="iconMap[group.icon]" /></ElIcon>
-              <span>{{ group.name }}</span>
+              <span>{{ group.title }}</span>
             </template>
             <ElMenuItem
               v-for="item in group.children"
@@ -449,7 +464,13 @@ watch(
               :index="item.path"
             >
               <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
-              <span>{{ item.title }}</span>
+              <span class="menu-label">{{ item.title }}</span>
+              <ElBadge
+                v-if="item.badgeKey && getBadgeCount(item.badgeKey) > 0"
+                :value="getBadgeCount(item.badgeKey)"
+                :max="99"
+                class="menu-badge"
+              />
             </ElMenuItem>
           </ElSubMenu>
         </ElMenu>
@@ -521,18 +542,24 @@ watch(
             @select="handleMenuSelect"
             mode="vertical"
           >
-            <ElMenuItem index="/user-center">
-              <ElIcon><HomeFilled /></ElIcon>
-              <span>首页</span>
+            <!-- 顶级直达项（首页 / 家族概况） -->
+            <ElMenuItem
+              v-for="leaf in leafMenuEntries"
+              :key="leaf.path"
+              :index="leaf.path"
+            >
+              <ElIcon><component :is="iconMap[leaf.icon]" /></ElIcon>
+              <span>{{ leaf.title }}</span>
             </ElMenuItem>
+            <!-- 顶级分组 -->
             <ElSubMenu
-              v-for="group in filteredMenuGroups"
-              :key="group.name"
-              :index="group.name"
+              v-for="group in groupMenuEntries"
+              :key="group.title"
+              :index="group.title"
             >
               <template #title>
                 <ElIcon><component :is="iconMap[group.icon]" /></ElIcon>
-                <span>{{ group.name }}</span>
+                <span>{{ group.title }}</span>
               </template>
               <ElMenuItem
                 v-for="item in group.children"
@@ -540,7 +567,13 @@ watch(
                 :index="item.path"
               >
                 <ElIcon><component :is="iconMap[item.icon]" /></ElIcon>
-                <span>{{ item.title }}</span>
+                <span class="menu-label">{{ item.title }}</span>
+                <ElBadge
+                  v-if="item.badgeKey && getBadgeCount(item.badgeKey) > 0"
+                  :value="getBadgeCount(item.badgeKey)"
+                  :max="99"
+                  class="menu-badge"
+                />
               </ElMenuItem>
             </ElSubMenu>
           </ElMenu>
@@ -840,6 +873,22 @@ watch(
 
 .side-menu :deep(.el-menu-item:hover) {
   background-color: rgba(201, 169, 110, 0.08);
+}
+
+/* 菜单徽章：标题与数字横向并排，徽章靠右悬浮 */
+.side-menu :deep(.el-menu-item .menu-label) {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+.side-menu :deep(.el-menu-item .menu-badge) {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.side-menu :deep(.el-menu-item .menu-badge .el-badge__content) {
+  transform: translateY(-1px);
 }
 
 .admin-entry {

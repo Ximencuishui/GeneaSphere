@@ -499,9 +499,23 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'verify/records',
-        name: 'user-verify-records',
-        component: () => import('@/views/user-center/verify/MyVerifyRecordsPage.vue'),
-        meta: { title: '验证记录', requiresAuth: true },
+        // 验证记录已合并到「我的验证」tab 化页面（菜单对齐计划 v1.0 P2）
+        redirect: () => '/user-center/verify?tab=records',
+      },
+      // 我的申请（与菜单对齐族谱管理后台补充 · v1.0）
+      // 详细实现见 P2，当前提供占位页使菜单可点击。
+      {
+        path: 'my-applications',
+        name: 'user-my-applications',
+        component: () => import('@/views/user-center/MyApplicationsPage.vue'),
+        meta: { title: '我的申请', requiresAuth: true },
+      },
+      // 家族公告族员只读页（同上 P2 计划实现详情）
+      {
+        path: 'announcements',
+        name: 'user-announcements',
+        component: () => import('@/views/user-center/AnnouncementsPage.vue'),
+        meta: { title: '家族公告', requiresAuth: true },
       },
       {
         path: 'family-relation',

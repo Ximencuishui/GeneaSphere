@@ -769,6 +769,318 @@ export class UserService {
     return { message: '已标记为已读' };
   }
 
+  // ==================== 徽章计数（P0 阶段） ====================
+
+  async getBadgeCounts(userId: string) {
+    const membership = await this.prisma.clanMember.findFirst({
+      where: { user_id: userId },
+      orderBy: [{ joined_at: 'asc' }],
+    });
+    const clanId = membership?.clan_id ?? null;
+
+    const [
+      notificationCount,
+      pendingEndorsementCount,
+      pendingSessionAsInviterCount,
+      pendingModificationCount,
+      pendingRelationChangeCount,
+      pendingSessionAsScannerCount,
+      announcementTotalCount,
+      announcementReadCount,
+      activeOrderCount,
+    ] = await Promise.all([
+      this.prisma.notification.count({ where: { user_id: userId, is_read: false } }),
+      this.prisma.endorsement.count({
+        where: { endorser_user_id: userId, result: null, expire_at: { gt: new Date() } },
+      }),
+      this.prisma.verificationSession.count({
+        where: { inviter_user_id: userId, status: 'PENDING' },
+      }),
+      this.prisma.personModificationRequest.count({
+        where: { requester_user_id: userId, status: 'PENDING' },
+      }),
+      this.prisma.familyRelationChange.count({
+        where: { target_user_id: userId, status: 'pending' },
+      }),
+      this.prisma.verificationSession.count({
+        where: { scanned_user_id: userId, status: 'PENDING' },
+      }),
+      clanId
+        ? this.prisma.clanAnnouncement.count({ where: { clan_id: clanId, is_active: true } })
+        : 0,
+      clanId
+        ? this.prisma.notification.count({
+            where: { user_id: userId, target_type: 'CLAN_ANNOUNCEMENT', is_read: true },
+          })
+        : 0,
+      this.prisma.printOrder.count({
+        where: { user_id: userId, status: { in: ['PAID', 'PRINTING', 'SHIPPED'] } },
+      }),
+    ]);
+
+    const verifyTotal =
+      pendingEndorsementCount + pendingSessionAsInviterCount + pendingSessionAsScannerCount;
+    const applicationsTotal =
+      pendingModificationCount + pendingSessionAsScannerCount + pendingRelationChangeCount;
+    const announcementsUnread = Math.max(0, announcementTotalCount - announcementReadCount);
+
+    return {
+      notifications: notificationCount,
+      verify: verifyTotal,
+      applications: applicationsTotal,
+      announcements: announcementsUnread,
+      groups: 0,
+      orders: activeOrderCount,
+      details: {
+        verify_pending_endorsement: pendingEndorsementCount,
+        verify_pending_session_as_inviter: pendingSessionAsInviterCount,
+        verify_pending_session_as_scanner: pendingSessionAsScannerCount,
+        applications_pending_modification: pendingModificationCount,
+        applications_pending_relation: pendingRelationChangeCount,
+      },
+      primary_clan_id: clanId ? clanId.toString() : null,
+    };
+  }
+
+  // ==================== 我的申请（P0 阶段） ====================
+
+  async listMyApplications(
+    userId: string,
+    options: {
+      category?: 'modification' | 'verification' | 'relation_change';
+      status?: string;
+      page?: number;
+      pageSize?: number;
+    } = {},
+  ) {
+    const page = options.page ?? 1;
+    const pageSize = options.pageSize ?? 20;
+    const skip = (page - 1) * pageSize;
+
+    const include = (options.category ? [options.category] : [
+      'modification',
+      'verification',
+      'relation_change',
+    ]) as Array<'modification' | 'verification' | 'relation_change'>;
+
+    const buildResult = <T>(rows: T[], total: number, mapper: (row: any) => any) => ({
+      data: rows.map(mapper),
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        total_pages: Math.ceil(total / pageSize),
+      },
+    });
+
+    const out: Record<string, any> = {};
+
+    if (include.includes('modification')) {
+      const where: any = { requester_user_id: userId };
+      if (options.status) where.status = options.status;
+      const [rows, total] = await Promise.all([
+        this.prisma.personModificationRequest.findMany({ where, orderBy: { created_at: 'desc' }, skip, take: pageSize }),
+        this.prisma.personModificationRequest.count({ where }),
+      ]);
+      out.modification = buildResult(rows, total, (r: any) => ({
+        id: r.id.toString(),
+        category: 'modification',
+        person_id: r.person_id.toString(),
+        clan_id: r.clan_id.toString(),
+        field_name: r.field_name,
+        old_value: r.old_value,
+        new_value: r.new_value,
+        reason: r.reason,
+        status: r.status,
+        reject_reason: r.reject_reason,
+        reviewer_id: r.reviewer_id,
+        reviewed_at: r.reviewed_at,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      }));
+    }
+
+    if (include.includes('verification')) {
+      const where: any = {
+        OR: [{ inviter_user_id: userId }, { scanned_user_id: userId }],
+      };
+      if (options.status) where.status = options.status;
+      const [rows, total] = await Promise.all([
+        this.prisma.verificationSession.findMany({ where, orderBy: { created_at: 'desc' }, skip, take: pageSize }),
+        this.prisma.verificationSession.count({ where }),
+      ]);
+      out.verification = buildResult(rows, total, (r: any) => ({
+        id: r.id.toString(),
+        category: 'verification',
+        clan_id: r.clan_id.toString(),
+        qrcode_id: r.qrcode_id?.toString() || null,
+        inviter_user_id: r.inviter_user_id,
+        scanner_nickname: r.scanner_nickname,
+        scanner_phone: r.scanner_phone,
+        verify_method: r.verify_method,
+        status: r.status,
+        matched_person_id: r.matched_person_id?.toString() || null,
+        passed_at: r.passed_at,
+        fail_reason: r.fail_reason,
+        expire_at: r.expire_at,
+        created_at: r.created_at,
+      }));
+    }
+
+    if (include.includes('relation_change')) {
+      const where: any = { target_user_id: userId };
+      if (options.status) where.status = options.status;
+      const [rows, total] = await Promise.all([
+        this.prisma.familyRelationChange.findMany({ where, orderBy: { created_at: 'desc' }, skip, take: pageSize }),
+        this.prisma.familyRelationChange.count({ where }),
+      ]);
+      out.relation_change = buildResult(rows, total, (r: any) => ({
+        id: r.id.toString(),
+        category: 'relation_change',
+        clan_id: r.clan_id.toString(),
+        person_id: r.person_id.toString(),
+        operator_user_id: r.operator_user_id,
+        change_type: r.change_type,
+        previous_state: r.previous_state,
+        current_state: r.current_state,
+        privacy_level: r.privacy_level,
+        change_reason: r.change_reason,
+        status: r.status,
+        created_at: r.created_at,
+      }));
+    }
+
+    return out;
+  }
+
+  // ==================== 家族公告（P2：族员只读） ====================
+
+  /**
+   * 列出我主家族的 active 公告
+   * - 必须先获取主家族；
+   * - 过滤 is_active=true 并按置顶/发布时间排序；
+   * - 序列化 BigInt。
+   */
+  async listClanAnnouncements(
+    userId: string,
+    options: { page?: number; pageSize?: number } = {},
+  ) {
+    const page = options.page ?? 1;
+    const pageSize = options.pageSize ?? 20;
+    const skip = (page - 1) * pageSize;
+
+    const membership = await this.prisma.clanMember.findFirst({
+      where: { user_id: userId },
+      orderBy: [{ joined_at: 'asc' }],
+    });
+    if (!membership) {
+      return { data: [], pagination: { page, page_size: pageSize, total: 0, total_pages: 0 } };
+    }
+    const clanId = membership.clan_id;
+
+    const where = { clan_id: clanId, is_active: true };
+
+    const [rows, total, readCount] = await Promise.all([
+      this.prisma.clanAnnouncement.findMany({
+        where,
+        include: {
+          creator: { select: { id: true, phone: true, nickname: true } },
+        },
+        orderBy: [{ is_pinned: 'desc' }, { published_at: 'desc' }, { created_at: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.clanAnnouncement.count({ where }),
+      // 已读列表：target_type=CLAN_ANNOUNCEMENT 且 is_read=true 的 Notification 条数
+      this.prisma.notification.findMany({
+        where: {
+          user_id: userId,
+          target_type: 'CLAN_ANNOUNCEMENT',
+          is_read: true,
+        },
+        select: { target_id: true },
+      }),
+    ]);
+    const readSet = new Set(readCount.map((r) => r.target_id));
+
+    const data = rows.map((a) => ({
+      id: a.id.toString(),
+      title: a.title,
+      content: a.content,
+      cover_url: a.cover_url,
+      is_pinned: a.is_pinned,
+      is_active: a.is_active,
+      published_at: a.published_at,
+      creator_id: a.created_by,
+      creator_name: a.creator.nickname || a.creator.phone,
+      created_at: a.created_at,
+      updated_at: a.updated_at,
+      is_read: readSet.has(a.id.toString()),
+    }));
+
+    return {
+      data,
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        total_pages: Math.ceil(total / pageSize),
+      },
+    };
+  }
+
+  /**
+   * 标记家族公告已读：以 Notification 兼作回写标记
+   * - 若同 target_id+target_type 的通知已存在，仅置 is_read=true；
+   * - 否则创建一条新通知（type=SYSTEM, target_type=CLAN_ANNOUNCEMENT）。
+   */
+  async markClanAnnouncementRead(userId: string, announcementId: string) {
+    const announcement = await this.prisma.clanAnnouncement.findUnique({
+      where: { id: BigInt(announcementId) },
+    });
+    if (!announcement) {
+      throw new NotFoundException('公告不存在');
+    }
+    // 限定只能读所属家族的公告
+    const membership = await this.prisma.clanMember.findFirst({
+      where: { user_id: userId, clan_id: announcement.clan_id },
+    });
+    if (!membership) {
+      throw new ForbiddenException('您不是该家族的成员');
+    }
+
+    const existing = await this.prisma.notification.findFirst({
+      where: {
+        user_id: userId,
+        target_type: 'CLAN_ANNOUNCEMENT',
+        target_id: announcement.id.toString(),
+      },
+    });
+    if (existing) {
+      if (!existing.is_read) {
+        await this.prisma.notification.update({
+          where: { id: existing.id },
+          data: { is_read: true, read_at: new Date() },
+        });
+      }
+    } else {
+      await this.prisma.notification.create({
+        data: {
+          user_id: userId,
+          clan_id: announcement.clan_id,
+          type: NotificationType.SYSTEM,
+          title: '家族公告已读',
+          content: announcement.title,
+          target_type: 'CLAN_ANNOUNCEMENT',
+          target_id: announcement.id.toString(),
+          is_read: true,
+          read_at: new Date(),
+        },
+      });
+    }
+    return { message: '已标记为已读' };
+  }
+
   // ==================== 工具方法 ====================
 
   private maskPhone(phone: string): string {

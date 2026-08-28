@@ -242,6 +242,54 @@ export class UserController {
     return this.userService.markNotificationRead(req.user.userId, notificationId);
   }
 
+  // ==================== P0：徽章计数聚合 ====================
+
+  @Get('badge-counts')
+  @ApiOperation({ summary: '用户中心侧边栏徽章聚合计数（notifications/verify/applications/announcements/groups/orders）' })
+  async getBadgeCounts(@Request() req) {
+    return this.userService.getBadgeCounts(req.user.userId);
+  }
+
+  // ==================== P0：我的申请聚合 ====================
+
+  @Get('applications')
+  @ApiOperation({ summary: '我的申请聚合（族谱修改 / 验证会话 / 家庭关系变更）' })
+  async listMyApplications(
+    @Request() req,
+    @Query('category') category?: 'modification' | 'verification' | 'relation_change',
+    @Query('status') status?: string,
+    @Query('page') pageStr = '1',
+    @Query('pageSize') pageSizeStr = '20',
+  ) {
+    return this.userService.listMyApplications(req.user.userId, {
+      category,
+      status,
+      page: parseInt(pageStr) || 1,
+      pageSize: parseInt(pageSizeStr) || 20,
+    });
+  }
+
+  // ==================== P2：家族公告（族员只读） ====================
+
+  @Get('clan-announcements')
+  @ApiOperation({ summary: '我所属家族的公告列表（族员只读）' })
+  async listClanAnnouncements(
+    @Request() req,
+    @Query('page') pageStr = '1',
+    @Query('pageSize') pageSizeStr = '20',
+  ) {
+    return this.userService.listClanAnnouncements(req.user.userId, {
+      page: parseInt(pageStr) || 1,
+      pageSize: parseInt(pageSizeStr) || 20,
+    });
+  }
+
+  @Post('clan-announcements/:id/read')
+  @ApiOperation({ summary: '标记家族公告已读' })
+  async markClanAnnouncementRead(@Request() req, @Param('id') id: string) {
+    return this.userService.markClanAnnouncementRead(req.user.userId, id);
+  }
+
   // ==================== 家族概况（只读） ====================
 
   @Get('clan-overview')

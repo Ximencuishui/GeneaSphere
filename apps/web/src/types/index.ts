@@ -831,3 +831,101 @@ export interface UpdateCustodyPayload {
   is_biological?: boolean;
   change_reason?: string;
 }
+
+// ==================== P0：徽章计数 & 我的申请 ====================
+
+export interface UserBadgeCounts {
+  notifications: number;
+  verify: number;
+  applications: number;
+  announcements: number;
+  groups: number;
+  orders: number;
+  details: {
+    verify_pending_endorsement: number;
+    verify_pending_session_as_inviter: number;
+    verify_pending_session_as_scanner: number;
+    applications_pending_modification: number;
+    applications_pending_relation: number;
+  };
+  primary_clan_id: string | null;
+}
+
+export type UserApplicationCategory =
+  | 'modification'
+  | 'verification'
+  | 'relation_change';
+
+export interface UserModificationApplication {
+  id: string;
+  category: 'modification';
+  person_id: string;
+  clan_id: string;
+  field_name: string;
+  old_value: string | null;
+  new_value: string;
+  reason: string | null;
+  status: string;
+  reject_reason: string | null;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserVerificationApplication {
+  id: string;
+  category: 'verification';
+  clan_id: string;
+  qrcode_id: string | null;
+  inviter_user_id: string | null;
+  scanner_nickname: string | null;
+  scanner_phone: string | null;
+  verify_method: string | null;
+  status: string;
+  matched_person_id: string | null;
+  passed_at: string | null;
+  fail_reason: string | null;
+  expire_at: string;
+  created_at: string;
+}
+
+export interface UserRelationChangeApplication {
+  id: string;
+  category: 'relation_change';
+  clan_id: string;
+  person_id: string;
+  operator_user_id: string;
+  change_type: string;
+  previous_state: any;
+  current_state: any;
+  privacy_level: string;
+  change_reason: string | null;
+  status: string;
+  created_at: string;
+}
+
+export type UserApplication =
+  | UserModificationApplication
+  | UserVerificationApplication
+  | UserRelationChangeApplication;
+
+export interface UserApplicationsResponse {
+  modification?: Pagination<UserModificationApplication>;
+  verification?: Pagination<UserVerificationApplication>;
+  relation_change?: Pagination<UserRelationChangeApplication>;
+}
+
+export interface UserClanAnnouncement {
+  id: string;
+  title: string;
+  content: string;
+  cover_url: string | null;
+  is_pinned: boolean;
+  is_active: boolean;
+  published_at: string | null;
+  creator_id: string;
+  creator_name: string;
+  created_at: string;
+  updated_at: string;
+}
