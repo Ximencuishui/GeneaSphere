@@ -372,6 +372,10 @@ async function loadG6Runtime(): Promise<G6Runtime> {
 
   // 自定义边：使用布局引擎预计算的正交路径
   // 完全覆盖 getKeyPath 和 getEndpoints，直接使用预计算的绝对坐标
+  // [2026-08-28 C1] 生成圆角拐弯路径，使牵引线视觉上更柔顺（代替硬直角）。
+  //   仅在路径点数 ≥ 3 且是拐点时插入圆弧，未拐点处保持纯直线。
+  //   默认圆角半径 4 px（与 plan §C1 设定一致）。
+  const ORTH_CORNER_RADIUS = 4
   class OrthEdge extends Polyline {
     getEndpoints(attributes: any, optimize = true, controlPoints = []) {
       const orthPath = attributes.orthPath;
@@ -381,14 +385,52 @@ async function loadG6Runtime(): Promise<G6Runtime> {
       }
       return super.getEndpoints(attributes, optimize, controlPoints);
     }
-    
+
     getKeyPath(attributes: any) {
       const orthPath = attributes.orthPath;
       if (orthPath?.points && orthPath.points.length >= 2) {
         const pts = orthPath.points;
+        const radius = attributes.cornerRadius ?? ORTH_CORNER_RADIUS;
         const path: any[] = [['M', pts[0].x, pts[0].y]];
+
+        // [2026-08-28 C1] 插入圆角拐弯：
+        //   每 3 个连续点 (a, b, c) 检查是否构成拐弯（非共线），
+        //   如是：从 a 走到 b 之前插入 L（到 b 靠近 a 侧），然后 Q（二次贝塞尔）绕到 b 靠近 c 侧
+        //   ，再从那里直线走到 c。
+        //   仅相邻点产生“折角”时才插入圆弧，避免退化点（2 点或共线点）产生额外零长度路径。
         for (let i = 1; i < pts.length; i++) {
-          path.push(['L', pts[i].x, pts[i].y]);
+          const prev = pts[i - 1];
+          const curr = pts[i];
+          const next = pts[i + 1];
+          if (!next) {
+            // 终点：纯直线
+            path.push(['L', curr.x, curr.y]);
+            continue;
+          }
+          // 检测拐弯：prev→curr 与 curr→next 不共线
+          const inHoriz = curr.y === prev.y
+          const inVert = curr.x === prev.x
+          const outHoriz = next.y === curr.y
+          const outVert = next.x === curr.x
+          const isTurn = (inHoriz && outVert) || (inVert && outHoriz)
+          if (!isTurn) {
+            path.push(['L', curr.x, curr.y]);
+            continue;
+          }
+          // 计算圆角起止点（在 curr 两侧各退 radius）
+          // 入边方向
+          const inDx = Math.sign(curr.x - prev.x)
+          const inDy = Math.sign(curr.y - prev.y)
+          // 出边方向
+          const outDx = Math.sign(next.x - curr.x)
+          const outDy = Math.sign(next.y - curr.y)
+          const startX = curr.x - inDx * radius
+          const startY = curr.y - inDy * radius
+          const endX = curr.x + outDx * radius
+          const endY = curr.y + outDy * radius
+          path.push(['L', startX, startY])
+          // 二次贝塞尔曲线：控制点 curr，走向 endX/endY
+          path.push(['Q', curr.x, curr.y, endX, endY])
         }
         return path;
       }
@@ -695,72 +737,69 @@ function failLoading() {
 // detailed/xianshi/su 三个传统横排模式统一加宽到 76 px；
 // - 高度 < 70：走 drawLabelShape（G6 默认 label 路径）
 // - 高度 >= 70：走 drawTraditionalContent（自定义渲染，PRD §2.1.6 四字段布局）
-// [2026-08-27 P1 修复] 浏览器实测 56×110 宽高比仅 0.51（偏窄，纵向留白过多），
-// 宽度上调到 76，使宽高比 ≈ 0.69 更协调；同步缩小 nodeSep 避免过宽。
+// [2026-08-28 B1 调优] 卡片宽高比与间距调优
+// 目标：宽高比 0.85-1.0（接近正方形），同代间距卡片宽度 × 0.25，
+//   代际间距卡片高度 × 1.15，夫妻间距 spouseGap = 16（与 LayoutConfig 默认一致）。
+//   紧贴传统族谱（苏式/欧式）的卡片比例。
 const viewModeConfig = computed(() => ({
   compact: {
-    nodeWidth: 48,
-    nodeHeight: 36,  // 36 >= 70 阈值以下，走 drawLabelShape；保留紧凑横排
+    // 52×36：保持横排压缩，右上角调色板与姓名同行
+    nodeWidth: 52,
+    nodeHeight: 36,
     avatarSize: 0,
     nameFontSize: 12,
     sublabelFontSize: 9,
-    nodeSep: 36,
-    rankSep: 95,
+    nodeSep: 16,           // 52 × 0.25 = 13 → 上调至 16（间过窄会重叠）
+    rankSep: 42,           // 36 × 1.15 = 41.4
   },
-  // [树谱卡片 2026-08-27] 详细模式：传统横排卡片，展示身份标签/排行/姓名/生卒年
-  // [P1 2026-08-27] 56→76：消除「纵向留白 > 内容」失衡，宽高比 0.51→0.69
+  // 详细模式：传统横排卡片，84×100 使宽高比 ≈ 0.84 更接近正方形
   detailed: {
-    nodeWidth: 76,
-    nodeHeight: 110,
+    nodeWidth: 84,
+    nodeHeight: 100,
     avatarSize: 0,
     nameFontSize: 13,
     sublabelFontSize: 0,  // 由 drawTraditionalContent 自渲染生卒年，不走 sublabel
-    nodeSep: 32,
-    rankSep: 140,  // 高度压缩后代际间距同步调整
+    nodeSep: 22,           // 84 × 0.25 = 21
+    rankSep: 115,          // 100 × 1.15
   },
   portrait: {
-    nodeWidth: 90,
-    nodeHeight: 110,
+    nodeWidth: 94,
+    nodeHeight: 100,
     avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 0,
-    nodeSep: 44,
-    rankSep: 140,
+    nodeSep: 24,           // 94 × 0.25 = 23.5
+    rankSep: 115,          // 100 × 1.15
   },
-  // [吊线图 2026-08-17] 传统世系吊线：子女按 child_links.mother_id 归属各妻子节点下；
-  // 卡片显示身份标签 + 排行 + 姓名 + 生卒年；过继/收养（child_type !== BIOLOGICAL）连线为虚线。
-  // [P1 2026-08-27] 56→76：与 detailed/su 对齐，避免「三种传统卡片尺寸不一」
+  // 吊线图传统世系：84×90，宽高比 ≈ 0.93，与 detailed 统一宽度
   xianshi: {
-    nodeWidth: 76,
-    nodeHeight: 100,
+    nodeWidth: 84,
+    nodeHeight: 90,
     avatarSize: 0,
     nameFontSize: 12,
     sublabelFontSize: 0,
-    nodeSep: 30,
-    rankSep: 130,
+    nodeSep: 22,
+    rankSep: 104,          // 90 × 1.15 = 103.5
   },
-  // [苏式 2026-08-19] 苏式世系条原本就是竖排窄卡，现在改为横排后加宽；
-  // drawTraditionalContent 对 su 模式走「姓名横排、生卒年小字同行」布局。
-  // [P1 2026-08-27] 60→76：与 detailed/xianshi 对齐
+  // 苏式：传统横排，与 detailed/xianshi 同宽
   su: {
-    nodeWidth: 76,
-    nodeHeight: 110,
+    nodeWidth: 84,
+    nodeHeight: 100,
     avatarSize: 0,
     nameFontSize: 13,
     sublabelFontSize: 0,
-    nodeSep: 30,
-    rankSep: 140,
+    nodeSep: 22,
+    rankSep: 115,
   },
-  // [浙式 2026-08-19] 浙式世代格保持横排，走 drawLabelShape（G6 sublabel）；
-  // 宽度 120、高度 56 已是横排布局，PRD §2.1.6 字段全部通过 labelText/sublabelText 渲染。
+  // 浙式：世代格保持横排 120×56（横长卡），走 drawLabelShape
   zhe: {
     nodeWidth: 120,
     nodeHeight: 56,
     avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 9,
-    nodeSep: 28,
-    rankSep: 110,
+    nodeSep: 30,           // 120 × 0.25
+    rankSep: 64,           // 56 × 1.15 = 64.4
   },
 }));
 
@@ -1011,6 +1050,10 @@ const transformToG6Data = (
       if (link) {
         g.data.child_type = link.child_type;
         g.data.birth_order = link.birth_order;
+        // [2026-08-28 P4 一妻多妾优化] 透出 mother_id 供 layoutEdges / 边样式读取
+        // - layoutEdges：按母亲归属决定父子边牵引线起点 X
+        // - 边样式：isConcubineChild + palette 区分妾之子
+        g.data.mother_id = link.mother_id ? String(link.mother_id) : undefined;
         // [树谱卡片 2026-08-26] 用实际排行重新推导子女身份标签
         g.data.identity_label = deriveIdentityLabel(child, {
           birthOrder: link.birth_order ?? undefined,
@@ -1657,14 +1700,63 @@ const initGraph = async (data: GenealogyNode) => {
     height: config.nodeHeight,
   }));
 
-  const layoutEdges: LayoutEdge[] = (graphData.edges || []).map((e: any) => ({
-    id: String(e.id),
-    source: String(e.source),
-    target: String(e.target),
-    kind: e.data?.kind === 'spouse' ? 'spouse' : 'parent-child',
-    isCurrent: e.data?.is_current,
-    marriageOrder: e.data?.order,
-  }));
+  // [2026-08-28 P1 一妻多妾优化] 建立 personId → spouse node id 映射，供 layout-engine 查找妾节点位置
+  // 背景：layout-engine 收到 motherId 后，需要从 nodePositions.get(motherId)?.x 取妾节点中心 X。
+  // 但 mother_id 是原始 personId（如 "5"），而妾节点 G6 id 是 "5-spouse-3"（副本）或 "5"（外部配偶）。
+  // 这里将所有妾节点的 originalId（personId）映射到其 G6 id。
+  const spouseNodeIdByPersonId = new Map<string, string>()
+  for (const node of pendingSpouseNodes) {
+    const personId = node.data?.originalId ? String(node.data.originalId) : String(node.id)
+    if (!spouseNodeIdByPersonId.has(personId)) {
+      spouseNodeIdByPersonId.set(personId, String(node.id))
+    }
+  }
+
+  // [2026-08-28 P3] 建立 childId → birthOrder 索引，供 layoutEdges 按出生顺序透传
+  const birthOrderByChildId = new Map<string, number>()
+  // [P4] target → mother_id，layoutEdges 转换时反查（非 xianshi 模式下边 data 不含 mother_id）
+  const motherIdByChildId = new Map<string, string>()
+  // 递归遍历 treeData 收集（每个节点的 data.birth_order / mother_id 在 transformToG6Data 中已写入）
+  const collectChildMeta = (n: any) => {
+    if (n?.data?.birth_order != null) {
+      birthOrderByChildId.set(String(n.id), Number(n.data.birth_order))
+    }
+    if (n?.data?.mother_id) {
+      motherIdByChildId.set(String(n.id), String(n.data.mother_id))
+    }
+    if (n?.children) n.children.forEach(collectChildMeta)
+  }
+  collectChildMeta(treeData)
+
+  const layoutEdges: LayoutEdge[] = (graphData.edges || []).map((e: any) => {
+    const targetId = String(e.target)
+    // [P1] 优先读边自身的 data.mother_id（xianshi 模式下 addedEdges 已写入），
+    // 否则回退到 treeData 节点的 data.mother_id（非 xianshi 模式）。
+    const motherPersonId = e.data?.mother_id
+      ? String(e.data.mother_id)
+      : motherIdByChildId.get(targetId)
+    // [P1] mother_id 映射为 spouse node id；若映射失败则保留原值（layout-engine 会回退到默认起点）
+    const motherNodeId = motherPersonId
+      ? (spouseNodeIdByPersonId.get(motherPersonId) ?? motherPersonId)
+      : undefined
+    // [P4] 是否为妾之子：mother 存在且与 source 不同（即母亲是妾，不是父自己）
+    const isConcubineChild = !!motherPersonId && motherPersonId !== String(e.source)
+    const palette = isConcubineChild && motherPersonId ? getWifePaletteColor(motherPersonId) : undefined
+    // [P3] birthOrder 透传（用于 layout-engine 按出生顺序排序子节点）
+    const birthOrder = e.data?.birth_order ?? birthOrderByChildId.get(targetId)
+    return {
+      id: String(e.id),
+      source: String(e.source),
+      target: targetId,
+      kind: e.data?.kind === 'spouse' ? 'spouse' : 'parent-child',
+      isCurrent: e.data?.is_current,
+      marriageOrder: e.data?.order,
+      motherId: motherNodeId,
+      birthOrder: birthOrder != null ? Number(birthOrder) : undefined,
+      isConcubineChild,
+      palette,
+    }
+  });
 
   // 添加配偶边到布局引擎
   for (const edge of pendingSpouseEdges) {
@@ -1676,6 +1768,28 @@ const initGraph = async (data: GenealogyNode) => {
       isCurrent: edge.data?.is_current,
       marriageOrder: edge.data?.order,
     });
+  }
+
+  // [2026-08-28 P4] 把 layoutEdges 的 isConcubineChild / palette 同步回 graphData.edges.data
+  // G6 渲染时读 d.data.palette / d.data.isConcubineChild，应用到边样式
+  if (graphData.edges) {
+    const layoutEdgeByPair = new Map<string, LayoutEdge>()
+    for (const le of layoutEdges) {
+      layoutEdgeByPair.set(`${le.source}-${le.target}`, le)
+    }
+    for (const g6Edge of graphData.edges) {
+      const layoutEdge = layoutEdgeByPair.get(`${g6Edge.source}-${g6Edge.target}`)
+      if (!layoutEdge) continue
+      if (!g6Edge.data) g6Edge.data = {}
+      if (layoutEdge.isConcubineChild) {
+        g6Edge.data.is_concubine_child = true
+        if (layoutEdge.palette) g6Edge.data.palette = layoutEdge.palette
+      }
+      // [P3] 同步 birth_order 到 G6 边 data，供调试/外部使用
+      if (layoutEdge.birthOrder != null) {
+        g6Edge.data.birth_order = layoutEdge.birthOrder
+      }
+    }
   }
 
   // 添加配偶节点到布局引擎（标记为外部配偶，不参与主布局）
@@ -2078,6 +2192,12 @@ const initGraph = async (data: GenealogyNode) => {
         lineDash: (d: any) => {
           // 历史配偶边用虚线
           if (d.data?.kind === 'spouse' && !d.data?.is_current) return [6, 4];
+          // [2026-08-28 P4 一妻多妾优化] 妾之子用点线（区别于过继的 [5,4] 虚线），
+          // 传统苏式谱牒“另枝”语义。与 palette 叠加：颜色变母亲色，样式点线。
+          // 优先级：is_concubine_child 优先于 childType（非 BIOLOGICAL）。
+          // 设计考量：1个 “妾之子同时是过继/收养” 的极端场景，妾之子的“另枝”语义更强，
+          // 母亲色+点线 传递的信息量大于 普通色+虚线；故先 return 点线，舍弃后续过继虚线判定。
+          if (d.data?.is_concubine_child) return [3, 3];
           // [吊线图 2026-08-17] 过继/收养/继子女（child_type !== BIOLOGICAL）连线用虚线
           // [吊线图调色板 2026-08-19] 与 palette 叠加：颜色变妻子色，样式仍是虚线
           const childType = d.target?.data?.child_type;
@@ -2245,7 +2365,28 @@ const initGraph = async (data: GenealogyNode) => {
   /**
    * 节点拖拽后，重新计算与该节点相连的所有边的正交路径
    * 因为边使用预计算的绝对坐标，拖拽后需要实时更新
+   *
+   * [2026-08-28 C2] 主节点拖拽时联动配偶及继子女子树
+   *   传统习惯中“拖夫随妻”——拖动夫时，同一 CoupleUnit 内的所有妻、继子女
+   *   及非主脉子树都应跟随联动，避免布局在拖拽后崩裂。
+   *   实现要点：
+   *   1) dragstart 记录原位 (x, y)
+   *   2) dragend 计算位移 dx/dy
+   *   3) BFS 求配偶及其继子女子树 → 集体平移
+   *   4) 同步更新所有受影响的边（包括父子边、配偶边）
    */
+  const dragOriginMap = new Map<string, { x: number; y: number }>()
+  g6Graph.on('node:dragstart', (evt: any) => {
+    const id = evt.target?.id || evt.id
+    if (!id) return
+    const d = g6Graph.getNodeData(id)
+    if (!d) return
+    dragOriginMap.set(String(id), {
+      x: Number(d.style?.x ?? 0),
+      y: Number(d.style?.y ?? 0),
+    })
+  })
+
   g6Graph.on('node:dragend', (evt: any) => {
     const nodeId = evt.target?.id || evt.id;
     if (!nodeId) return;
@@ -2253,15 +2394,85 @@ const initGraph = async (data: GenealogyNode) => {
       // 获取拖拽后节点的新位置（从节点数据中读取）
       const nodeData = g6Graph.getNodeData(nodeId);
       if (!nodeData) return;
-      
+
       // 从节点 style 中获取新位置
       const newX = nodeData.style?.x;
       const newY = nodeData.style?.y;
       if (newX === undefined || newY === undefined) return;
 
-      // 查找所有与该节点相连的边
-      const allEdges = g6Graph.getEdgeData() || [];
-      const relatedEdges = allEdges.filter((e: any) => e.source === nodeId || e.target === nodeId);
+      // [2026-08-28 C2] 计算拖拽位移；走全量重布局路线只适用于产模式，
+      //   拖拽场景下重布局会闪一下。这里采用「平移式联动」：直接平移配偶及继子女子树。
+      const origin = dragOriginMap.get(String(nodeId))
+      const dx = origin ? Number(newX) - origin.x : 0
+      const dy = origin ? Number(newY) - origin.y : 0
+      dragOriginMap.delete(String(nodeId))
+      // 阈值过滤：未产生位移不联动
+      const hasMovement = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5
+
+      // [2026-08-28 C2] 联动配偶及继子女子树：
+      //   收集配偶 id 集合，BFS 遍历继子女（以配偶为根的子树），生成平移列表。
+      //   [2026-08-28 P1 修复] moveSet 提升到外层作用域复用，避免后续 relatedEdges BFS 重复，
+      //     且保证「兄弟共妻」场景下另一兄弟也被收集，使 另一兄弟→共妻 边正确进入 relatedEdges。
+      let moveSet: Set<string> | null = null
+      if (hasMovement) {
+        const allEdges = g6Graph.getEdgeData() || []
+        moveSet = new Set<string>([String(nodeId)])
+        const queue: string[] = []
+        // 种子：被拖拽节点的直接配偶
+        for (const e of allEdges) {
+          if (e.data?.kind !== 'spouse') continue
+          if (e.source === nodeId) queue.push(String(e.target))
+          else if (e.target === nodeId) queue.push(String(e.source))
+        }
+        // BFS：继子女 + 兄弟共妻扩展（均沿 parent-child 与 spouse 边遍历）
+        while (queue.length > 0) {
+          const cur = queue.shift()!
+          if (moveSet.has(cur)) continue
+          moveSet.add(cur)
+          // cur 的所有子女（以 cur 为源的 parent-child 边）
+          for (const e of allEdges) {
+            if (e.data?.kind !== 'parent-child') continue
+            if (e.source === cur && !moveSet.has(String(e.target))) {
+              queue.push(String(e.target))
+            }
+          }
+          // cur 的配偶（兄弟共妻/双重身份场景），也纳入联动
+          for (const e of allEdges) {
+            if (e.data?.kind !== 'spouse') continue
+            if (e.source === cur) queue.push(String(e.target))
+            else if (e.target === cur) queue.push(String(e.source))
+          }
+        }
+
+        const moveUpdates: any[] = []
+        for (const id of moveSet) {
+          const d = g6Graph.getNodeData(id)
+          if (!d) continue
+          const cx = Number(d.style?.x ?? 0)
+          const cy = Number(d.style?.y ?? 0)
+          moveUpdates.push({
+            id,
+            style: {
+              ...d.style,
+              x: cx + dx,
+              y: cy + dy,
+            },
+          })
+        }
+        if (moveUpdates.length > 0) {
+          g6Graph.updateNodeData(moveUpdates)
+        }
+      }
+
+      // 查找所有与「被联动节点」相连的边
+      // [2026-08-28 C2] 联动后仍需重算：原节点相关的边 + 配偶相关边 + 继子女相关边
+      // [2026-08-28 P1 修复] 直接复用 moveSet（包含 主节点 + 配偶 + 继子女子树 + 兄弟共妻扩展），
+      //   避免重跑 BFS 遗漏「另一兄弟→共妻」边。hasMovement=false 时退化为只含 nodeId。
+      const allEdges = g6Graph.getEdgeData() || []
+      const allRelatedIds = moveSet ?? new Set<string>([String(nodeId)])
+      const relatedEdges = allEdges.filter((e: any) =>
+        allRelatedIds.has(String(e.source)) || allRelatedIds.has(String(e.target))
+      )
 
       for (const edge of relatedEdges) {
         const edgeId = edge.id;

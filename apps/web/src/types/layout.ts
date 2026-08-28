@@ -57,6 +57,32 @@ export interface LayoutEdge {
   kind: 'parent-child' | 'spouse';
   isCurrent?: boolean;
   marriageOrder?: number;
+  /**
+    * [2026-08-28 P1 一妻多妾优化] 母亲节点 id。
+    * 仅对 kind='parent-child' 生效，用于父子边按母亲归属选择牵引线起点 X：
+    * - 未指定 / 等于 source：视为正妻之子（或无妾场景），起点为父节点中心 X（默认）
+    * - 不等于 source：视为妾之子，起点为母亲（妾）节点底部中心 X
+    * 背景：传统谱牒中妾之子画「另枝」，需与正妻之子视觉区分；同一父亲的子女可能因母亲不同而走不同牵引线。
+    */
+  motherId?: string;
+  /**
+    * [2026-08-28 P3] 子女出生顺序。
+    * layout-engine 在构建 compactBox 输入时按 birthOrder 升序排序子节点，
+    * 保证同一父亲的多个子女在画布上从左到右严格按排行排列（与谱牒传统一致）。
+    * - 未指定：保持原顺序（向后兼容）
+    * - 指定：按升序排列，相同 birthOrder 保持原顺序
+    */
+  birthOrder?: number;
+  /**
+    * [2026-08-28 P4] 是否为妾之子（用于边样式区分）。
+    * true 时 GenealogyTree 边样式会用母亲调色板 + 虚线，达到「另枝」视觉。
+    */
+  isConcubineChild?: boolean;
+  /**
+    * [2026-08-28 P4] 母亲（妾）的调色板色（同 layout-engine 与 G6 data）。
+    * 仅当 isConcubineChild=true 时使用。
+    */
+  palette?: string;
   // 布局结果
   path?: EdgePath;
 }
@@ -76,6 +102,33 @@ export interface LayoutResult {
   bounds: BoundingBox;
   generations: number;
   totalNodes: number;
+}
+
+/**
+ * 夫妻绑定单元（CoupleUnit）
+ *
+ * [A2 2026-08-28] 引入原因：原算法中「主节点 + 配偶」是松散拼接的，
+ *   resolveSubtreeOverlap / alignMainLineage 阶段会把配偶子树拆开参与扫描对齐，
+ *   导致夫妻对错位、中间被其他族员插入。
+ * CoupleUnit 把「主节点 + 全部配偶 + 配偶继子女子树」视为一个不可拆的整体单元，
+ *   供以下阶段统一以绑定单元为单位操作：
+ *   - alignMainLineage：主脉子节点的 CoupleUnit 整体平移
+ *   - resolveSubtreeOverlap：扫描时以 CoupleUnit.unitWidth 为最小单位宽度
+ *   - computeSpouseEdgePaths：junction X 错定 mainPos.x + mainPos.width/2（丈夫右边缘），
+ *     保证一夫多妻的 spouse 边从同一起点呈梳状分岔
+ */
+export interface CoupleUnit {
+  /** 主节点 id（族内人，generation >= 0） */
+  mainId: string;
+  /** 按 marriageOrder 排序的配偶 id 列表（含族内女性与外部配偶） */
+  spouseIds: string[];
+  /**
+   * 绑定单元总宽度 = 主节点宽度 + Σ(spouseWidth + spouseGap) + spouseGap
+   * 不包含继子女子树的避让宽度（避让交给 resolveSubtreeOverlap 整体右推处理）
+   */
+  unitWidth: number;
+  /** 绑定单元的视觉右边界 X = mainPos.x + mainPos.width/2 + Σ(spouseWidth + spouseGap) + spouseGap */
+  unitRightX: number;
 }
 
 // ==================== 视口配置 ====================
@@ -138,8 +191,11 @@ export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   nodeHeight: 28,
   nodeSep: 'auto',
   rankSep: 'auto',
-  spouseGap: 32,
-  marriageJunctionOffset: 16,
+  // [B1 2026-08-28] 32 → 16：夫妻紧贴，目标 夫妻中心距 / 卡片宽度 ≤ 1.3
+  spouseGap: 16,
+  // [B1 2026-08-28] 16 → 0：junction 与丈夫底重合，spouse 边退化为纯水平直线
+  //   保持 PR 趋势向传统「夫妻一线连」看齐
+  marriageJunctionOffset: 0,
   // [2026-08-27 调优] 之前默认 6 px 太近，同层水平边段仍会贴近；
   // 调到 10 后梳状布线肉眼可辨，避免边段重合。
   edgeHorizontalSeparation: 10,
