@@ -12,16 +12,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { LayoutEngine } from '@/utils/layout-engine'
 import type { LayoutNode, LayoutEdge } from '@/types/layout'
 
-// [2026-08-27 §2.7 验收] 视图模式预设
-// - compact: Demo 原始尺寸（80×32, sep=28, rank=60）—— 紧凑卡片
-// - detailed: PRD §2.7 目标模式（76×110, sep=32, rank=140）—— 详细横排卡片
-//   节点高度增加后，能在视觉上验证「T 形分支水平段共享 Y」「梳状布线汇
-//   聚点位于丈夫底与妻子顶之间」等走线要求
-// [2026-08-27 P1 修复] 同步主组件 GenealogyTree.vue 的 56→76 加宽决策，
-// 宽高比从 0.51 提升到 ~0.69，匹配生产模式。
+// [2026-08-28 B1 调优] 同步 GenealogyTree.vue 的 viewModeConfig 调优后尺寸
+// 卡片宽高比 0.85-1.0，nodeSep = nodeWidth × 0.25，rankSep = nodeHeight × 1.15。
+// 在 demo 页作为详细的“详细模式”对照手动补齐。
 const VIEW_MODE_PRESETS = {
-  compact:  { nodeWidth: 80, nodeHeight: 32, nodeSep: 28, rankSep: 60,  spouseGap: 40 },
-  detailed: { nodeWidth: 76, nodeHeight: 110, nodeSep: 32, rankSep: 140, spouseGap: 32 },
+  compact:  { nodeWidth: 52, nodeHeight: 36, nodeSep: 16, rankSep: 42,  spouseGap: 16 },
+  detailed: { nodeWidth: 84, nodeHeight: 100, nodeSep: 22, rankSep: 115, spouseGap: 16 },
 } as const
 type ViewMode = keyof typeof VIEW_MODE_PRESETS
 const route = useRoute()
@@ -163,6 +159,85 @@ const scenarios: Scenario[] = [
       { id: 'e-sp-xy', source: 'X', target: 'Y', kind: 'spouse', marriageOrder: 1, isCurrent: true },
     ],
   },
+  // [2026-08-28 D1 验证] 场景 5：1 夫 2 妻，其中一位无继子女
+  //   验证 R1（间距累加 bug）：两位妻之间的间距应严格 = spouseWidth + spouseGap，
+  //   即便其中一位妻携带深子树，也不应撑开两妻之间的间隙。
+  {
+    id: 'r1-spouse-gap',
+    label: 'R1/R5 验证：1 夫 2 妻，子树不对称',
+    description: '妻 1 无继子女，妻 2 有 3 代继子女。验证两妻中心距 = spouseWidth + spouseGap（无子树累加）。',
+    nodes: [
+      { id: 'H', label: '夫', gender: 'male', isMainLineage: true, isLiving: false, generation: 0, width: NW, height: NH },
+      { id: 'W1', label: '无子女妻', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: NW, height: NH },
+      { id: 'W2', label: '3 代妻', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: NW, height: NH },
+      { id: 'C1', label: '长子', gender: 'male', isMainLineage: true, isLiving: false, generation: 1, width: NW, height: NH },
+      { id: 'GC1', label: '孙', gender: 'male', isMainLineage: true, isLiving: false, generation: 2, width: NW, height: NH },
+      { id: 'GGC1', label: '曾孙', gender: 'male', isMainLineage: true, isLiving: false, generation: 3, width: NW, height: NH },
+    ],
+    edges: [
+      { id: 'e-hw1', source: 'H', target: 'W1', kind: 'spouse', marriageOrder: 1, isCurrent: true },
+      { id: 'e-hw2', source: 'H', target: 'W2', kind: 'spouse', marriageOrder: 2, isCurrent: true },
+      { id: 'e-w2c1', source: 'W2', target: 'C1', kind: 'parent-child' },
+      { id: 'e-c1gc1', source: 'C1', target: 'GC1', kind: 'parent-child' },
+      { id: 'e-gc1ggc1', source: 'GC1', target: 'GGC1', kind: 'parent-child' },
+    ],
+  },
+  // [2026-08-28 D1 验证] 场景 6：主脉对齐错误复现
+  //   1 夫 1 妻 + 3 子，其中长子是主脉继承者。如果“主脉对齐”拆开夫妻对，
+  //   某个子节点会跳进夫妻间隙。验证 R2（CoupleUnit 绑定语义）。
+  {
+    id: 'r2-main-align',
+    label: 'R2 验证：主脉对齐不拆夫妻子女',
+    description: '1 夫 1 妻 + 3 子，长子是主脉。验证夫妻不被子节点插入，子节点 X 在夫妻右侧。',
+    nodes: [
+      { id: 'H', label: '夫', gender: 'male', isMainLineage: true, isLiving: false, generation: 0, width: NW, height: NH },
+      { id: 'W', label: '妻', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: NW, height: NH },
+      { id: 'S1', label: '长子', gender: 'male', isMainLineage: true, isLiving: false, generation: 1, width: NW, height: NH },
+      { id: 'S2', label: '次子', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+      { id: 'S3', label: '三子', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+    ],
+    edges: [
+      { id: 'e-hw', source: 'H', target: 'W', kind: 'spouse', marriageOrder: 1, isCurrent: true },
+      { id: 'e-hs1', source: 'H', target: 'S1', kind: 'parent-child' },
+      { id: 'e-hs2', source: 'H', target: 'S2', kind: 'parent-child' },
+      { id: 'e-hs3', source: 'H', target: 'S3', kind: 'parent-child' },
+    ],
+  },
+  // [2026-08-28 D1 验证] 场景 7：CoupleUnit 整体推开
+  //   1 夫 4 妻，每位妻有不同数量的继子女，验证 CoupleUnit 绑定推开
+  {
+    id: 'r5-couple-unit',
+    label: 'R5 验证：CoupleUnit 整体推开',
+    description: '1 夫 4 妻，每位妻有 0/1/2/3 个继子女。验证 CoupleUnit 作为一个绑定单元参与扫描对齐。',
+    nodes: [
+      { id: 'H', label: '夫', gender: 'male', isMainLineage: true, isLiving: false, generation: 0, width: NW, height: NH },
+      { id: 'W1', label: '妻 1', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: NW, height: NH },
+      { id: 'W2', label: '妻 2', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: NW, height: NH },
+      { id: 'W3', label: '妻 3', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: NW, height: NH },
+      { id: 'W4', label: '妻 4', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: NW, height: NH },
+      // 妻 2：1 个继子女
+      { id: 'W2C', label: '继 2', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+      // 妻 3：2 个继子女
+      { id: 'W3C1', label: '继 3-1', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+      { id: 'W3C2', label: '继 3-2', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+      // 妻 4：3 个继子女
+      { id: 'W4C1', label: '继 4-1', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+      { id: 'W4C2', label: '继 4-2', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+      { id: 'W4C3', label: '继 4-3', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: NW, height: NH },
+    ],
+    edges: [
+      { id: 'e-hw1', source: 'H', target: 'W1', kind: 'spouse', marriageOrder: 1, isCurrent: true },
+      { id: 'e-hw2', source: 'H', target: 'W2', kind: 'spouse', marriageOrder: 2, isCurrent: true },
+      { id: 'e-hw3', source: 'H', target: 'W3', kind: 'spouse', marriageOrder: 3, isCurrent: true },
+      { id: 'e-hw4', source: 'H', target: 'W4', kind: 'spouse', marriageOrder: 4, isCurrent: true },
+      { id: 'e-w2c', source: 'W2', target: 'W2C', kind: 'parent-child' },
+      { id: 'e-w3c1', source: 'W3', target: 'W3C1', kind: 'parent-child' },
+      { id: 'e-w3c2', source: 'W3', target: 'W3C2', kind: 'parent-child' },
+      { id: 'e-w4c1', source: 'W4', target: 'W4C1', kind: 'parent-child' },
+      { id: 'e-w4c2', source: 'W4', target: 'W4C2', kind: 'parent-child' },
+      { id: 'e-w4c3', source: 'W4', target: 'W4C3', kind: 'parent-child' },
+    ],
+  },
 ]
 
 // ---------- 状态 ----------
@@ -294,6 +369,143 @@ function edgeStroke(edge: LayoutEdge): string {
   }
   return '#999'
 }
+
+// ---------- 诊断指标 [2026-08-28 D1] ----------
+
+/**
+ * 诊断指标计算
+ * - 夫妻中心距比（dist / spouseWidth）：应 ≤ 1.3（plan §二验收指标）
+ * - 夫妻间隙被穿过：检测夫妻水平区间内是否存在其他节点（应不发生）
+ * - 一夫多妻 span：第 1 妻与最后 1 妻的中心距（衡量 CoupleUnit 总宽度）
+ */
+interface DiagnosticMetric {
+  label: string
+  value: string
+  status: 'pass' | 'warn' | 'fail'
+  hint?: string
+}
+
+const diagnosticMetrics = computed<DiagnosticMetric[]>(() => {
+  if (!layout.value) return []
+  const metrics: DiagnosticMetric[] = []
+  const preset = VIEW_MODE_PRESETS[viewMode.value]
+  const spouseW = preset.nodeWidth
+  const spouseGap = preset.spouseGap
+
+  // 1) 收集所有 spouse 边，按夫分组计算「夫妻中心距比」
+  const couplesByMain = new Map<string, { mainId: string; spouseId: string; dist: number }[]>()
+  for (const e of layout.value.edges) {
+    if (e.kind !== 'spouse') continue
+    const mainId = e.source
+    const spouseId = e.target
+    const mainPos = layout.value.nodes.find(n => n.id === mainId)
+    const spousePos = layout.value.nodes.find(n => n.id === spouseId)
+    if (!mainPos || !spousePos) continue
+    const dist = Math.abs(spousePos.x - mainPos.x)
+    if (!couplesByMain.has(mainId)) couplesByMain.set(mainId, [])
+    couplesByMain.get(mainId)!.push({ mainId, spouseId, dist })
+  }
+
+  // 计算所有夫妻中心距比的最大值
+  let maxRatio = 0
+  let worstCouple: { mainId: string; spouseId: string; dist: number } | null = null
+  for (const list of couplesByMain.values()) {
+    for (const c of list) {
+      const ratio = c.dist / spouseW
+      if (ratio > maxRatio) {
+        maxRatio = ratio
+        worstCouple = c
+      }
+    }
+  }
+  metrics.push({
+    label: '夫妻中心距 / 卡片宽度',
+    value: maxRatio.toFixed(2) + ' ×',
+    status: maxRatio <= 1.3 ? 'pass' : maxRatio <= 1.5 ? 'warn' : 'fail',
+    hint: worstCouple ? `最差：${worstCouple.mainId} ↔ ${worstCouple.spouseId}（目标 ≤ 1.3）` : undefined,
+  })
+
+  // 2) 夫妻间隙被穿过：检查「夫 X 区间 + 妻 X 区间」之间是否存在其他节点
+  let pairViolations = 0
+  for (const list of couplesByMain.values()) {
+    for (const c of list) {
+      const mainPos = layout.value.nodes.find(n => n.id === c.mainId)
+      const spousePos = layout.value.nodes.find(n => n.id === c.spouseId)
+      if (!mainPos || !spousePos) continue
+      // 夫妻水平间隙：[mainRight, spouseLeft]
+      const mainRight = mainPos.x + mainPos.width / 2
+      const spouseLeft = spousePos.x - spousePos.width / 2
+      // 在另一代际（y 与夫妻不同）找节点中心 X 落入 [mainRight, spouseLeft]
+      for (const n of layout.value.nodes) {
+        if (n.id === c.mainId || n.id === c.spouseId) continue
+        if (Math.abs(n.y - mainPos.y) < 0.5) continue // 同一 Y（夫妻同代）跳过
+        if (n.x > mainRight && n.x < spouseLeft) {
+          pairViolations++
+          break
+        }
+      }
+    }
+  }
+  metrics.push({
+    label: '夫妻间隙被穿过节点数',
+    value: String(pairViolations),
+    status: pairViolations === 0 ? 'pass' : 'fail',
+    hint: pairViolations === 0 ? '所有夫妻对未被其他代际节点穿过' : '存在夫妻子树被拆开的违规场景',
+  })
+
+  // 3) 一夫多妻 span 占比：第 1 妻 → 最后 1 妻的中心距 vs CoupleUnit 宽度预期
+  let maxSpouses = 0
+  let maxSpanRatio = 0
+  for (const list of couplesByMain.values()) {
+    if (list.length < 2) continue
+    const sorted = list.slice().sort((a, b) => a.spouseId.localeCompare(b.spouseId))
+    const firstId = sorted[0].spouseId
+    const lastId = sorted[sorted.length - 1].spouseId
+    const firstPos = layout.value.nodes.find(n => n.id === firstId)
+    const lastPos = layout.value.nodes.find(n => n.id === lastId)
+    if (!firstPos || !lastPos) continue
+    const span = lastPos.x - firstPos.x
+    // 预期 span = (N-1) × (spouseW + spouseGap)
+    const expected = (list.length - 1) * (spouseW + spouseGap)
+    const ratio = span / expected
+    if (list.length > maxSpouses) maxSpouses = list.length
+    if (Math.abs(ratio - 1) > Math.abs(maxSpanRatio - 1)) maxSpanRatio = ratio
+  }
+  if (maxSpouses >= 2) {
+    metrics.push({
+      label: '一夫多妻 span 比',
+      value: maxSpanRatio.toFixed(2) + ' ×（预期 1.00）',
+      status: Math.abs(maxSpanRatio - 1) < 0.05 ? 'pass' : 'warn',
+      hint: `${maxSpouses} 位妻的实际 span / 理论 span，越接近 1.0 越说明 CoupleUnit 整齐对齐`,
+    })
+  }
+
+  // 4) 节点总重叠检测（继承自主测试中的 maxHorizontalOverlap）
+  const overlap = (() => {
+    let worst = 0
+    const positions = layout.value.nodes
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        const a = positions[i]
+        const b = positions[j]
+        if (Math.abs(a.y - b.y) > 0.5) continue
+        const ar = { left: a.x - a.width / 2, right: a.x + a.width / 2 }
+        const br = { left: b.x - b.width / 2, right: b.x + b.width / 2 }
+        const ov = ar.right - br.left
+        if (ov > worst) worst = ov
+      }
+    }
+    return worst
+  })()
+  metrics.push({
+    label: '同代节点最大重叠',
+    value: overlap.toFixed(1) + ' px',
+    status: overlap <= 0.5 ? 'pass' : 'fail',
+    hint: overlap <= 0.5 ? '无同代节点矩形重叠' : '存在同代节点矩形重叠',
+  })
+
+  return metrics
+})
 
 // ---------- 高亮交互 ----------
 
@@ -901,6 +1113,29 @@ function thumbNodeClass(id: string): string[] {
       </div>
     </div>
 
+    <!-- [2026-08-28 D1] 诊断面板：实时输出布局关键指标 -->
+    <div class="diagnostic-panel" data-test="diagnostic-panel">
+      <div class="diag-header">
+        <span class="diag-title">诊断指标 [2026-08-28 v5]</span>
+        <span class="diag-mode">模式：{{ viewMode }}（{{ activeScenario.id }}）</span>
+      </div>
+      <div class="diag-grid">
+        <div
+          v-for="m in diagnosticMetrics"
+          :key="m.label"
+          :class="['diag-item', `status-${m.status}`]"
+          :data-status="m.status"
+        >
+          <div class="diag-label">{{ m.label }}</div>
+          <div class="diag-value">{{ m.value }}</div>
+          <div v-if="m.hint" class="diag-hint">{{ m.hint }}</div>
+        </div>
+      </div>
+      <div class="diag-summary">
+        <span class="diag-pass">✓</span>达标 <span class="diag-warn">⚠</span>警告 <span class="diag-fail">✗</span>未达标
+      </div>
+    </div>
+
     <details class="legend">
       <summary>图例 / 验收要点</summary>
       <ul>
@@ -1285,4 +1520,89 @@ function thumbNodeClass(id: string): string[] {
   padding-left: 20px;
 }
 .legend li { margin: 4px 0; }
+
+// ---------- 诊断面板 [2026-08-28 D1] ----------
+
+.diagnostic-panel {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid #C9A96E;
+  border-radius: 6px;
+}
+.diag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0e6d3;
+}
+.diag-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #5D4037;
+}
+.diag-mode {
+  font-size: 11px;
+  color: #888;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+.diag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.diag-item {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+.diag-item.status-pass {
+  border-color: #A5D6A7;
+  background: #F1F8E9;
+}
+.diag-item.status-warn {
+  border-color: #FFE082;
+  background: #FFF8E1;
+}
+.diag-item.status-fail {
+  border-color: #EF9A9A;
+  background: #FFEBEE;
+}
+.diag-label {
+  font-size: 11px;
+  color: #5D4037;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.diag-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #2c3e50;
+  font-family: 'SF Mono', Menlo, monospace;
+  margin-bottom: 2px;
+}
+.diag-item.status-pass .diag-value { color: #2E7D32; }
+.diag-item.status-warn .diag-value { color: #E65100; }
+.diag-item.status-fail .diag-value { color: #C62828; }
+.diag-hint {
+  font-size: 10px;
+  color: #888;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+.diag-summary {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: #5D4037;
+  padding-top: 4px;
+  border-top: 1px dashed #f0e6d3;
+}
+.diag-pass { color: #2E7D32; font-weight: 700; }
+.diag-warn { color: #E65100; font-weight: 700; }
+.diag-fail { color: #C62828; font-weight: 700; }
 </style>
