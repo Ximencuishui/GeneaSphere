@@ -132,6 +132,11 @@ export default defineConfig({
           // 'vendor-antv': ['@antv/g6'],
           'vendor-pdfjs': ['pdfjs-dist'],
 
+          // lodash-es 多模块（omit / omitBy / ...）各自独立 chunk 后会重复声明变量 `h`
+          // （Rollup 报错 "Identifier 'h' has already been declared"），
+          // 强制合并到单一 chunk 后所有 lodash 函数在同一作用域，声明顺序受控。
+          'vendor-lodash': ['lodash-es'],
+
           // axios + 业务工具
           'vendor-utils': ['axios'],
         },
