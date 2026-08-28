@@ -16,6 +16,7 @@ import {
   Document,
   Share,
   Clock,
+  Loading,
 } from '@element-plus/icons-vue';
 import { cepuApi, type BookVolume, type ShiluEntry, type PersonBio } from '@/api/cepu';
 
@@ -54,6 +55,9 @@ const volumeContent = ref<{
   entries?: ShiluEntry[];
 } | null>(null);
 const loading = ref(false);
+// 单卷内容加载态（世录卷为实时生成，数据量大时耗时明显，需要进度提示避免误以为卡住）
+const volumeLoading = ref(false);
+const volumeLoadingText = ref('正在加载卷宗内容…');
 const editMode = ref(false);
 
 // ---------- 临时样式切换（仅影响当前阅读，不保存） ----------
@@ -201,13 +205,25 @@ async function loadVolumes() {
   }
 }
 
+// 卷宗切换请求序号：丢弃过期响应，避免旧请求复位共享加载态或覆盖新卷内容（审计 2026-08-28）
+let volumeReqSeq = 0;
+
 async function selectVolume(id: string) {
   activeVolumeId.value = id;
   volumeContent.value = null;
   searchOpen.value = false;
   annotations.value = {};
+  // 世录卷由后端实时汇总全族人物关系生成（首次约 5-15 秒，后端已缓存，再次打开秒开），文档卷直接读取内容，文案区分提示
+  const vol = volumes.value.find((v) => v.id === id);
+  volumeLoadingText.value =
+    vol?.type === 'shilu'
+      ? '正在生成世录条目：实时汇总全族人物关系，首次约需 5~15 秒，请勿关闭页面（再次打开将秒开）…'
+      : '正在加载卷宗内容…';
+  const reqSeq = ++volumeReqSeq;
+  volumeLoading.value = true;
   try {
     const data: any = await cepuApi.getVolume(clanId.value, id, shareToken.value);
+    if (reqSeq !== volumeReqSeq) return; // 已切换到其他卷，丢弃过期响应
     volumeContent.value = data;
     // 同步临时样式为卷宗配置的布局
     if (data?.config?.layout) {
@@ -219,6 +235,8 @@ async function selectVolume(id: string) {
     nextTick(() => applyFocus());
   } catch {
     /* 拦截器已提示 */
+  } finally {
+    if (reqSeq === volumeReqSeq) volumeLoading.value = false;
   }
 }
 
@@ -806,6 +824,12 @@ onMounted(async () => {
       <!-- 主内容区（书本式阅读） -->
       <main class="cepu-main">
         <div v-if="loading" v-loading="true" class="cepu-loading" />
+        <!-- 单卷加载中（世录卷实时生成耗时明显，给出进度提示） -->
+        <div v-else-if="volumeLoading" class="volume-loading">
+          <el-icon class="volume-loading-icon is-loading" :size="36"><Loading /></el-icon>
+          <p class="volume-loading-text">{{ volumeLoadingText }}</p>
+          <p class="volume-loading-sub">正在从家族数据库中汇总人物、家庭与世系关系，请稍候…</p>
+        </div>
         <div v-else-if="accessError" class="access-error">
           <el-empty :description="accessError" :image-size="80" />
           <div class="access-error-actions">
@@ -1397,6 +1421,22 @@ onMounted(async () => {
 .search-sub { font-size: 12px; color: #8d6e63; }
 .slide-right-enter-active, .slide-right-leave-active { transition: margin-right 0.2s ease; }
 .cepu-loading { height: 100%; }
+
+/* 单卷内容加载中（世录卷实时生成进度提示） */
+.volume-loading {
+  height: 100%;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: #5a6a7a;
+}
+.volume-loading-icon { color: #2f6f4f; }
+.volume-loading-text { font-size: 15px; color: #333; margin: 0; }
+.volume-loading-sub { font-size: 13px; color: #8a98a8; margin: 0; }
 
 /* [PR#1] 世系表开本在线预览版式(与 PDF 排版同构)
  * 设计要点：

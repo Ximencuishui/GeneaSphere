@@ -55,6 +55,33 @@ interface ShiluConfig {
 @Injectable()
 export class CepuService {
   private readonly logger = new Logger(CepuService.name);
+  // [2026-08-28 优化] 世录实时生成耗时 5-15s（数据库经 SSH 隧道访问远程库，单查询抖动 0.5-10s）；
+  // 内存缓存：重复打开/多人阅读秒开；config/传记写操作时主动失效。
+  // 已知限制：成员/婚姻/世系写路径（tree/merge/import 等）未挂失效，变更后最多 TTL 内脏读（20s）；
+  // 如需严格一致，应引入 clan 级 data_version 纳入缓存 key，留待后续。
+  private shiluCache = new Map<string, { at: number; entries: ShiluEntry[] }>();
+  private readonly SHILU_CACHE_TTL = 20_000;
+  // 进行中的生成 Promise（single-flight）：多请求同时未命中时只跑一份重查询，避免缓存穿透
+  private shiluInflight = new Map<string, Promise<ShiluEntry[]>>();
+
+  private shiluCacheKey(clanId: bigint, config: ShiluConfig) {
+    return `${clanId.toString()}:${JSON.stringify(config ?? {})}`;
+  }
+
+  private invalidateShiluCache(clanId: bigint) {
+    const prefix = `${clanId.toString()}:`;
+    for (const k of this.shiluCache.keys()) {
+      if (k.startsWith(prefix)) this.shiluCache.delete(k);
+    }
+  }
+
+  /** 顺带清理过期缓存项（防 Map 无限增长） */
+  private pruneShiluCache() {
+    const now = Date.now();
+    for (const [k, v] of this.shiluCache) {
+      if (now - v.at >= this.SHILU_CACHE_TTL) this.shiluCache.delete(k);
+    }
+  }
   private readonly browserPaths = [
     process.env.PUPPETEER_EXECUTABLE_PATH,
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -176,8 +203,8 @@ export class CepuService {
     if (!volume) throw new NotFoundException('卷宗不存在');
     // [二期 2026-08-20] 变更后写入新版本快照（可回滚）
     // - 60 分钟去重窗口：连续保存相同配置不会产生噪声版本
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.bookVolume.update({
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const v = await tx.bookVolume.update({
         where: { id: volumeId },
         data: {
           ...(body.title !== undefined && { title: body.title }),
@@ -185,9 +212,14 @@ export class CepuService {
           ...(body.config !== undefined && volume.type === 'shilu' && { config: body.config }),
         },
       });
-      await this.snapshotVolume(tx as any, updated, userId, undefined, { dedupeWithinMinutes: 60 });
-      return updated;
+      await this.snapshotVolume(tx as any, v, userId, undefined, { dedupeWithinMinutes: 60 });
+      return v;
     });
+    // 仅世录卷筛选配置变化才影响世录条目，失效该家族世录缓存（文档卷/仅改标题无需失效）
+    if (volume.type === 'shilu' && body.config !== undefined) {
+      this.invalidateShiluCache(volume.clan_id);
+    }
+    return updated;
   }
 
   // ==================== 卷宗版本历史（二期，决策清单 §F1） ====================
@@ -250,14 +282,18 @@ export class CepuService {
       where: { volume_id_version: { volume_id: volumeId, version } },
     });
     if (!snap) throw new NotFoundException('版本不存在');
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.bookVolume.update({
+    const volume = await this.prisma.bookVolume.findUnique({ where: { id: volumeId } });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const v = await tx.bookVolume.update({
         where: { id: volumeId },
         data: { title: snap.title, content: snap.content, config: snap.config },
       });
-      await this.snapshotVolume(tx as any, updated, userId);
-      return updated;
+      await this.snapshotVolume(tx as any, v, userId);
+      return v;
     });
+    // 回滚可能改世录配置，失效该家族世录缓存
+    if (volume) this.invalidateShiluCache(volume.clan_id);
+    return updated;
   }
 
   async deleteVolume(volumeId: bigint) {
@@ -297,6 +333,28 @@ export class CepuService {
   // ==================== 世录生成（苏式，一期） ====================
 
   async generateShilu(clanId: bigint, config: ShiluConfig): Promise<ShiluEntry[]> {
+    // [2026-08-28 优化] 命中缓存直接返回（首次生成 5-15s，重复打开/他人阅读秒开）
+    const cacheKey = this.shiluCacheKey(clanId, config);
+    const hit = this.shiluCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < this.SHILU_CACHE_TTL) return hit.entries;
+    // 防穿透：同 key 已有生成中的请求则复用其结果（single-flight）
+    const inflight = this.shiluInflight.get(cacheKey);
+    if (inflight) return inflight;
+    const task = this.buildShiluEntries(clanId, config)
+      .then((entries) => {
+        this.shiluCache.set(cacheKey, { at: Date.now(), entries });
+        this.pruneShiluCache();
+        return entries;
+      })
+      .finally(() => {
+        this.shiluInflight.delete(cacheKey);
+      });
+    this.shiluInflight.set(cacheKey, task);
+    return task;
+  }
+
+  /** 世录条目实时生成（不含缓存层，由 generateShilu 统一缓存） */
+  private async buildShiluEntries(clanId: bigint, config: ShiluConfig): Promise<ShiluEntry[]> {
     const persons = await this.prisma.person.findMany({
       where: { clan_id: clanId, deleted_at: null },
       select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true },
@@ -306,13 +364,58 @@ export class CepuService {
     const personIds = persons.map((p) => p.id);
     const idStr = (id: bigint) => id.toString();
 
+    // [2026-08-28 优化] 数据库经 SSH 隧道访问（每查询固定 ~1s 延迟），原实现 9 个查询全串行约 10s+；
+    // 现将互不依赖的 5 个查询改为 Promise.all 并行（延迟重叠，总耗时 ≈ 单查询最慢值）。
+    // 深度 1 父子边同时服务：族根 hasParent、father_name、房派根回溯（原 findClanRoot 内 1 次 +
+    // 房派根 1 次 + fatherOf 1 次共 3 次串行查询合并为 1 次；hasParent 用单侧 in（与外族/已删
+    // 祖先无关），parentOf/fatherOf 在内存中按“祖先在族内”过滤，复现原双 in 语义）
+    const [parentEdges, familyChildren, famRows, bios, mediaLinks] = await Promise.all([
+      this.prisma.personAncestry.findMany({
+        where: { descendant_id: { in: personIds }, depth: 1 },
+        select: { ancestor_id: true, descendant_id: true },
+      }),
+      this.prisma.familyChild.findMany({
+        where: { child_id: { in: personIds } },
+        select: { child_id: true, birth_order: true, child_type: true, family_id: true },
+      }),
+      this.prisma.familyUnit.findMany({
+        where: { clan_id: clanId },
+        select: { id: true, husband_id: true, wife_id: true },
+      }),
+      this.prisma.personBio.findMany({
+        where: { person_id: { in: personIds } },
+      }),
+      this.prisma.mediaPersonLink.findMany({
+        where: { person_id: { in: personIds } },
+        include: { media: { select: { file_url: true } } },
+      }),
+    ]);
+
     // 1) 辈分 + 房派根：闭包表相对族根深度
-    const root = await this.findClanRoot(clanId, personIds);
+    // 族根定位：无父者中 id 最小（原 findClanRoot 的 roots 查询与 persons 全量重复，改内存计算）
+    const hasParent = new Set(parentEdges.map((e) => idStr(e.descendant_id)));
+    let rootId: bigint | null = null;
+    for (const p of persons) {
+      if (!hasParent.has(idStr(p.id)) && (rootId === null || p.id < rootId)) rootId = p.id;
+    }
+    if (rootId === null) {
+      // 全部有父（数据异常闭环），取 id 最小者兜底，与原 findClanRoot 一致
+      for (const p of persons) if (rootId === null || p.id < rootId) rootId = p.id;
+    }
+    // 族内身份集合：parentOf/fatherOf 复现原“双 in”语义（祖先须在族内；软删除祖先不在 persons 内，
+    // 其边不参与房派回溯与 father_name，与原实现一致）
+    const inClan = new Set(personIds.map(idStr));
+    const parentOf = new Map<string, string>();
+    for (const e of parentEdges) {
+      const a = idStr(e.ancestor_id);
+      const d = idStr(e.descendant_id);
+      if (inClan.has(a) && !parentOf.has(d)) parentOf.set(d, a);
+    }
     const generationMap = new Map<string, number>();
     const branchRootMap = new Map<string, string>();
-    if (root) {
+    if (rootId !== null) {
       const rootAncestry = await this.prisma.personAncestry.findMany({
-        where: { ancestor_id: root, descendant_id: { in: personIds } },
+        where: { ancestor_id: rootId, descendant_id: { in: personIds } },
         select: { descendant_id: true, depth: true, ancestor_id: true },
       });
       // 若存在多个根（数据异常），取根可达的人
@@ -321,12 +424,6 @@ export class CepuService {
         if (!generationMap.has(d)) generationMap.set(d, r.depth);
       }
       // 房派根 = 深度 1 的祖先（始祖直接子女）；用 depth=1 父链向上回溯
-      const parentEdges = await this.prisma.personAncestry.findMany({
-        where: { ancestor_id: { in: personIds }, descendant_id: { in: personIds }, depth: 1 },
-        select: { ancestor_id: true, descendant_id: true },
-      });
-      const parentOf = new Map<string, string>();
-      for (const e of parentEdges) parentOf.set(idStr(e.descendant_id), idStr(e.ancestor_id));
       for (const [d, gen] of generationMap) {
         let cur = d;
         for (let i = gen; i > 1; i--) {
@@ -345,16 +442,8 @@ export class CepuService {
     }
 
     // 2) 排行 + 过继类型（FamilyChild，优先出生家庭=BIOLOGICAL 且 id 最小）
-    const familyChildren = await this.prisma.familyChild.findMany({
-      where: { child_id: { in: personIds } },
-      select: { child_id: true, birth_order: true, child_type: true, family_id: true },
-    });
     const rankMap = new Map<string, number>();
     const childTypeMap = new Map<string, string>();
-    const famRows = await this.prisma.familyUnit.findMany({
-      where: { clan_id: clanId },
-      select: { id: true, husband_id: true, wife_id: true },
-    });
     for (const fc of familyChildren) {
       const c = idStr(fc.child_id);
       const currentRank = rankMap.get(c);
@@ -366,28 +455,18 @@ export class CepuService {
       }
     }
 
-    // 3) 父子/配偶/子女/媒体 一次性预取
-    const parentEdgesAll = await this.prisma.personAncestry.findMany({
-      where: { ancestor_id: { in: personIds }, descendant_id: { in: personIds }, depth: 1 },
-      select: { ancestor_id: true, descendant_id: true },
-    });
+    // 3) 父子/配偶/子女/媒体 索引化（组装用）
     const fatherOf = new Map<string, string>();
-    for (const e of parentEdgesAll) {
+    for (const e of parentEdges) {
+      const a = idStr(e.ancestor_id);
       const d = idStr(e.descendant_id);
-      if (!fatherOf.has(d)) fatherOf.set(d, idStr(e.ancestor_id));
+      // 与双 in 查询同口径：父不在族内（外族/已软删）不视为世录中的父亲
+      if (inClan.has(a) && !fatherOf.has(d)) fatherOf.set(d, a);
     }
     const nameById = new Map(persons.map((p) => [idStr(p.id), p.full_name]));
     const genderById = new Map(persons.map((p) => [idStr(p.id), p.gender]));
 
-    const bios = await this.prisma.personBio.findMany({
-      where: { person_id: { in: personIds } },
-    });
     const bioById = new Map(bios.map((b) => [idStr(b.person_id), b]));
-
-    const mediaLinks = await this.prisma.mediaPersonLink.findMany({
-      where: { person_id: { in: personIds } },
-      include: { media: { select: { file_url: true } } },
-    });
     const mediaByPerson = new Map<string, string[]>();
     for (const m of mediaLinks) {
       const pid = idStr(m.person_id);
@@ -402,6 +481,29 @@ export class CepuService {
       if (!childrenByFamily.has(fk)) childrenByFamily.set(fk, []);
       childrenByFamily.get(fk)!.push(fc);
     }
+
+    // [2026-08-28 优化] 家庭按 husband/wife 建索引（原实现每人生成时全表扫描 famRows，
+    // 1325 人 × 703 家庭 ≈ 93 万次内层迭代，世录生成耗时 30s+；索引化后 O(1) 定位配偶家庭，
+    // familyId/spouseId 预转字符串，组装循环内零 BigInt 转换/比较）
+    type FamLink = { familyId: string; spouseId: string | null };
+    const famsByHusband = new Map<string, FamLink[]>();
+    const famsByWife = new Map<string, FamLink[]>();
+    for (const f of famRows) {
+      const link: FamLink = { familyId: f.id.toString(), spouseId: f.wife_id != null ? idStr(f.wife_id) : null };
+      if (f.husband_id != null) {
+        const k = idStr(f.husband_id);
+        if (!famsByHusband.has(k)) famsByHusband.set(k, []);
+        famsByHusband.get(k)!.push(link);
+      }
+      if (f.wife_id != null) {
+        const k = idStr(f.wife_id);
+        if (!famsByWife.has(k)) famsByWife.set(k, []);
+        famsByWife.get(k)!.push(link);
+      }
+    }
+    // bioOfOther 只依赖 bios，一次性构建（原实现在每人循环内重复重建 Map）
+    const bioOfOther = new Map<string, string | undefined>();
+    for (const b of bios) bioOfOther.set(idStr(b.person_id), b.native_place ?? undefined);
 
     // 4) 组装条目 + 过滤
     const prematureAge = config.premature_age ?? 18;
@@ -427,19 +529,14 @@ export class CepuService {
       if (config.branches?.length && branchRoot && !config.branches.includes(branchRoot)) continue;
 
       const bio = bioById.get(d);
-      // 配偶：person 作为 husband/wife 的家庭，取对侧
+      // 配偶：person 作为 husband/wife 的家庭，取对侧（索引化 O(1)，替代全表扫描）
       const spouses: ShiluEntry['spouses'] = [];
       const children: ShiluEntry['children'] = [];
-      const bioOfOther = new Map<string, string>();
-      for (const b of bios) bioOfOther.set(idStr(b.person_id), b.native_place ?? undefined);
+      const relatedFams = [...(famsByHusband.get(d) ?? []), ...(famsByWife.get(d) ?? [])];
+      for (const link of relatedFams) {
+        if (link.spouseId == null) continue;
 
-      for (const f of famRows) {
-        let spouseId: bigint | null = null;
-        if (f.husband_id === p.id) spouseId = f.wife_id;
-        else if (f.wife_id === p.id) spouseId = f.husband_id;
-        if (spouseId == null) continue;
-
-        const spouseStr = idStr(spouseId);
+        const spouseStr = link.spouseId;
         const hideThisSpouse =
           (config.hide_wife && p.gender === 'male') ||
           (config.hide_son_in_law && p.gender === 'female' && (generationMap.get(d) ?? 0) > 0);
@@ -454,7 +551,7 @@ export class CepuService {
           });
         }
 
-        const kids = childrenByFamily.get(f.id.toString()) ?? [];
+        const kids = childrenByFamily.get(link.familyId) ?? [];
         for (const kid of kids) {
           const kidStr = idStr(kid.child_id);
           const kidGender = genderById.get(kidStr);
@@ -514,22 +611,6 @@ export class CepuService {
     return entries;
   }
 
-  /** 定位族根（无父者，与 tree.findClanRootPerson 同口径） */
-  private async findClanRoot(clanId: bigint, personIds: bigint[]) {
-    const parentEdges = await this.prisma.personAncestry.findMany({
-      where: { descendant_id: { in: personIds }, depth: 1 },
-      select: { descendant_id: true },
-    });
-    const hasParent = new Set(parentEdges.map((e) => e.descendant_id.toString()));
-    const roots = await this.prisma.person.findMany({
-      where: { clan_id: clanId, deleted_at: null },
-      orderBy: { id: 'asc' },
-      select: { id: true },
-    });
-    const root = roots.find((r) => !hasParent.has(r.id.toString())) ?? roots[0];
-    return root?.id ?? null;
-  }
-
   // ==================== PersonBio ====================
 
   async getPersonBio(personId: bigint) {
@@ -560,6 +641,10 @@ export class CepuService {
       where: { person_id: personId },
       create: { person_id: personId, ...data },
       update: data,
+    }).then((bio) => {
+      // 传记变化会反映到世录条目，失效该家族世录缓存
+      this.invalidateShiluCache(person.clan_id);
+      return bio;
     });
   }
 
