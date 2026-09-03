@@ -113,7 +113,7 @@ function maxHorizontalOverlap(
 // ---------- 测试 ----------
 
 describe('layout-engine: 一夫多妻走线', () => {
-  it('配偶按 marriage_order 从左到右排列', () => {
+  it('配偶按 marriage_order 从左到右排列', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -127,7 +127,7 @@ describe('layout-engine: 一夫多妻走线', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const xs = ['2', '3', '4', '5'].map(id => pos.get(id)!.x)
     // 严格递增
@@ -136,7 +136,7 @@ describe('layout-engine: 一夫多妻走线', () => {
     }
   })
 
-  it('spouse 边 path 包含婚姻汇聚点 junction，且呈 ┬ 形梳状', () => {
+  it('spouse 边 path 包含婚姻汇聚点 junction，且呈 ┬ 形梳状', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -150,7 +150,7 @@ describe('layout-engine: 一夫多妻走线', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const spouseEdges = result.edges.filter(e => e.kind === 'spouse')
     expect(spouseEdges.length).toBe(4)
 
@@ -212,7 +212,7 @@ describe('layout-engine: 一夫多妻走线', () => {
         resolveSubtreeOverlap: false,
       } as Partial<LayoutConfig>,
     })
-    const resultDefault = engineDefault.calculateLayout(nodes, edges)
+    const resultDefault = await engineDefault.calculateLayout(nodes, edges)
     // [2026-08-28 A3] 默认 junctionOffset=0：所有 4 位妻子的 junction X 都锚定丈夫右边缘
     const jDefaults = resultDefault.edges.filter(e => e.kind === 'spouse').map(e => e.path!.junction!)
     for (const j of jDefaults) {
@@ -228,7 +228,7 @@ describe('layout-engine: 一夫多妻走线', () => {
 })
 
 describe('layout-engine: 配偶子树避让', () => {
-  it('有较深继子女子树的配偶会撑开 effectiveWidth', () => {
+  it('有较深继子女子树的配偶会撑开 effectiveWidth', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -242,13 +242,13 @@ describe('layout-engine: 配偶子树避让', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const husbandPos = result.nodes.find(n => n.id === '1')!
     // 丈夫 effectiveWidth 应大于卡片宽度（因为有 4 位妻子 + 继子女子树）
     expect(husbandPos.width).toBeGreaterThanOrEqual(64)
   })
 
-  it('配偶子树与同代主树节点不重叠', () => {
+  it('配偶子树与同代主树节点不重叠', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -262,13 +262,13 @@ describe('layout-engine: 配偶子树避让', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     // 同代（generation 0 主树 + generation -1 妻子）外接矩形不应重叠
     const overlap = maxHorizontalOverlap(result.nodes)
     expect(overlap).toBeLessThanOrEqual(0.5)
   })
 
-  it('继子女挂在配偶正下方且水平居中', () => {
+  it('继子女挂在配偶正下方且水平居中', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -282,7 +282,7 @@ describe('layout-engine: 配偶子树避让', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     // 妻 2 (id=3) 的继子女 B1 / B2 应在妻 2 正下方
     const w2 = pos.get('3')!
@@ -299,7 +299,7 @@ describe('layout-engine: 配偶子树避让', () => {
 })
 
 describe('layout-engine: 同层水平边段错开', () => {
-  it('resolveEdgeHorizontalOverlaps 错开同 Y 坐标的水平段', () => {
+  it('resolveEdgeHorizontalOverlaps 错开同 Y 坐标的水平段', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -313,7 +313,7 @@ describe('layout-engine: 同层水平边段错开', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     // 同代边应严格正交
     for (const e of result.edges) {
       if (!e.path?.points) continue
@@ -326,7 +326,7 @@ describe('layout-engine: 同层水平边段错开', () => {
     }
   })
 
-  it('edgeHorizontalSeparation = 0 时不强制错开', () => {
+  it('edgeHorizontalSeparation = 0 时不强制错开', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -340,13 +340,13 @@ describe('layout-engine: 同层水平边段错开', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     expect(result.edges.length).toBeGreaterThan(0)
   })
 })
 
 describe('layout-engine: 父子边严格正交', () => {
-  it('父子边 path 仅含水平/垂直线段（无斜线）', () => {
+  it('父子边 path 仅含水平/垂直线段（无斜线）', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -360,7 +360,7 @@ describe('layout-engine: 父子边严格正交', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pcEdges = result.edges.filter(e => e.kind === 'parent-child')
     for (const e of pcEdges) {
       const pts = e.path?.points ?? []
@@ -374,7 +374,7 @@ describe('layout-engine: 父子边严格正交', () => {
 })
 
 describe('layout-engine: 极端场景', () => {
-  it('resolveSubtreeOverlap=false 时不强制推开，但布局仍可完成', () => {
+  it('resolveSubtreeOverlap=false 时不强制推开，但布局仍可完成', async () => {
     const { nodes, edges } = buildMultiWifeInput()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -388,10 +388,10 @@ describe('layout-engine: 极端场景', () => {
       } as Partial<LayoutConfig>,
     })
 
-    expect(() => engine.calculateLayout(nodes, edges)).not.toThrow()
+    await expect(engine.calculateLayout(nodes, edges)).resolves.toBeDefined()
   })
 
-  it('单配偶场景不破坏原有布局', () => {
+  it('单配偶场景不破坏原有布局', async () => {
     const nodes: LayoutNode[] = [
       { id: 'H', label: '\u592B', gender: 'male', isMainLineage: true, isLiving: false, generation: 0, width: 64, height: 28 },
       { id: 'W', label: '\u59BB', gender: 'female', isMainLineage: false, isLiving: false, generation: -1, width: 64, height: 28 },
@@ -414,7 +414,7 @@ describe('layout-engine: 极端场景', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     expect(result.nodes.length).toBe(3)
     expect(result.edges.length).toBe(2)
   })
@@ -458,7 +458,7 @@ function buildSingleSpouseMultiChildren() {
 }
 
 describe('layout-engine: 单配偶多子女', () => {
-  it('同一父节点的多子女共享同一分支水平段 Y（梳状布线）', () => {
+  it('同一父节点的多子女共享同一分支水平段 Y（梳状布线）', async () => {
     const { nodes, edges } = buildSingleSpouseMultiChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -471,7 +471,7 @@ describe('layout-engine: 单配偶多子女', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     // P → S1/S2/S3 三条父子边，其中两条（除了单子之外）应共享中间分支 Y
     const psEdges = result.edges.filter(e => e.kind === 'parent-child' && e.source === 'P')
     expect(psEdges.length).toBe(3)
@@ -491,7 +491,7 @@ describe('layout-engine: 单配偶多子女', () => {
     expect(max).toBeGreaterThanOrEqual(2)
   })
 
-  it('单子女父子边为 L 形折线（pts 长度 === 2）', () => {
+  it('单子女父子边为 L 形折线（pts 长度 === 2）', async () => {
     const nodes: LayoutNode[] = [
       { id: 'A', label: 'A', gender: 'male', isMainLineage: true, isLiving: false, generation: 0, width: 64, height: 28 },
       { id: 'B', label: 'B', gender: 'male', isMainLineage: false, isLiving: false, generation: 1, width: 64, height: 28 },
@@ -509,12 +509,12 @@ describe('layout-engine: 单配偶多子女', () => {
         resolveSubtreeOverlap: false,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const e = result.edges[0]
     expect(e.path?.points.length).toBe(2)
   })
 
-  it('多子女父子边为 T 形折线（pts 长度 === 4）', () => {
+  it('多子女父子边为 T 形折线（pts 长度 === 4）', async () => {
     const { nodes, edges } = buildSingleSpouseMultiChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -526,14 +526,14 @@ describe('layout-engine: 单配偶多子女', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     // 至少有一条 P → 子 的边 pts 长度 >= 4
     const psEdges = result.edges.filter(e => e.kind === 'parent-child' && e.source === 'P')
     const tShape = psEdges.filter(e => (e.path?.points.length ?? 0) >= 4)
     expect(tShape.length).toBeGreaterThanOrEqual(2)
   })
 
-  it('同代节点 Y 坐标一致（同代对齐）', () => {
+  it('同代节点 Y 坐标一致（同代对齐）', async () => {
     const { nodes, edges } = buildSingleSpouseMultiChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -545,7 +545,7 @@ describe('layout-engine: 单配偶多子女', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     // gen=1 的节点 S1/S2/S3 应同 Y
     const gen1 = result.nodes.filter(n => n.id === 'S1' || n.id === 'S2' || n.id === 'S3')
     expect(gen1.length).toBe(3)
@@ -554,7 +554,7 @@ describe('layout-engine: 单配偶多子女', () => {
     expect(ys[2]).toBeCloseTo(ys[0], 0)
   })
 
-  it('同代多卡片水平间距 ≥ nodeSep', () => {
+  it('同代多卡片水平间距 ≥ nodeSep', async () => {
     const { nodes, edges } = buildSingleSpouseMultiChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -566,7 +566,7 @@ describe('layout-engine: 单配偶多子女', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const gen1 = result.nodes.filter(n => n.id === 'S1' || n.id === 'S2' || n.id === 'S3')
     const sorted = gen1.slice().sort((a, b) => a.x - b.x)
     for (let i = 1; i < sorted.length; i++) {
@@ -575,7 +575,7 @@ describe('layout-engine: 单配偶多子女', () => {
     }
   })
 
-  it('兄弟节点 X 严格递增（关闭主脉居中时）', () => {
+  it('兄弟节点 X 严格递增（关闭主脉居中时）', async () => {
     const { nodes, edges } = buildSingleSpouseMultiChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -588,14 +588,14 @@ describe('layout-engine: 单配偶多子女', () => {
         mainLineageCenter: false,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const gen1 = result.nodes.filter(n => n.id === 'S1' || n.id === 'S2' || n.id === 'S3')
     const xs = gen1.map(n => n.x)
     expect(xs[1]).toBeGreaterThan(xs[0])
     expect(xs[2]).toBeGreaterThan(xs[1])
   })
 
-  it('深继子女子树：孙节点挂到父节点正下方（X 一致）', () => {
+  it('深继子女子树：孙节点挂到父节点正下方（X 一致）', async () => {
     const { nodes, edges } = buildSingleSpouseMultiChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -607,14 +607,14 @@ describe('layout-engine: 单配偶多子女', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     // S2 → GS2 → GGS2 沿主脉居中轴
     expect(pos.get('GS2')!.x).toBeCloseTo(pos.get('S2')!.x, 0)
     expect(pos.get('GGS2')!.x).toBeCloseTo(pos.get('GS2')!.x, 0)
   })
 
-  it('resolveSubtreeOverlap 后任意同代节点外接矩形不重叠', () => {
+  it('resolveSubtreeOverlap 后任意同代节点外接矩形不重叠', async () => {
     const { nodes, edges } = buildSingleSpouseMultiChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -626,7 +626,7 @@ describe('layout-engine: 单配偶多子女', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const overlap = maxHorizontalOverlap(result.nodes)
     expect(overlap).toBeLessThanOrEqual(0.5)
   })
@@ -716,7 +716,7 @@ function buildDualRole() {
 }
 
 describe('layout-engine: 多夫多妻交叉场景', () => {
-  it('连襟：同代两位男性的配偶节点 X 不重叠', () => {
+  it('连襟：同代两位男性的配偶节点 X 不重叠', async () => {
     const { nodes, edges } = buildBrothersInLaw()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -728,7 +728,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const w1 = pos.get('W1')!
     const w2 = pos.get('W2')!
@@ -742,7 +742,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
     expect(w2.x).toBeGreaterThan(h2.x)
   })
 
-  it('连襟：两位男性的配偶边各自形成梳状分支', () => {
+  it('连襟：两位男性的配偶边各自形成梳状分支', async () => {
     const { nodes, edges } = buildBrothersInLaw()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -754,7 +754,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const sp = result.edges.filter(e => e.kind === 'spouse')
     // H1 和 H2 各 1 条 spouse 边 → 共 2 条
     expect(sp.length).toBe(2)
@@ -773,7 +773,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
     expect(j1NearH1 || j2NearH2).toBe(true)
   })
 
-  it('兄弟共妻：共用 W 节点复制为 2 份配偶副本，layout 不崩', () => {
+  it('兄弟共妻：共用 W 节点复制为 2 份配偶副本，layout 不崩', async () => {
     const { nodes, edges } = buildPolyandry()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -785,13 +785,13 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    expect(() => engine.calculateLayout(nodes, edges)).not.toThrow()
-    const result = engine.calculateLayout(nodes, edges)
+    await expect(engine.calculateLayout(nodes, edges)).resolves.toBeDefined()
+    const result = await engine.calculateLayout(nodes, edges)
     // W 节点副本数量 ≥ 1（至少渲染层会复制）
     expect(result.nodes.filter(n => n.id.startsWith('W')).length).toBeGreaterThanOrEqual(1)
   })
 
-  it('兄弟共妻：两位丈夫各自有独立 junction 锚点', () => {
+  it('兄弟共妻：两位丈夫各自有独立 junction 锚点', async () => {
     const { nodes, edges } = buildPolyandry()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -803,7 +803,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const sp = result.edges.filter(e => e.kind === 'spouse')
     // 找到 H1 / H2 各自的 spouse 边
     const h1Sp = sp.find(e => e.source === 'H1' || e.target === 'H1')
@@ -814,7 +814,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
     expect(h1Sp!.path!.junction!.x).not.toBe(h2Sp!.path!.junction!.x)
   })
 
-  it('双重身份：X 既是 P 的子女，又是 Y 的配偶', () => {
+  it('双重身份：X 既是 P 的子女，又是 Y 的配偶', async () => {
     const { nodes, edges } = buildDualRole()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -826,7 +826,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     // X 节点存在
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     expect(pos.get('X')).toBeDefined()
@@ -839,7 +839,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
     expect(kinds.has('spouse')).toBe(true)
   })
 
-  it('双重身份：X 节点同时承担主脉子节点与丈夫角色', () => {
+  it('双重身份：X 节点同时承担主脉子节点与丈夫角色', async () => {
     const { nodes, edges } = buildDualRole()
     const engine = new LayoutEngine({
       canvasSize: { width: 1200, height: 800 },
@@ -851,7 +851,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     // Y 在 X 附近（X 是 Y 的丈夫，spouse 边从 X 到 Y；不强制水平线，
     // 因为 X 是 gen=1 而 Y 是 gen=0，按 layout 可能不同 Y）
@@ -873,7 +873,7 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
     expect(y).toBeDefined()
   })
 
-  it('混合场景：多夫 + 多妻 + 双重身份，34 节点布局不崩', () => {
+  it('混合场景：多夫 + 多妻 + 双重身份，34 节点布局不崩', async () => {
     // 动态构造一个混合场景：
     // P → X (gen 1) ── Y1 (gen 0) → C1/C2/C3
     //              └─ Y2 (gen 0) → D1/D2
@@ -927,8 +927,8 @@ describe('layout-engine: 多夫多妻交叉场景', () => {
         resolveSubtreeOverlap: true,
       } as Partial<LayoutConfig>,
     })
-    expect(() => engine.calculateLayout(nodes, edges)).not.toThrow()
-    const result = engine.calculateLayout(nodes, edges)
+    await expect(engine.calculateLayout(nodes, edges)).resolves.toBeDefined()
+    const result = await engine.calculateLayout(nodes, edges)
     // 配偶边：混合场景下配偶节点 generation=0，可能与主脉合并，本断言仅校验 layout 不崩
     // 父子边严格正交
     for (const e of result.edges) {
@@ -969,7 +969,7 @@ function buildSimpleCouple() {
 }
 
 describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
-  it('A1: 简单夫妻对（无继子女子树）中心距严格 = spouseWidth + spouseGap', () => {
+  it('A1: 简单夫妻对（无继子女子树）中心距严格 = spouseWidth + spouseGap', async () => {
     const { nodes, edges } = buildSimpleCouple()
     const SP_GAP = 16
     const engine = new LayoutEngine({
@@ -985,7 +985,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const h = pos.get('H')!
     const w = pos.get('W')!
@@ -996,7 +996,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
     expect(dist).toBeCloseTo(expected, 0)
   })
 
-  it('A1: 一夫二妻场景，相邻妻子中心距 = spouseWidth + spouseGap（无继子女累加）', () => {
+  it('A1: 一夫二妻场景，相邻妻子中心距 = spouseWidth + spouseGap（无继子女累加）', async () => {
     // 两个简单妻子（无继子女）+ 一个带 2 代继子女子树的妻子，验证 A1 修复：
     // 即便第三个妻子有深子树，前两位无子妻子之间的间距仍 = spouseWidth + spouseGap
     const { nodes, edges } = buildMultiWifeInput()
@@ -1011,7 +1011,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const w1 = pos.get('2')! // 妻 1（无继子女）
     const w2 = pos.get('3')! // 妻 2（有深子树）
@@ -1023,7 +1023,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
     expect(w3.x - w2.x).toBeCloseTo(64 + SP_GAP, 0)
   })
 
-  it('A2: CoupleUnit 注册：1 夫 + 1 妻场景下，CoupleUnit 通过私有 map 维护', () => {
+  it('A2: CoupleUnit 注册：1 夫 + 1 妻场景下，CoupleUnit 通过私有 map 维护', async () => {
     // 通过外部观察：拖拽主节点后能否同步平移配偶（C2 测试会用到）。
     // 这里用“夫 + 妻 间距不被打断”这一隐式指标验证 CoupleUnit 已生效。
     const { nodes, edges } = buildSimpleCouple()
@@ -1040,7 +1040,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     // 主脉居中开启时，夫被对齐到 x=0
     const h = result.nodes.find(n => n.id === 'H')!
     const w = result.nodes.find(n => n.id === 'W')!
@@ -1048,7 +1048,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
     expect(w.x - h.x).toBeCloseTo(64 + 16, 0)
   })
 
-  it('A3: junction 默认从丈夫右边缘出发（不传 marriageJunctionOffset）', () => {
+  it('A3: junction 默认从丈夫右边缘出发（不传 marriageJunctionOffset）', async () => {
     const { nodes, edges } = buildSimpleCouple()
     const engine = new LayoutEngine({
       canvasSize: { width: 800, height: 600 },
@@ -1063,7 +1063,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const spouseEdge = result.edges.find(e => e.kind === 'spouse')!
     const j = spouseEdge.path!.junction!
     const h = result.nodes.find(n => n.id === 'H')!
@@ -1080,7 +1080,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
     expect(pts[0].y).toBe(pts[1].y)
   })
 
-  it('A3: junctionOffset=16 时 path 仍是正交阶梯（保持向后兼容）', () => {
+  it('A3: junctionOffset=16 时 path 仍是正交阶梯（保持向后兼容）', async () => {
     const { nodes, edges } = buildSimpleCouple()
     const engine = new LayoutEngine({
       canvasSize: { width: 800, height: 600 },
@@ -1095,7 +1095,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const spouseEdge = result.edges.find(e => e.kind === 'spouse')!
     const j = spouseEdge.path!.junction!
     const h = result.nodes.find(n => n.id === 'H')!
@@ -1106,7 +1106,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
     expect(j.y).toBeCloseTo(h.y + h.height / 2 - 16, 0)
   })
 
-  it('A5: CoupleUnit 绑定：resolveSubtreeOverlap 后夫妻对不被其他主节点穿过', () => {
+  it('A5: CoupleUnit 绑定：resolveSubtreeOverlap 后夫妻对不被其他主节点穿过', async () => {
     // 1 夫 1 妻 + 1 子的简单场景下：resolveSubtreeOverlap 不能把子节点推到夫妻之间
     const nodes: LayoutNode[] = [
       { id: 'H', label: 'H', gender: 'male', isMainLineage: true, isLiving: false, generation: 0, width: 64, height: 28 },
@@ -1127,7 +1127,7 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const h = pos.get('H')!
     const w = pos.get('W')!
@@ -1142,15 +1142,20 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
 })
 
 /**
- * [2026-08-28 P1 一妻多妾优化] 父子边按母亲归属选择牵引线起点 X
+ * [v6.0.8 2026-09-02 走线解耦母亲归属] 父子边共享 drop line（与 motherId 完全解耦）
  *
- * 背景：传统谱牒中妾之子应从其生母（妾）节点底部出发，形成「另枝」视觉区分。
- * 本测试覆盖：
- * 1. 向后兼容：无 motherId → 起点为父节点中心 X（原行为）
- * 2. motherId = 妾节点 id → 起点为妾节点中心 X
- * 3. 多母亲混合：正妻之子从父节点出发、妾之子从妾节点出发，各自独立 T 形汇聚
+ * 背景（v6.0.7 → v6.0.8 行为变更）：
+ *   - v6.0.7：motherId 优先 per-edge 分流到母亲节点中心 X（不同母亲走线起点不同）
+ *   - v6.0.8：移除 motherId 分流，所有兄弟统一从 coupleUnitMidX 出发
+ *   - 母亲归属仅通过 `isConcubineChild + palette` 样式区分（G6 渲染层处理）
+ *
+ * 本测试覆盖 v6.0.8 新断言：
+ * 1. 无 motherId 的父子边起点 = coupleUnitMidX（不再 = 父节点中心 X）
+ * 2. motherId = 妾时起点 = coupleUnitMidX（不再 = 妾节点中心 X）
+ * 3. 多母亲混合：所有兄弟起点 = coupleUnitMidX（共享 drop line，不再 per-edge 分流）
+ * 4. 同父的所有兄弟共享 T 形汇聚点（不再按 motherId 分组）
  */
-describe('layout-engine: P1 一妻多妾 — 父子边按母亲归属选择牵引线起点', () => {
+describe('layout-engine: v6.0.8 一妻多妾 — 父子边共享 drop line（与 motherId 解耦）', () => {
   /**
    * 一夫 + 两位妻子（妻 1、妾 1）的最小数据集。
    * 妻 1 在 main 右侧第一位（marriageOrder=1）；妾 1 在右侧第二位（marriageOrder=2）。
@@ -1177,7 +1182,7 @@ describe('layout-engine: P1 一妻多妾 — 父子边按母亲归属选择牵�
     return { nodes, edges }
   }
 
-  it('P1.1 向后兼容：无 motherId 的父子边起点 = 父节点中心 X', () => {
+  it('P1.1 v6.0.8：无 motherId 的父子边起点 = coupleUnitMidX（有 coupleUnit）', async () => {
     const { nodes, edges } = buildMultiWifeChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1000, height: 600 },
@@ -1190,23 +1195,29 @@ describe('layout-engine: P1 一妻多妾 — 父子边按母亲归属选择牵�
         resolveSubtreeOverlap: false,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const fPos = pos.get('F')!
+    // [v6.0.8] 找最右配偶 W2
+    const w1Pos = pos.get('W1')!
+    const w2Pos = pos.get('W2')!
+    const rightmostSpouseX = Math.max(w1Pos.x, w2Pos.x)
+    const expectedStartX = (fPos.x + rightmostSpouseX) / 2
     const c1Edge = result.edges.find(e => e.id === 'e-fc1')!
 
     expect(c1Edge.path).toBeDefined()
     const pts = c1Edge.path!.points
     expect(pts.length).toBeGreaterThanOrEqual(2)
-    // [P1 核心] 首点 X = 父节点中心 X（向后兼容原计算）
-    expect(pts[0].x).toBeCloseTo(fPos.x, 5)
-    // 首点 Y 应为父节点底部 Y（变体可能上下调整，但仍是父代际级 Y）
-    // 仅校验它落在 [父顶部 Y, 父底部 Y + rankSep * 2] 区间，避免依赖具体调整。
+    // [v6.0.8 核心] 首点 X = coupleUnitMidX（不再是父节点中心 X）
+    expect(pts[0].x).toBeCloseTo(expectedStartX, 0)
+    // [v6.0.8 核心] 起点 X 不再等于父节点中心 X（v6.0.7 时为父节点中心 X）
+    expect(pts[0].x).not.toBeCloseTo(fPos.x, 0)
+    // 首点 Y 应为父节点底部 Y
     expect(pts[0].y).toBeGreaterThanOrEqual(fPos.y - fPos.height)
     expect(pts[0].y).toBeLessThanOrEqual(fPos.y + fPos.height * 2 + 100)
   })
 
-  it('P1.2 motherId=妾：父子边起点 = 妾节点中心 X（不 = 父节点中心 X）', () => {
+  it('P1.2 v6.0.8：motherId=妾时起点 = coupleUnitMidX（不再是妾节点中心 X）', async () => {
     const { nodes, edges } = buildMultiWifeChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1000, height: 600 },
@@ -1219,21 +1230,26 @@ describe('layout-engine: P1 一妻多妾 — 父子边按母亲归属选择牵�
         resolveSubtreeOverlap: false,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const fPos = pos.get('F')!
+    const w1Pos = pos.get('W1')!
     const w2Pos = pos.get('W2')!
+    const expectedStartX = (fPos.x + Math.max(w1Pos.x, w2Pos.x)) / 2
     const c2Edge = result.edges.find(e => e.id === 'e-fc2')!
 
     expect(c2Edge.path).toBeDefined()
     const pts = c2Edge.path!.points
     expect(pts.length).toBeGreaterThanOrEqual(2)
-    // [P1 核心] 首点 X = 妾节点中心 X，且 ≠ 父节点中心 X
-    expect(pts[0].x).toBeCloseTo(w2Pos.x, 5)
+    // [v6.0.8 核心] 首点 X = coupleUnitMidX（不再是妾节点中心 X）
+    expect(pts[0].x).toBeCloseTo(expectedStartX, 0)
+    // [v6.0.8 核心] 不再 = 妾节点中心 X
+    expect(pts[0].x).not.toBeCloseTo(w2Pos.x, 0)
+    // [v6.0.8 核心] 也不 = 父节点中心 X
     expect(pts[0].x).not.toBeCloseTo(fPos.x, 0)
   })
 
-  it('P1.3 多母亲混合：正妻之子 + 妾之子各自走线，前者从父节点出发后者从妾节点出发', () => {
+  it('P1.3 v6.0.8：多母亲混合，正妻之子 + 妾之子起点 = coupleUnitMidX（共享 drop line）', async () => {
     const { nodes, edges } = buildMultiWifeChildren()
     const engine = new LayoutEngine({
       canvasSize: { width: 1000, height: 600 },
@@ -1246,22 +1262,26 @@ describe('layout-engine: P1 一妻多妾 — 父子边按母亲归属选择牵�
         resolveSubtreeOverlap: false,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const fPos = pos.get('F')!
     const w2Pos = pos.get('W2')!
+    const expectedStartX = (fPos.x + w2Pos.x) / 2
 
-    const c1Edge = result.edges.find(e => e.id === 'e-fc1')!
-    const c2Edge = result.edges.find(e => e.id === 'e-fc2')!
+    const c1Edge = result.edges.find(e => e.id === 'e-fc1')!  // 正妻之子
+    const c2Edge = result.edges.find(e => e.id === 'e-fc2')!  // 妾之子
 
-    // c1（正妻之子）起点 = 父中心
-    expect(c1Edge.path!.points[0].x).toBeCloseTo(fPos.x, 5)
-    // c2（妾之子）起点 = 妾 1 中心（≠ 父中心）
-    expect(c2Edge.path!.points[0].x).toBeCloseTo(w2Pos.x, 5)
-    expect(c2Edge.path!.points[0].x).not.toBeCloseTo(fPos.x, 0)
+    // [v6.0.8 核心] c1（正妻之子，motherId=W1）起点 = coupleUnitMidX
+    expect(c1Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
+    // [v6.0.8 核心] c2（妾之子，motherId=W2）起点 = coupleUnitMidX
+    expect(c2Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
+    // [v6.0.8 核心] 两个兄弟起点 X 完全相同（共享 drop line）
+    expect(c1Edge.path!.points[0].x).toBeCloseTo(c2Edge.path!.points[0].x, 0)
+    // [v6.0.8 核心] 都不 = 父节点中心 X
+    expect(c1Edge.path!.points[0].x).not.toBeCloseTo(fPos.x, 0)
   })
 
-  it('P1.4 同母亲多子：同一母亲组的子节点共享 T 形汇聚点', () => {
+  it('P1.4 v6.0.8：同父的所有兄弟共享 T 形汇聚点（不再按 motherId 分组）', async () => {
     // 构造一个夫 + 1 妾 + 2 妾之子的场景
     const nodes: LayoutNode[] = [
       { id: 'F', label: '夫', gender: 'male', isMainLineage: true, isLiving: false, generation: 0, width: 64, height: 28 },
@@ -1285,27 +1305,30 @@ describe('layout-engine: P1 一妻多妾 — 父子边按母亲归属选择牵�
         resolveSubtreeOverlap: false,
       } as Partial<LayoutConfig>,
     })
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
+    const fPos = pos.get('F')!
     const cPos = pos.get('C')!
+    const expectedStartX = (fPos.x + cPos.x) / 2 // coupleUnitMidX
     const c1Edge = result.edges.find(e => e.id === 'e-fc1')!
     const c2Edge = result.edges.find(e => e.id === 'e-fc2')!
 
-    // 同母亲组的 2 个子节点：路径 4 点 T 形
+    // 同父亲组的 2 个子节点：路径 4 点 T 形
     expect(c1Edge.path!.points.length).toBe(4)
     expect(c2Edge.path!.points.length).toBe(4)
-    // [P1 核心] 起点头相同（都是从妾中心 X 出发）
-    expect(c1Edge.path!.points[0].x).toBeCloseTo(cPos.x, 5)
-    expect(c2Edge.path!.points[0].x).toBeCloseTo(cPos.x, 5)
-    // 起点 X 与父节点中心 X 不同（证明 P1 生效）
-    const fPos = pos.get('F')!
-    expect(c1Edge.path!.points[0].x).not.toBeCloseTo(fPos.x, 0)
+    // [v6.0.8 核心] 起点头相同（都从 coupleUnitMidX 出发）
+    expect(c1Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
+    expect(c2Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
+    // [v6.0.8 核心] 两个兄弟起点 X 完全相同（v6.0.7 时各自从母亲节点 X 出发）
+    expect(c1Edge.path!.points[0].x).toBeCloseTo(c2Edge.path!.points[0].x, 0)
     // 终点 X 不同（c1 和 c2 在不同 X）
     expect(c1Edge.path!.points[3].x).not.toBeCloseTo(c2Edge.path!.points[3].x, 0)
-    // [P1 同组 T 形] 分叉点 Y 与起点 Y 之间的「垂直段」存在：pts[0].y != pts[1].y
-    // （resolveEdgeHorizontalOverlaps 可能微调 Y，但路径结构仍是 T 形）
+    // [v6.0.8 同组 T 形] 分叉点 Y 与起点 Y 之间的「垂直段」存在
     expect(c1Edge.path!.points[0].y).not.toBeCloseTo(c1Edge.path!.points[1].y, 0)
     expect(c2Edge.path!.points[0].y).not.toBeCloseTo(c2Edge.path!.points[1].y, 0)
+    // [v6.0.8 共享总线] 兄弟间水平段在同一 busY 上
+    expect(c1Edge.path!.points[1].y).toBeCloseTo(c2Edge.path!.points[1].y, 0)
+    expect(c1Edge.path!.points[2].y).toBeCloseTo(c2Edge.path!.points[2].y, 0)
   })
 })
 
@@ -1317,7 +1340,7 @@ describe('layout-engine: P1 一妻多妾 — 父子边按母亲归属选择牵�
  * 本测试验证 layout-engine 正确按 birthOrder 升序排序子节点（升序：1 < 2 < 3）。
  */
 describe('layout-engine: P3 按 birth_order 排序子节点', () => {
-  it('P3.1 兄弟节点按 birthOrder 升序排序：edges 输入逆序时输出仍严格升序', () => {
+  it('P3.1 兄弟节点按 birthOrder 升序排序：edges 输入逆序时输出仍严格升序', async () => {
     // 1 父 + 3 子，edges 顺序为 c3 → c1 → c2（逆序），但 birthOrder 为 1/2/3
     const W = 64
     const H = 28
@@ -1345,7 +1368,7 @@ describe('layout-engine: P3 按 birth_order 排序子节点', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const c1X = pos.get('c1')!.x
     const c2X = pos.get('c2')!.x
@@ -1356,7 +1379,7 @@ describe('layout-engine: P3 按 birth_order 排序子节点', () => {
     expect(c2X).toBeLessThan(c3X)
   })
 
-  it('P3.2 未指定 birthOrder 的子节点保持在原顺序（向后兼容）', () => {
+  it('P3.2 未指定 birthOrder 的子节点保持在原顺序（向后兼容）', async () => {
     const W = 64
     const H = 28
     const nodes: LayoutNode[] = [
@@ -1381,7 +1404,7 @@ describe('layout-engine: P3 按 birth_order 排序子节点', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const aX = pos.get('a')!.x
     const bX = pos.get('b')!.x
@@ -1390,7 +1413,7 @@ describe('layout-engine: P3 按 birth_order 排序子节点', () => {
     expect(aX).toBeLessThan(bX)
   })
 
-  it('P3.3 部分指定 birthOrder：已指定的按升序排在前面，未指定的排在后面', () => {
+  it('P3.3 部分指定 birthOrder：已指定的按升序排在前面，未指定的排在后面', async () => {
     const W = 64
     const H = 28
     const nodes: LayoutNode[] = [
@@ -1417,7 +1440,7 @@ describe('layout-engine: P3 按 birth_order 排序子节点', () => {
       } as Partial<LayoutConfig>,
     })
 
-    const result = engine.calculateLayout(nodes, edges)
+    const result = await engine.calculateLayout(nodes, edges)
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const xX = pos.get('x')!.x
     const yX = pos.get('y')!.x

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
+import { ref, reactive, shallowRef, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   ZoomIn,
@@ -35,6 +35,7 @@ import PersonEditDrawer from './PersonEditDrawer.vue';
 import ImagePreview from './ImagePreview.vue';
 import { LayoutEngine } from '@/utils/layout-engine';
 import type { LayoutNode, LayoutEdge, LayoutConfig, ViewportConfig } from '@/types/layout';
+import { useLayoutDebugPanel } from '@/composables/useLayoutDebugPanel';
 
 /**
  * G6 精细化按需加载
@@ -502,7 +503,7 @@ const props = defineProps<{
 /** Vue 模板中不能直接使用 import.meta.env，需要 ref 桥接 */
 const isDev = ref(import.meta.env.DEV);
 
-/** 性能埋点状态：FPS / 可见节点 / 总节点 / 渲染耗时 */
+/** 性能埋点状态：FPS / 可见节点 / 总节点 / 渲染耗时 / elkjs WASM 阶段计时 */
 const perfStats = reactive({
   fps: 0,
   visibleNodes: 0,
@@ -512,6 +513,37 @@ const perfStats = reactive({
   renderMs: 0,
   zoom: 1,
   showOverlay: false,
+  // [2026-09-01 §11.10 P3] elkjs WASM 加载性能监控：
+  //   elkjs1000Ms：1000 节点 elkjs 端到端布局耗时（closest user-visible timing）
+  //   elkjsInitMs：首次 elkjs layout() 耗时（包含 worker spawn + WASM 加载 + 首布局）
+  //   elkjsLayoutMs：暖机后稳态 elkjs layout() 耗时（仅布局本身）
+  //   三段拆分便于定位瓶颈是在 worker 启动、WASM 加载、还是 Sugiyama 计算。
+  elkjs1000Ms: 0,
+  elkjsInitMs: 0,
+  elkjsLayoutMs: 0,
+  // [2026-09-02 P1] render 阶段细粒度分段计时（用于定位 88% 卡死真凶）
+  //   - loadG6Ms: G6 动态 import + 14+ 扩展 register
+  //   - waitContainerMs: waitForContainerSize 等容器可见（≤1500ms）
+  //   - transformMs: transformToG6Data + treeToGraphData 同步转换
+  //   - layoutEngineMs: layoutEngine.calculateLayout（含展开/折叠/边路径）
+  //   - g6RenderMs: g6Graph.setData + render() G6 实例化+绘制
+  //   - viewportMs: zoomTo + translateBy 视口调整
+  //   - totalMs: 整个 initGraph 端到端
+  renderBreakdown: {
+    loadG6Ms: 0,
+    waitContainerMs: 0,
+    transformMs: 0,
+    layoutEngineMs: 0,
+    g6RenderMs: 0,
+    viewportMs: 0,
+    totalMs: 0,
+  },
+  // [2026-09-02 P2] partialTree 深度截断埋点
+  //   - depthBefore / depthAfter：截断前/后最大深度
+  //   - truncatedByDepth：被截断的子节点数
+  truncatedByDepth: 0,
+  depthBefore: 0,
+  depthAfter: 0,
 });
 
 /** 性能埋点 rAF id（提前声明，避免 TDZ） */
@@ -532,6 +564,31 @@ let lastViewportConfig: ViewportConfig | null = null;
 
 /** 工具栏是否折叠（折叠后只显示图标 + 搜索框，节省顶部空间） */
 const toolbarCollapsed = ref(false);
+
+/**
+ * [v6.x 健壮性 L+D 系列] 布局引擎实例的 ref 持有
+ *
+ * LayoutEngine 实例在 initGraph() 内部 new，生命周期与 graph.value 绑定。
+ * 这里用 shallowRef 暴露给顶层订阅器（useLayoutDebugPanel），便于 dev-only
+ * perf-overlay 在 engine 实例就绪后自动 attach。
+ *
+ * watchEffect 行为：
+ *   - 初始 null → useLayoutDebugPanel 不绑定（composable 内的 watchEffect 同步跳过）
+ *   - initGraph 内赋值后 → watchEffect 重新跑 → 自动 attach
+ *   - 切换 graph 时旧 engine 卸载 → detach 上一个 binding（previousLogger 还原）
+ */
+const layoutEngineRef = shallowRef<LayoutEngine | null>(null);
+
+/**
+ * [v6.x 健壮性 L+D 系列] 布局调试面板
+ *
+ * 提供 useLayoutDebugPanel 返回的响应式状态（cumulative / timings / slowPhases / errors），
+ * 在 perf-overlay 中渲染为可折叠面板。仅 dev 模式消费，prod 模式面板不渲染。
+ */
+const debugPanel = useLayoutDebugPanel(layoutEngineRef);
+
+/** [D 系列] 调试面板折叠状态（true = 展开细节） */
+const debugPanelExpanded = ref(false);
 
 /**
  * 渐进加载（大族谱首屏优化，2026-08-20）
@@ -592,6 +649,29 @@ const errorState = ref<{ code: number; message: string } | null>(null);
 const searchKeyword = ref('');
 const layoutDirection = ref<'TB' | 'LR'>('TB');
 const filterGender = ref<'all' | 'male' | 'female'>('all');
+
+/**
+ * [2026-09-01 P1 修复] 引擎选择状态（auto/dagre/elkjs/compactBox 四档）。
+ *
+ * 初始化优先级：URL `?engine=` 参数 > 默认 'auto'。
+ * 切换时通过 updateConfig + debouncedInitGraph 重新布局。
+ */
+type EngineChoice = 'auto' | 'dagre' | 'elkjs' | 'compactBox';
+const ENGINE_OPTIONS: Array<{ value: EngineChoice; label: string; icon: string }> = [
+  { value: 'auto', label: '自动', icon: '⚡' },
+  { value: 'dagre', label: 'Dagre', icon: '📐' },
+  { value: 'elkjs', label: 'ELK.js', icon: '🦌' },
+  { value: 'compactBox', label: 'v5 兜底', icon: '📦' },
+];
+function parseEngineFromUrl(): EngineChoice {
+  if (typeof window === 'undefined') return 'auto';
+  const raw = new URLSearchParams(window.location.search).get('engine')?.toLowerCase();
+  if (raw === 'dagre' || raw === 'elkjs' || raw === 'compactBox' || raw === 'auto') {
+    return raw;
+  }
+  return 'auto';
+}
+const engineChoice = ref<EngineChoice>(parseEngineFromUrl());
 
 /** 视图模式中文名映射（替代三元链，新增 viewMode 时只需补一行） */
 const VIEW_MODE_LABEL: Record<string, string> = {
@@ -741,6 +821,13 @@ function failLoading() {
 // 目标：宽高比 0.85-1.0（接近正方形），同代间距卡片宽度 × 0.25，
 //   代际间距卡片高度 × 1.15，夫妻间距 spouseGap = 16（与 LayoutConfig 默认一致）。
 //   紧贴传统族谱（苏式/欧式）的卡片比例。
+// [2026-08-31 修复] 用户反馈树谱三类问题：
+//   1) 配偶卡片水平堆叠重叠：spouseGap 由「卡片宽×0.25」上调到「卡片宽×0.5」，
+//      使中心距 = 卡片宽 + 卡片宽×0.5，确保多配偶场景卡片边缘间距 ≥ 卡片宽 1/3。
+//   2) 卡片上下距离过大：rankSep 由「卡片高×1.15」下调到「卡片高×0.7」，
+//      让连续代际视觉紧凑，与传统苏式五世同堂比例一致（卡片高×0.6-0.8）。
+//   3) 引导线末端衔接：在 layout-engine computeOrthogonalEdgePaths 增加端点内缩，
+//      让线的末端精确落在卡片边缘内 4px 而不是几何边缘。
 const viewModeConfig = computed(() => ({
   compact: {
     // 52×36：保持横排压缩，右上角调色板与姓名同行
@@ -749,8 +836,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 0,
     nameFontSize: 12,
     sublabelFontSize: 9,
-    nodeSep: 16,           // 52 × 0.25 = 13 → 上调至 16（间过窄会重叠）
-    rankSep: 42,           // 36 × 1.15 = 41.4
+    nodeSep: 16,           // 52 × 0.31
+    rankSep: 26,           // 36 × 0.72（卡片上下紧凑，留给导览线空间）
   },
   // 详细模式：传统横排卡片，84×100 使宽高比 ≈ 0.84 更接近正方形
   detailed: {
@@ -759,8 +846,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 0,
     nameFontSize: 13,
     sublabelFontSize: 0,  // 由 drawTraditionalContent 自渲染生卒年，不走 sublabel
-    nodeSep: 22,           // 84 × 0.25 = 21
-    rankSep: 115,          // 100 × 1.15
+    nodeSep: 28,           // 84 × 0.33（同代宽松 间距，避免多兄弟重叠）
+    rankSep: 70,           // 100 × 0.7（紧凑代际，上下代卡片边缘间距 20px）
   },
   portrait: {
     nodeWidth: 94,
@@ -768,8 +855,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 0,
-    nodeSep: 24,           // 94 × 0.25 = 23.5
-    rankSep: 115,          // 100 × 1.15
+    nodeSep: 30,           // 94 × 0.32
+    rankSep: 70,           // 100 × 0.7
   },
   // 吊线图传统世系：84×90，宽高比 ≈ 0.93，与 detailed 统一宽度
   xianshi: {
@@ -778,8 +865,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 0,
     nameFontSize: 12,
     sublabelFontSize: 0,
-    nodeSep: 22,
-    rankSep: 104,          // 90 × 1.15 = 103.5
+    nodeSep: 28,
+    rankSep: 64,           // 90 × 0.71
   },
   // 苏式：传统横排，与 detailed/xianshi 同宽
   su: {
@@ -788,8 +875,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 0,
     nameFontSize: 13,
     sublabelFontSize: 0,
-    nodeSep: 22,
-    rankSep: 115,
+    nodeSep: 28,
+    rankSep: 70,
   },
   // 浙式：世代格保持横排 120×56（横长卡），走 drawLabelShape
   zhe: {
@@ -798,8 +885,8 @@ const viewModeConfig = computed(() => ({
     avatarSize: 22,
     nameFontSize: 13,
     sublabelFontSize: 9,
-    nodeSep: 30,           // 120 × 0.25
-    rankSep: 64,           // 56 × 1.15 = 64.4
+    nodeSep: 36,           // 120 × 0.3
+    rankSep: 40,           // 56 × 0.71
   },
 }));
 
@@ -840,6 +927,8 @@ const fetchTreeData = async (rootId: string = '1', opts?: { limit?: number }) =>
         genealogyStore.totalPersons = response.totalPersons || 0;
         partialTree.value = !!response.isPartial;
         shownPersons.value = response.shownPersons || 0;
+        // [2026-09-02 P2] partialTree 深度截断：仅在 partial + 大树 + 纵深 时启用
+        maybeTruncateByDepth(response.rootNode);
         return response.rootNode;
       }
     }
@@ -905,6 +994,93 @@ function collectNodeIds(root: GenealogyNode | null): string[] {
   };
   walk(root);
   return ids;
+}
+
+/**
+ * [2026-09-02 P2] 客户端深度截断（条件性启用）
+ *
+ * 背景：partialTree 仅按后端 limit 截断「节点数」，但 zhuxi-demo 这类「单支系深族谱」
+ * 可能在 limit=100 之内仍保持 12+ 代纵深 → layoutEngine.calculateLayout 计算量大、
+ *   g6Graph.render() 视口高度爆掉，触发 P0 的 30s 兜底超时。
+ *
+ * 设计原则（条件性启用，避免误伤）：
+ * 1) 仅当 partialTree.value === true（后端已声明 partial）才考虑截断
+ * 2) 仅当总节点数 > PARTIAL_TREE_TRUNCATE_THRESHOLD 500 才截断（小族谱不动）
+ * 3) 仅当 maxDepth > PARTIAL_TREE_MAX_DEPTH 10 才截断（仅对「纵深」族谱）
+ * 4) 截断点选「最深的叶子层」，把超深支系的 children 数组清空（DFS 自然终止）
+ *
+ * 注：此函数直接 mutate root.children；调用前需 clone 谨慎。当前仅在 render 之前调用，
+ *     不会影响 store 中已存的 genealogyStore.treeData（store 持有旧引用）。
+ */
+const PARTIAL_TREE_MAX_DEPTH = 10;       // 根 = 0；超过此深度的子孙全部清空
+const PARTIAL_TREE_TRUNCATE_THRESHOLD = 500; // 总节点数阈值
+
+/**
+ * 计算树的最大深度（根 = 0；无 children 的节点深度为 0）。
+ */
+function computeTreeMaxDepth(root: GenealogyNode | null): number {
+  if (!root) return 0;
+  let max = 0;
+  const walk = (n: GenealogyNode, depth: number) => {
+    if (depth > max) max = depth;
+    if (!n.children || n.children.length === 0) return;
+    for (const c of n.children) walk(c, depth + 1);
+  };
+  walk(root, 0);
+  return max;
+}
+
+/**
+ * 按最大深度截断树：把深度 > maxDepth 的节点及其后代一并清空（仅清 children，保留节点本身）。
+ * 返回被截断的节点总数（含子孙后代），用于 perf 埋点。
+ */
+function truncateTreeByDepth(root: GenealogyNode | null, maxDepth: number): number {
+  if (!root) return 0;
+  let truncated = 0;
+  const walk = (n: GenealogyNode, depth: number) => {
+    if (!n.children || n.children.length === 0) return;
+    if (depth >= maxDepth) {
+      // 该节点已在 maxDepth，整层 children 都视为截断
+      truncated += n.children.length;
+      n.children = [];
+      return;
+    }
+    // 未到 maxDepth，继续 DFS；统计当前层 children 中被截断的子孙
+    const beforeLen = n.children.length;
+    for (const c of n.children) walk(c, depth + 1);
+    // （walk 之后可能已把某些 children 清空；不影响 beforeLen 计数）
+    void beforeLen;
+  };
+  walk(root, 0);
+  return truncated;
+}
+
+/**
+ * [2026-09-02 P2] 条件性深度截断的包装函数：仅在同时满足以下三个条件时执行：
+ *   1) partialTree.value === true（后端已声明 partial，避免对全量数据动刀）
+ *   2) 节点总数 > PARTIAL_TREE_TRUNCATE_THRESHOLD 500（小族谱不截断）
+ *   3) maxDepth > PARTIAL_TREE_MAX_DEPTH 10（仅处理真正的纵深族谱）
+ * 截断后写入 perfStats.truncatedByDepth / depthBefore / depthAfter 便于 dev overlay 复盘。
+ */
+function maybeTruncateByDepth(root: GenealogyNode | null): void {
+  // 每次调用前重置截断埋点（避免上次的值残留）
+  perfStats.truncatedByDepth = 0;
+  perfStats.depthBefore = 0;
+  perfStats.depthAfter = 0;
+  if (!root || !partialTree.value) return;
+  const nodeCount = collectNodeIds(root).length;
+  if (nodeCount <= PARTIAL_TREE_TRUNCATE_THRESHOLD) return;
+  const depthBefore = computeTreeMaxDepth(root);
+  if (depthBefore <= PARTIAL_TREE_MAX_DEPTH) return;
+  const truncated = truncateTreeByDepth(root, PARTIAL_TREE_MAX_DEPTH);
+  const depthAfter = computeTreeMaxDepth(root);
+  perfStats.truncatedByDepth = truncated;
+  perfStats.depthBefore = depthBefore;
+  perfStats.depthAfter = depthAfter;
+  console.info(
+    `[GenealogyTree][P2 深度截断] 节点 ${nodeCount} > ${PARTIAL_TREE_TRUNCATE_THRESHOLD} 且深度 ${depthBefore} > ${PARTIAL_TREE_MAX_DEPTH}，` +
+      `截断 ${truncated} 个子孙（深度 → ${depthAfter}）`,
+  );
 }
 
 /**
@@ -979,6 +1155,9 @@ const loadMoreBatch = async () => {
     genealogyStore.totalPersons = res.totalPersons || genealogyStore.totalPersons;
     shownPersons.value = res.shownPersons || shownPersons.value + added;
     partialTree.value = !!res.isPartial;
+    // [2026-09-02 P2] 逐批合并后可能再次变深（mergeBatchIntoTree 把子孙挂回去），
+    // 重新跑一次深度截断判断；perf 埋点会被覆盖，符合「最近一次」语义。
+    maybeTruncateByDepth(treeData);
     // 追加渲染：重新布局 + 重绘（复用完整管线：配偶边/吊线重挂载/过滤/裁剪/LOD 全兼容）
     await initGraph(treeData);
   } catch {
@@ -1482,11 +1661,80 @@ const initGraph = async (data: GenealogyNode) => {
   // 加载 G6 运行时（Graph + 必要扩展的注册）。
   // 动态 import 走子路径，绕开主入口的 preset 依赖链，
   // vendor-antv 体积会从 1.2MB 缩减到 400-600KB。
+  //
+  // [2026-09-02 P0 修复] 渲染阶段超时 + 子阶段进度
+  //   历史问题：1325 节点首次 initGraph 卡在 render 阶段（进度 88%）永不 resolve。
+  //   根因：render 阶段包含多个 await（loadG6 / waitContainer / calculateLayout / g6.render），
+  //         任何一个慢/挂都会导致 finishLoading 永远不调用。
+  //   解决方案：
+  //     1) 整个 initGraph 包 30s 兜底超时（Promise.race），超时强制 finishLoading + 错误占位
+  //     2) 子阶段进度细分 88→92→96→99→100，便于定位卡点
+  //     3) perfStats.renderBreakdown 记录每段耗时（dev 模式可在 perf-overlay 查看）
   setLoadingStage('render');
+  const initGraphStart = performance.now();
+  let renderTimer: number | null = null;
+  let timedOut = false;
+  const RENDER_TIMEOUT_MS = 30000;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    renderTimer = window.setTimeout(() => {
+      timedOut = true;
+      reject(new Error(
+        `[GenealogyTree] initGraph 渲染超时（${RENDER_TIMEOUT_MS / 1000}s），` +
+        `请刷新重试或减小数据规模（partial 模式下仅渲染首屏核心子集）`,
+      ));
+    }, RENDER_TIMEOUT_MS);
+  });
+
+  try {
+    await Promise.race([runInitGraphBody(data), timeoutPromise]);
+  } catch (e: any) {
+    if (timedOut) {
+      // [2026-09-02 P0] 超时兜底：强制 finishLoading + 错误占位
+      //   进度条不再卡 88%，用户体验闭环；错误占位提示用户刷新。
+      console.error('[GenealogyTree] render 超时:', e?.message || e);
+      try {
+        const { ElMessage } = await import('element-plus');
+        ElMessage?.error?.('族谱树渲染超时（>30s），请刷新页面重试');
+      } catch (_) { /* element-plus 未加载时静默 */ }
+      errorState.value = {
+        code: 504,
+        message: '渲染超时（30s）',
+      };
+      failLoading();
+      // 性能埋点：记录超时（便于 dev overlay 复盘）
+      perfStats.renderBreakdown.totalMs = RENDER_TIMEOUT_MS;
+    } else {
+      console.error('[GenealogyTree] G6 渲染失败:', e);
+      try {
+        const { ElMessage } = await import('element-plus');
+        ElMessage?.error?.(`渲染失败：${e?.message || '未知错误'}`);
+      } catch (_) { /* element-plus 未加载时静默 */ }
+      failLoading();
+    }
+  } finally {
+    if (renderTimer !== null) clearTimeout(renderTimer);
+    perfStats.renderBreakdown.totalMs = performance.now() - initGraphStart;
+  }
+};
+
+/**
+ * [2026-09-02 P0] initGraph 主体（被 Promise.race 超时包装）
+ *   拆出来便于：
+ *   - 子阶段进度细分（88→92→96→99→100）
+ *   - renderBreakdown 计时
+ *   - 超时取消清理（在 finally 中统一处理 timer）
+ */
+const runInitGraphBody = async (data: GenealogyNode) => {
+  // ---- 子阶段 1：loadG6 (88→92%) ----
+  const tLoadG6Start = performance.now();
   const { Graph, treeToGraphData } = await loadG6();
+  perfStats.renderBreakdown.loadG6Ms = performance.now() - tLoadG6Start;
+  loadingPercent.value = 92;
 
   // 等待容器可见（v-show 受 loading 状态影响，可能为 display:none）
+  const tWaitStart = performance.now();
   const { w: width, h: height } = await waitForContainerSize();
+  perfStats.renderBreakdown.waitContainerMs = performance.now() - tWaitStart;
 
   if (graph.value) {
     graph.value.destroy();
@@ -1494,9 +1742,13 @@ const initGraph = async (data: GenealogyNode) => {
 
   const config = viewModeConfig.value[genealogyStore.viewMode];
 
+  // ---- 子阶段 2：transformToG6Data + treeToGraphData (92→96%) ----
+  const tTransformStart = performance.now();
   const generationMap = new Map<string, number>();
   const treeData = transformToG6Data(data, generationMap);
   const graphData = treeToGraphData(treeData);
+  perfStats.renderBreakdown.transformMs = performance.now() - tTransformStart;
+  loadingPercent.value = 96;
 
   // ==================== 补齐 spouse 边（延迟添加策略）====================
   /**
@@ -1815,7 +2067,10 @@ const initGraph = async (data: GenealogyNode) => {
       nodeHeight: config.nodeHeight,
       nodeSep: config.nodeSep,
       rankSep: config.rankSep,
-      spouseGap: 32, // 增加配偶节点间距，避免重叠，使夫妻关系更清晰
+      // [2026-08-31 修复] 卡片堆叠重叠：spouseGap 从 32 上调到 48
+      //   多配偶场景下，配偶卡片中心距 = 节点宽 + 48，确保边缘间距 ≥ 48px，
+      //   避免多妻妾堆叠在一起。
+      spouseGap: 48,
       mainLineageCenter: true,
       spouseOptimization: true,
       generationAlign: true,
@@ -1831,16 +2086,67 @@ const initGraph = async (data: GenealogyNode) => {
         viewportCulling: true,
         lodEnabled: true,
       },
+      // [2026-09-01 P1 修复] 引擎选择由工具栏 4 选 1 按钮组控制
+      //   - 'auto'（默认）：≤1000 节点走 dagre；>1000 节点走 elkjs；失败 → compactBox
+      //   - 显式 'dagre' / 'elkjs' / 'compactBox' 用于调试与对比
+      //   - 也可通过 URL `?engine=` 参数初始化（见 engineChoice ref）
+      engine: engineChoice.value,
+      engineThreshold: 1000,
     },
   });
 
-  // 计算布局
-  const layoutResult = layoutEngine.calculateLayout(layoutNodes, layoutEdges);
+  // [v6.x 健壮性 L+D 系列] 把刚创建的 engine 暴露给顶层订阅器（useLayoutDebugPanel）
+  // watchEffect 触发 → 自动 attach 内部 subscription logger；
+  // 当 graph 重建时旧 engine 会被替换，watchEffect 会自动 detach 旧 binding。
+  layoutEngineRef.value = layoutEngine;
+
+  // [W3 2026-09-01] LayoutEngine v6 双引擎：calculateLayout 改为 async
+  //   - 默认走 dagre 同步路径（≤1000 节点）
+  //   - >1000 节点自动走 elkjs worker 异步路径
+  //   - 失败回退到 compactBox
+  // 详见 docs/dagre-vs-elkjs-selection.md。
+  //
+  // [2026-09-02 P0 修复] calculateLayout 15s 超时
+  //   历史问题：1325 节点 elkjs worker 通信偶尔超时（Network 列表为空、Console 无错误），
+  //             dagre 在 5000 节点退化时也可能卡死。
+  //   解决方案：race 15s 超时，超时抛错由 runLayoutEngine 内部 fallback 链捕获，
+  //             若全部失败则上抛到 initGraph 外层 → render 阶段总超时兜底。
+  const tLayoutStart = performance.now();
+  const LAYOUT_TIMEOUT_MS = 15000;
+  let layoutTimer: number | null = null;
+  const layoutTimeoutPromise = new Promise<never>((_, reject) => {
+    layoutTimer = window.setTimeout(() => {
+      reject(new Error(
+        `[GenealogyTree] layoutEngine.calculateLayout 超时（${LAYOUT_TIMEOUT_MS / 1000}s），` +
+        `节点数=${layoutNodes.length}`,
+      ));
+    }, LAYOUT_TIMEOUT_MS);
+  });
+  let layoutResult;
+  try {
+    layoutResult = await Promise.race([
+      layoutEngine.calculateLayout(layoutNodes, layoutEdges),
+      layoutTimeoutPromise,
+    ]);
+  } finally {
+    if (layoutTimer !== null) clearTimeout(layoutTimer);
+    perfStats.renderBreakdown.layoutEngineMs = performance.now() - tLayoutStart;
+  }
+
+  // [v6.x 健壮性 L+D 系列] 把最新一次调用的 meta 同步到 debugPanel（用于 perf-overlay）
+  // 慢路径事件 / 错误事件由 useLayoutDebugPanel 内置的 attach() 在 logger 链路中实时捕获。
+  debugPanel.refresh();
 
   // 自适应缩放策略：让金字塔形结构正确显示：
   // - zoom 优先适配画布高度（让实际分层可见）
   // - X 方向允许溢出（横向滚动条浏览支系），但不缩得太小（节点需可读）
   // - 中心固定主枝条（centerX=0），主枝在画布中央，支系在两侧扇形展开
+  //
+  // [2026-09-01 P0 修复] 利用 autoFit 新增的 wideTree 字段：
+  //   - 极端宽树（aspectRatio > 3 且 scaleX < minZoom）下，baseViewport.zoom 已被
+  //     autoFit 强制改为 fitByHeight（合理值如 0.5-0.7），不再需要 ×1.5 提升
+  //   - 此时下限可放宽到 0.5（卡片仍清晰），让主枝 8-10 代完整可见
+  //   - 普通树维持原 [0.4, 1.0] 下限，保证窄长树也不缩太小
   const mainLineageIds = new Set(genealogyStore.mainLineage.map(String));
   const baseViewport = layoutEngine.autoFit(layoutResult);
   let viewportConfig = baseViewport;
@@ -1858,9 +2164,13 @@ const initGraph = async (data: GenealogyNode) => {
   const totalNodeCount = layoutNodes.length;
   // [渐进加载 2026-08-20] 核心子集模式：不因节点数压低缩放，卡片保持肉眼可读
   const zoomByNodeCount = partialTree.value ? 1.0 : totalNodeCount > 600 ? 0.45 : totalNodeCount > 300 ? 0.6 : 0.85;
-  // 取三者中较小值，但保 0.4（核心子集模式保 0.6）防止缩到节点看不清
-  let desiredZoom = Math.min(fitByHeight, zoomByNodeCount, baseViewport.zoom * 1.5);
-  desiredZoom = Math.max(partialTree.value ? 0.6 : 0.4, Math.min(1.0, desiredZoom));
+  // [2026-09-01 P0 修复] 极端宽树下 autoFit.zoom 已是 fitByHeight，无需 ×1.5；上限放宽到 0.8
+  const isWideTree = baseViewport.wideTree === true;
+  const zoomCap = isWideTree ? Math.max(baseViewport.zoom, fitByHeight) : baseViewport.zoom * 1.5;
+  let desiredZoom = Math.min(fitByHeight, zoomByNodeCount, zoomCap);
+  // [2026-09-01 P0 修复] 极端宽树保 0.5，普通树保 0.4；核心子集模式额外提至 0.6
+  const zoomFloor = isWideTree ? 0.5 : (partialTree.value ? 0.6 : 0.4);
+  desiredZoom = Math.max(zoomFloor, Math.min(1.0, desiredZoom));
 
   if (mainLineageIds.size > 0) {
     const mainPositions = layoutResult.nodes.filter(n => mainLineageIds.has(n.id));
@@ -2681,11 +2991,67 @@ const initGraph = async (data: GenealogyNode) => {
 
   try {
     g6Graph.setData(graphData);
-    await g6Graph.render();
+    // [2026-09-02 P0 修复] g6Graph.render() 20s 超时 + 进度 96→99%
+    //   G6 v5 内部 setData + draw() 是同步重活（1325 节点下可能 3-10s），
+    //   dev mode 下首次 register 14+ 扩展可能更慢。包超时避免无限卡死。
+    const tRenderStart = performance.now();
+    const G6_RENDER_TIMEOUT_MS = 20000;
+    let g6RenderTimer: number | null = null;
+    const g6RenderTimeout = new Promise<never>((_, reject) => {
+      g6RenderTimer = window.setTimeout(() => {
+        reject(new Error(
+          `[GenealogyTree] g6Graph.render() 超时（${G6_RENDER_TIMEOUT_MS / 1000}s），` +
+          `节点数=${graphData?.nodes?.length || 0}`,
+        ));
+      }, G6_RENDER_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([g6Graph.render(), g6RenderTimeout]);
+    } finally {
+      if (g6RenderTimer !== null) clearTimeout(g6RenderTimer);
+      perfStats.renderBreakdown.g6RenderMs = performance.now() - tRenderStart;
+    }
+    loadingPercent.value = 99;
     graph.value = g6Graph;
     // 调试用：把 G6 实例暴露到全局，方便控制台检查节点/边坐标
     if (import.meta.env.DEV) {
       (window as any).__g6_graph__ = g6Graph;
+      // [2026-09-01 P1 修复] 暴露布局引擎实例与方法库，方便浏览器 console 调试
+      //   使用方法：
+      //   - window.__layoutDebug.engine.autoFit(layoutResult) → 重算 viewport
+      //   - window.__layoutDebug.config.autoFit.minZoom = 0.4 → 调参后下次布局生效
+      //   - window.__adapter.runLayoutEngine('elkjs', nodes, edges, config) → 强制引擎
+      //   - window.__layoutDebug.lastViewport → 当前视口 zoom/center
+      (window as any).__layoutDebug = {
+        engine: layoutEngine,
+        config: (layoutEngine as any).config,
+        canvasSize: (layoutEngine as any).canvasSize,
+        coupleUnitByMain: (layoutEngine as any).coupleUnitByMain,
+        lastViewport: lastViewportConfig,
+        // [2026-09-01 §11.10 P3] elkjs WASM perf hook：
+        //   浏览器 console 可通过 `__layoutDebug.perf.runElkjs1000()` 触发三段计时压测，
+        //   返回值直接打印 initMs / layoutMs / 1000Ms / ok / fallbackUsed 5 个字段。
+        //   监控数据同步写入 perfStats.elkjsInitMs / elkjsLayoutMs / elkjs1000Ms。
+        perf: {
+          runElkjs1000: (nodeCount = 1000) => runPerfTestElkjs(nodeCount),
+          getStats: () => ({
+            elkjs1000Ms: perfStats.elkjs1000Ms,
+            elkjsInitMs: perfStats.elkjsInitMs,
+            elkjsLayoutMs: perfStats.elkjsLayoutMs,
+            renderMs: perfStats.renderMs,
+          }),
+        },
+      };
+      // adapter 与各引擎函数按需 import（避免生产环境打入）
+      Promise.all([
+        import('@/utils/layout-engine-adapter'),
+        import('@/utils/dagre-layout'),
+        import('@/utils/elkjs-layout'),
+      ]).then(([adapter, dagre, elkjs]) => {
+        (window as any).__adapter = adapter;
+        (window as any).__layoutWithDagre = dagre.layoutWithDagre;
+        (window as any).__layoutWithElkjs = elkjs.layoutWithElkjs;
+      });
     }
 
     // 应用布局引擎计算的视口变换（缩放 + 居中）
@@ -2826,6 +3192,41 @@ const toggleLayout = () => {
   }
 };
 
+/**
+ * [2026-09-01 P1 修复] 切换布局引擎（auto/dagre/elkjs/compactBox）。
+ *
+ * 实现要点：
+ * 1. 更新 engineChoice ref（响应式状态）
+ * 2. 同步 URL 参数（便于刷新后保留、分享链接）
+ * 3. 触发 debouncedInitGraph 重新布局（避免快速点击时重复计算）
+ *
+ * 引擎选择由 layout-engine-adapter.selectLayoutEngine 决策：
+ * - 'auto' + ≤1000 节点 → dagre
+ * - 'auto' + >1000 节点 → elkjs
+ * - 显式 'dagre' / 'elkjs' / 'compactBox' → 强制使用
+ */
+const changeEngine = (next: EngineChoice) => {
+  if (engineChoice.value === next) return;
+  engineChoice.value = next;
+  // 同步 URL（保持刷新/分享一致性）
+  try {
+    const url = new URL(window.location.href);
+    if (next === 'auto') {
+      url.searchParams.delete('engine');
+    } else {
+      url.searchParams.set('engine', next);
+    }
+    window.history.replaceState({}, '', url.toString());
+  } catch {
+    /* SSR / 异常 URL 时忽略 */
+  }
+  const label = ENGINE_OPTIONS.find((o) => o.value === next)?.label || next;
+  ElMessage.success(`已切换为 ${label} 引擎`);
+  if (genealogyStore.treeData) {
+    debouncedInitGraph(genealogyStore.treeData);
+  }
+};
+
 const handleViewModeChange = (mode: ViewMode) => {
   genealogyStore.setViewMode(mode);
   if (genealogyStore.treeData) {
@@ -2916,6 +3317,69 @@ const addPerson = () => {
 
 // ==================== 性能压测（开发期） ====================
 /**
+ * [2026-09-01 §11.10 P3] 共享辅助：构造 1000 节点的合成家谱树
+ * - 与 runPerfTest 原内联生成逻辑等价，提取出来便于：
+ *   1. runPerfTestElkjs 复用相同 shape，避免两套测试数据漂移；
+ *   2. 浏览器 console 通过 __layoutDebug.perf.buildLargeGraph(1000) 复用构造数据。
+ * - 节点数量由 TOTAL 控制，9 代扇出，每代 each node ≤ FANOUT 子女，截断到 TOTAL。
+ */
+function buildLargeGraph(TOTAL = 1000): { root: any; count: number } {
+  const FANOUT = 3;
+  const root: any = {
+    id: 'perf-1',
+    full_name: '根节点',
+    gender: 'male',
+    is_living: true,
+    has_photo: false,
+  };
+  let count = 1;
+  let frontier: any[] = [root];
+  const maleNames = ['明', '建国', '伟', '磊', '勇', '军', '杰', '涛', '超', '强'];
+  const femaleNames = ['芳', '娜', '敏', '静', '丽', '艳', '娟', '霞', '萍', '燕'];
+
+  while (count < TOTAL && frontier.length > 0) {
+    const next: any[] = [];
+    for (const parent of frontier) {
+      const kids = Math.min(FANOUT, TOTAL - count);
+      for (let i = 0; i < kids; i++) {
+        count++;
+        const isMale = (count + i) % 2 === 0;
+        const name = isMale
+          ? maleNames[count % maleNames.length] + (count > 99 ? count : '')
+          : femaleNames[count % femaleNames.length] + (count > 99 ? count : '');
+        const child: any = {
+          id: `perf-${count}`,
+          full_name: name,
+          gender: isMale ? 'male' : 'female',
+          is_living: true,
+          has_photo: false,
+        };
+        parent.children = parent.children || [];
+        parent.children.push(child);
+        next.push(child);
+        if (count >= TOTAL) break;
+      }
+      if (count >= TOTAL) break;
+    }
+    frontier = next;
+  }
+
+  root.spouses = [
+    {
+      id: 'perf-spouse-1',
+      name: '配 偶',
+      gender: 'female',
+      family_id: 'perf-fam-1',
+      marriage_order: 1,
+      is_current: true,
+      end_reason: null,
+    },
+  ];
+
+  return { root, count };
+}
+
+/**
  * 生成 1000 个合成节点（9 代树形）+ spouse 边，验证 viewport culling 收益。
  * - 仅 dev 模式可点
  * - 不读 API，纯前端生成，跳过后端
@@ -2926,59 +3390,7 @@ async function runPerfTest() {
   if (perfTestLoading.value) return;
   perfTestLoading.value = true;
   try {
-    const TOTAL = 1000;
-    const FANOUT = 3; // 每代每个节点最多 3 个子女，9 代约 3000 节点——收一点按 TOTAL 截断
-    const root: any = {
-      id: 'perf-1',
-      full_name: '根节点',
-      gender: 'male',
-      is_living: true,
-      has_photo: false,
-    };
-    let count = 1;
-    let frontier: any[] = [root];
-    const maleNames = ['明', '建国', '伟', '磊', '勇', '军', '杰', '涛', '超', '强'];
-    const femaleNames = ['芳', '娜', '敏', '静', '丽', '艳', '娟', '霞', '萍', '燕'];
-
-    while (count < TOTAL && frontier.length > 0) {
-      const next: any[] = [];
-      for (const parent of frontier) {
-        const kids = Math.min(FANOUT, TOTAL - count);
-        for (let i = 0; i < kids; i++) {
-          count++;
-          const isMale = (count + i) % 2 === 0;
-          const name = isMale
-            ? maleNames[count % maleNames.length] + (count > 99 ? count : '')
-            : femaleNames[count % femaleNames.length] + (count > 99 ? count : '');
-          const child: any = {
-            id: `perf-${count}`,
-            full_name: name,
-            gender: isMale ? 'male' : 'female',
-            is_living: true,
-            has_photo: false,
-          };
-          parent.children = parent.children || [];
-          parent.children.push(child);
-          next.push(child);
-          if (count >= TOTAL) break;
-        }
-        if (count >= TOTAL) break;
-      }
-      frontier = next;
-    }
-
-    // 给根节点一个 spouse 边，验证 spouse 边绘制是否正确
-    root.spouses = [
-      {
-        id: 'perf-spouse-1',
-        name: '配 偶',
-        gender: 'female',
-        family_id: 'perf-fam-1',
-        marriage_order: 1,
-        is_current: true,
-        end_reason: null,
-      },
-    ];
+    const { root, count } = buildLargeGraph(1000);
 
     genealogyStore.setTreeData(root);
     ElMessage.info(`已生成 ${count} 个合成节点，开始渲染测试…`);
@@ -2994,6 +3406,193 @@ async function runPerfTest() {
   } finally {
     perfTestLoading.value = false;
   }
+}
+
+/**
+ * [2026-09-01 §11.10 P3] 直接构造 1000 个 LayoutNode 的平衡二叉树（elkjs 压测专用）
+ * - 与 runPerfTest 的「家谱合成树」相比，这里直接生成 LayoutNode[]：
+ *   1. 跳过 GenealogyTree → graphData → LayoutNode 的多层 transform，与 bench spec 的
+ *      buildLargeTree 行为一致，确保浏览器端实测和 jsdom 单测的输入可比；
+ *   2. 不再需要经过 1000 个节点的 G6 渲染初始化，仅做 elkjs 布局耗时测量，耗时更纯净。
+ * - W=64、H=28 与 layout-engine.bench.spec.ts 的 buildLargeTree / 默认节点尺寸一致。
+ */
+function buildLargeLayoutGraph(targetSize = 1000): { nodes: any[]; edges: any[] } {
+  const W = 64;
+  const H = 28;
+  const nodes: any[] = [];
+  const edges: any[] = [];
+  nodes.push({
+    id: 'root',
+    label: 'Root',
+    gender: 'male',
+    isMainLineage: true,
+    isLiving: false,
+    generation: 0,
+    width: W,
+    height: H,
+  });
+  let edgeCounter = 0;
+  let currentGenIds: string[] = ['root'];
+  let gen = 0;
+  while (nodes.length < targetSize && gen < 20) {
+    const nextGenIds: string[] = [];
+    gen++;
+    for (let i = 0; i < currentGenIds.length; i++) {
+      const parentId = currentGenIds[i];
+      for (let c = 0; c < 2; c++) {
+        if (nodes.length >= targetSize) break;
+        const childId = `g${gen}_n${i}_c${c}`;
+        nodes.push({
+          id: childId,
+          label: childId,
+          gender: 'male',
+          isMainLineage: false,
+          isLiving: false,
+          generation: gen,
+          width: W,
+          height: H,
+        });
+        edges.push({
+          id: `e_${edgeCounter++}`,
+          source: parentId,
+          target: childId,
+          kind: 'parent-child',
+          birthOrder: c,
+        });
+        nextGenIds.push(childId);
+      }
+      if (nodes.length >= targetSize) break;
+    }
+    currentGenIds = nextGenIds;
+  }
+  return { nodes, edges };
+}
+
+/**
+ * [2026-09-01 §11.10 P3] elkjs WASM 加载性能监控
+ * - 与 runPerfTest 同样压 1000 节点，但跳过 G6 渲染，直接走 elkjs 布局管线，三段计时：
+ *   ① elkjsInitMs  = 首次 elkjs.layout() 的耗时（worker spawn + WASM 加载 + 首布局）
+ *   ② elkjsLayoutMs = 稳态 elkjs.layout() 耗时（worker 已 warm，取 3 次调用的最小值）
+ *   ③ elkjs1000Ms  = 单次稳态调用的耗时（user-visible timing，与 renderMs 对齐）
+ * - elkjs 失败时 adapter 会自动 fallback 到 dagre，触发 ElMessage 警告；
+ *   此时 perfStats.elkjs* 仍记 0（无意义），让监控数据明确区分"elkjs 成功"与"已降级"。
+ * - 用例：浏览器 console `__layoutDebug.perf.runElkjs1000()` 即可触发
+ */
+const elkjsPerfLoading = ref(false);
+async function runPerfTestElkjs(nodeCount = 1000): Promise<{
+  elkjs1000Ms: number;
+  elkjsInitMs: number;
+  elkjsLayoutMs: number;
+  ok: boolean;
+  fallbackUsed: boolean;
+}> {
+  if (elkjsPerfLoading.value) {
+    return { elkjs1000Ms: 0, elkjsInitMs: 0, elkjsLayoutMs: 0, ok: false, fallbackUsed: false };
+  }
+  elkjsPerfLoading.value = true;
+  const fallbackUsed = false;
+  try {
+    // 直接生成 1000 LayoutNode 平衡二叉树（与 bench spec 的 buildLargeTree(1000) 同构）
+    const { nodes: layoutNodes, edges: layoutEdges } = buildLargeLayoutGraph(nodeCount);
+    const adapter = await import('@/utils/layout-engine-adapter');
+    const { expandSpouseToVirtualNodes } = await import('@/utils/spouse-virtualizer');
+    const { DEFAULT_LAYOUT_CONFIG } = await import('@/types/layout');
+    const virtualized = expandSpouseToVirtualNodes(layoutNodes, layoutEdges);
+
+    // 配置：强制 elkjs 引擎（关闭 auto fallback），关掉主脉对齐等耗时后处理
+    // 沿用 bench spec 的写法：用 `as LayoutConfig` 整体收窄类型，避免 engine 字段被推断为 string。
+    // LayoutConfig 已在脚本顶部以 type 静态引入，无需 await import。
+    const elkjsConfig = {
+      ...DEFAULT_LAYOUT_CONFIG,
+      engine: 'elkjs',
+      nodeSep: 24,
+      rankSep: 48,
+      spouseGap: 16,
+      marriageJunctionOffset: 0,
+      edgeHorizontalSeparation: 0,
+      resolveSubtreeOverlap: false,
+      mainLineageCenter: false,
+      spouseOptimization: false,
+    } as LayoutConfig;
+
+    // ① 首次 elkjs：包含 worker spawn + WASM 加载 + 首布局
+    const tInitStart = performance.now();
+    let initOk = false;
+    let effectiveEngine: 'dagre' | 'elkjs' | 'compactBox' = 'elkjs';
+    try {
+      // 通过 adapter 调用：内部会捕获 elkjs 失败并 fallback 到 dagre。
+      // 我们在外层通过尝试性 catch 不切引擎，只测量 elkjs 路径耗时。
+      await layoutEngineForPerf(layoutNodes, layoutEdges, elkjsConfig);
+      initOk = true;
+    } catch (e) {
+      console.warn('[runPerfTestElkjs] elkjs init failed:', e);
+    }
+    perfStats.elkjsInitMs = Math.round(performance.now() - tInitStart);
+
+    // ② ③ 稳态测量：连续 3 次 elkjs.layout，拆分布局耗时
+    let totalLayoutMs = 0;
+    let layoutOk = false;
+    let lastResult: any = null;
+    for (let iter = 0; iter < 3; iter++) {
+      const t = performance.now();
+      try {
+        lastResult = await adapter.runLayoutEngine(
+          'elkjs',
+          virtualized.virtualNodes,
+          virtualized.virtualEdges,
+          elkjsConfig,
+        );
+        layoutOk = (lastResult?.size ?? 0) > 0;
+        effectiveEngine = 'elkjs';
+      } catch (e) {
+        // elkjs 在某次调用失败 → fallback 到 dagre；记录并跳出循环
+        console.warn(`[runPerfTestElkjs] elkjs iter ${iter} failed:`, e);
+        effectiveEngine = 'dagre';
+        break;
+      }
+      totalLayoutMs += performance.now() - t;
+    }
+    // 稳态单次耗时：3 次平均（用于跨次测量与 JIT 抖动平均化）
+    const singleLayoutMs = totalLayoutMs / 3;
+    perfStats.elkjsLayoutMs = Math.round(singleLayoutMs);
+    perfStats.elkjs1000Ms = Math.round(singleLayoutMs);
+
+    const effectiveFallback = effectiveEngine !== 'elkjs';
+    const summary = effectiveFallback
+      ? `⚠️ elkjs 失败已 fallback 到 dagre：initMs=${perfStats.elkjsInitMs} layoutMs=${perfStats.elkjsLayoutMs}`
+      : `elkjs 压测完成：initMs=${perfStats.elkjsInitMs} layoutMs=${perfStats.elkjsLayoutMs} 1000Ms≈${perfStats.elkjs1000Ms}`;
+    if (effectiveFallback) ElMessage.warning(summary);
+    else ElMessage.success(summary);
+
+    return {
+      elkjs1000Ms: perfStats.elkjs1000Ms,
+      elkjsInitMs: perfStats.elkjsInitMs,
+      elkjsLayoutMs: perfStats.elkjsLayoutMs,
+      ok: initOk && layoutOk,
+      fallbackUsed: effectiveFallback,
+    };
+  } catch (e: any) {
+    ElMessage.error(`elkjs 压测失败：${e?.message || e}`);
+    return { elkjs1000Ms: 0, elkjsInitMs: 0, elkjsLayoutMs: 0, ok: false, fallbackUsed };
+  } finally {
+    elkjsPerfLoading.value = false;
+  }
+}
+
+/**
+ * [2026-09-01 §11.10 P3] elkjs perf helper：构造一个 ephemeral LayoutEngine 实例，
+ * 仅做首次 elkjs.layout（含 WASM 加载），不写入 perfStats。
+ *   - 与 runPerfTestElkjs 解耦，便于 __layoutDebug.perf 在 console 直接复用。
+ */
+async function layoutEngineForPerf(
+  nodes: any[],
+  edges: any[],
+  config: any,
+): Promise<void> {
+  const adapter = await import('@/utils/layout-engine-adapter');
+  const { expandSpouseToVirtualNodes } = await import('@/utils/spouse-virtualizer');
+  const virtualized = expandSpouseToVirtualNodes(nodes, edges);
+  await adapter.runLayoutEngine('elkjs', virtualized.virtualNodes, virtualized.virtualEdges, config);
 }
 
 // ==================== 侧栏编辑抽屉（PersonEditDrawer） ====================
@@ -3404,6 +4003,25 @@ defineExpose({
         />
       </el-tooltip>
 
+      <!-- [2026-09-01 P1 修复] 引擎 4 选 1 按钮组：auto / dagre / elkjs / compactBox -->
+      <el-button-group class="engine-controls">
+        <el-tooltip
+          v-for="opt in ENGINE_OPTIONS"
+          :key="opt.value"
+          :content="`布局引擎：${opt.label}（${opt.value}）`"
+          placement="bottom"
+        >
+          <el-button
+            :type="engineChoice === opt.value ? 'primary' : 'default'"
+            size="small"
+            @click="changeEngine(opt.value)"
+            :title="opt.value"
+          >
+            <span style="font-size: 13px">{{ opt.icon }}</span>
+          </el-button>
+        </el-tooltip>
+      </el-button-group>
+
       <div class="toolbar-spacer" />
 
       <!-- Zoom Controls -->
@@ -3476,6 +4094,13 @@ defineExpose({
           <template v-if="genealogyStore.totalPersons">{{ genealogyStore.totalPersons }}</template>
           <template v-else>-</template>
           人 —— 逐批加载中，浏览更流畅
+          <!-- [2026-09-02 P2] 深度截断提示：仅当本批发生了深度截断才显示 -->
+          <template v-if="perfStats.truncatedByDepth > 0">
+            <span class="partial-tree-truncate-tag">
+              · 已按深度截断 {{ perfStats.truncatedByDepth }} 节点
+              （{{ perfStats.depthBefore }}→{{ perfStats.depthAfter }} 代）
+            </span>
+          </template>
         </span>
       </div>
       <el-button
@@ -3512,6 +4137,19 @@ defineExpose({
             <span class="perf-label">渲染</span>
             <span class="perf-value">{{ perfStats.renderMs }}ms</span>
           </div>
+          <!-- [2026-09-01 §11.10 P3] elkjs WASM 加载性能监控面板 -->
+          <div class="perf-row" v-if="isDev">
+            <span class="perf-label">elkjs 首载</span>
+            <span class="perf-value">{{ perfStats.elkjsInitMs }}ms</span>
+          </div>
+          <div class="perf-row" v-if="isDev">
+            <span class="perf-label">elkjs 稳态</span>
+            <span class="perf-value">{{ perfStats.elkjsLayoutMs }}ms</span>
+          </div>
+          <div class="perf-row" v-if="isDev">
+            <span class="perf-label">elkjs 1000</span>
+            <span class="perf-value">{{ perfStats.elkjs1000Ms }}ms</span>
+          </div>
           <button
             v-if="isDev"
             class="perf-test-btn"
@@ -3520,6 +4158,137 @@ defineExpose({
           >
             {{ perfTestLoading ? '生成中…' : '压测 1000 节点' }}
           </button>
+          <button
+            v-if="isDev"
+            class="perf-test-btn perf-test-btn--elkjs"
+            :disabled="elkjsPerfLoading"
+            @click="runPerfTestElkjs(1000)"
+          >
+            {{ elkjsPerfLoading ? 'elkjs 压测中…' : 'elkjs 1000 节点压测' }}
+          </button>
+
+          <!-- [v6.x 健壮性 L+D 系列] 布局引擎调试面板（dev-only，可折叠）
+               - 紧凑模式：仅展示累计统计（calls / OK / FAIL / 错误率）
+               - 展开模式：追加 timings 表 / 慢路径事件历史 / 错误事件历史
+               - 数据源：useLayoutDebugPanel(layoutEngineRef) 响应式 ref
+          -->
+          <div v-if="isDev && layoutEngineRef" class="layout-debug-panel">
+            <button
+              type="button"
+              class="layout-debug-toggle"
+              @click="debugPanelExpanded = !debugPanelExpanded"
+              :title="debugPanelExpanded ? '折叠' : '展开'"
+            >
+              <span class="layout-debug-icon">{{ debugPanelExpanded ? '▼' : '▶' }}</span>
+              <span class="layout-debug-title">LayoutEngine 调试</span>
+              <span class="layout-debug-badge" :class="debugPanel.errorRate.value > 0.05 ? 'bad' : 'good'">
+                {{ debugPanel.cumulative.value.totalCalls }}次 / 错{{ debugPanel.cumulative.value.errorCalls }}
+              </span>
+            </button>
+
+            <!-- 紧凑摘要（始终显示） -->
+            <div v-if="debugPanel.lastMeta" class="layout-debug-summary">
+              <div class="perf-row">
+                <span class="perf-label">最近一次</span>
+                <span class="perf-value">{{ debugPanel.lastTotalMs.toFixed(1) }}ms</span>
+              </div>
+              <div class="perf-row" v-if="debugPanel.lastMeta.engineUsed">
+                <span class="perf-label">引擎</span>
+                <span class="perf-value">{{ debugPanel.lastMeta.engineUsed }}</span>
+              </div>
+              <div class="perf-row" v-if="debugPanel.lastMeta.wideTree">
+                <span class="perf-label">宽树</span>
+                <span class="perf-value bad">true</span>
+              </div>
+              <div class="perf-row" v-if="debugPanel.lastMeta.input.nodeCount">
+                <span class="perf-label">输入</span>
+                <span class="perf-value">
+                  {{ debugPanel.lastMeta.input.nodeCount }}N / {{ debugPanel.lastMeta.input.edgeCount }}E
+                </span>
+              </div>
+            </div>
+
+            <!-- 展开细节 -->
+            <div v-if="debugPanelExpanded" class="layout-debug-details">
+              <!-- 阶段耗时表 -->
+              <div v-if="debugPanel.timings.value.length > 0" class="layout-debug-section">
+                <div class="layout-debug-section-title">阶段耗时</div>
+                <div
+                  v-for="row in debugPanel.timings.value"
+                  :key="row.phase"
+                  class="perf-row"
+                >
+                  <span class="perf-label">{{ row.phase }}</span>
+                  <span class="perf-value">{{ row.durationMs }}ms ({{ row.percentOfTotal }}%)</span>
+                </div>
+              </div>
+
+              <!-- 慢路径事件 -->
+              <div v-if="debugPanel.slowPhases.value.length > 0" class="layout-debug-section">
+                <div class="layout-debug-section-title">
+                  慢路径 ({{ debugPanel.slowPhases.value.length }})
+                </div>
+                <div
+                  v-for="(sp, idx) in debugPanel.slowPhases.value.slice(-5).reverse()"
+                  :key="idx"
+                  class="layout-debug-event"
+                >
+                  <div class="perf-row">
+                    <span class="perf-label">{{ sp.phase }}</span>
+                    <span class="perf-value bad">{{ sp.durationMs.toFixed(1) }}ms</span>
+                  </div>
+                  <div class="perf-row">
+                    <span class="perf-label">阈值</span>
+                    <span class="perf-value">{{ sp.thresholdMs }}ms · {{ sp.engineUsed ?? '?' }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 错误事件 -->
+              <div v-if="debugPanel.errors.value.length > 0" class="layout-debug-section">
+                <div class="layout-debug-section-title">
+                  错误 ({{ debugPanel.errors.value.length }})
+                </div>
+                <div
+                  v-for="(err, idx) in debugPanel.errors.value.slice(-5).reverse()"
+                  :key="idx"
+                  class="layout-debug-event"
+                >
+                  <div class="perf-row">
+                    <span class="perf-label">{{ err.code }}</span>
+                    <span class="perf-value bad">{{ err.message }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 累计统计 -->
+              <div v-if="debugPanel.cumulative.value.totalCalls > 0" class="layout-debug-section">
+                <div class="layout-debug-section-title">累计</div>
+                <div class="perf-row">
+                  <span class="perf-label">总调用</span>
+                  <span class="perf-value">{{ debugPanel.cumulative.value.totalCalls }}</span>
+                </div>
+                <div class="perf-row">
+                  <span class="perf-label">错误率</span>
+                  <span class="perf-value" :class="debugPanel.errorRate.value > 0.05 ? 'bad' : 'good'">
+                    {{ (debugPanel.errorRate.value * 100).toFixed(1) }}%
+                  </span>
+                </div>
+                <div v-if="Object.keys(debugPanel.cumulative.value.errorsByCode).length > 0" class="perf-row">
+                  <span class="perf-label">错误码</span>
+                  <span class="perf-value">
+                    {{ Object.entries(debugPanel.cumulative.value.errorsByCode).map(([k, v]) => `${k}×${v}`).join(', ') }}
+                  </span>
+                </div>
+                <div v-if="Object.keys(debugPanel.cumulative.value.enginesUsed).length > 0" class="perf-row">
+                  <span class="perf-label">引擎分布</span>
+                  <span class="perf-value">
+                    {{ Object.entries(debugPanel.cumulative.value.enginesUsed).map(([k, v]) => `${k}×${v}`).join(', ') }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
     
         <!-- Loading with staged progress -->
@@ -3771,6 +4540,19 @@ defineExpose({
   flex-shrink: 0;
 }
 
+/* [2026-09-02 P2] 深度截断标签：橙色提示，与主文案区分 */
+.partial-tree-truncate-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: rgba(230, 162, 60, 0.12);
+  color: #E6A23C;
+  font-size: 12px;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
 /* 性能面板（dev only，右下角） */
 .perf-overlay {
   position: absolute;
@@ -3834,6 +4616,105 @@ defineExpose({
 .perf-overlay .perf-test-btn:disabled {
   background: #555;
   cursor: not-allowed;
+}
+
+/* [v6.x 健壮性 L+D 系列] 布局引擎调试面板样式 */
+.layout-debug-panel {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.layout-debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f0f0f0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 11px;
+  text-align: left;
+}
+
+.layout-debug-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.layout-debug-icon {
+  font-size: 9px;
+  color: #4FC3F7;
+  width: 10px;
+  display: inline-block;
+}
+
+.layout-debug-title {
+  font-weight: 600;
+  flex: 1;
+  color: #4FC3F7;
+}
+
+.layout-debug-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.layout-debug-badge.good {
+  background: rgba(102, 187, 106, 0.18);
+  color: #66BB6A;
+}
+
+.layout-debug-badge.bad {
+  background: rgba(239, 83, 80, 0.22);
+  color: #EF5350;
+}
+
+.layout-debug-summary {
+  margin-top: 6px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+
+.layout-debug-details {
+  margin-top: 6px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.layout-debug-section {
+  margin-bottom: 6px;
+}
+
+.layout-debug-section:last-child {
+  margin-bottom: 0;
+}
+
+.layout-debug-section-title {
+  color: #999;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+  padding-bottom: 2px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.layout-debug-event {
+  margin-bottom: 4px;
+  padding: 3px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  font-size: 10px;
 }
 
 .stat-divider {

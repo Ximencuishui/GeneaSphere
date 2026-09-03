@@ -3,7 +3,7 @@
  * 一夫多妻 + 子树避让优化 Demo 页
  *
  * 直接调用 LayoutEngine 计算布局，并把节点 / 边渲染为 SVG。
- * 用于人工验收 v4 优化方案（一夫多妻走线 + 同世代卡片不重叠 + 牵引线不重叠）。
+ * 用于人工验收 v6 优化方案（一夫多妻共享 drop line + 同世代卡片不重叠 + 走线解耦母亲归属）。
  *
  * 路由：/demo/tree-multi-wife（无需登录）
  */
@@ -11,6 +11,11 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { LayoutEngine } from '@/utils/layout-engine'
 import type { LayoutNode, LayoutEdge } from '@/types/layout'
+import {
+  collectCouplesByMain,
+  computeWorstSpanRatio,
+  spanRatioStatus,
+} from '@/utils/couple-unit-span'
 
 // [2026-08-28 B1 调优] 同步 GenealogyTree.vue 的 viewModeConfig 调优后尺寸
 // 卡片宽高比 0.85-1.0，nodeSep = nodeWidth × 0.25，rankSep = nodeHeight × 1.15。
@@ -243,13 +248,14 @@ const scenarios: Scenario[] = [
 // ---------- 状态 ----------
 
 /** 视图模式（compact / detailed），支持 URL ?mode= 持久化 */
-const viewMode = ref<ViewMode>(((route.query.mode as ViewMode) || 'compact') in VIEW_MODE_PRESETS
-  ? (route.query.mode as ViewMode)
-  : 'compact')
+const initialMode = route.query.mode as ViewMode | undefined
+const viewMode = ref<ViewMode>(
+  initialMode && initialMode in VIEW_MODE_PRESETS ? initialMode : 'compact'
+)
 /** 缩放百分比，支持 URL ?zoom= 持久化，默认 100% */
 const zoomPercent = ref<number>(Math.min(400, Math.max(25, Number(route.query.zoom) || 100)))
 const activeId = ref(scenarios[0].id)
-const layout = ref<ReturnType<LayoutEngine['calculateLayout']> | null>(null)
+const layout = ref<Awaited<ReturnType<LayoutEngine['calculateLayout']>> | null>(null)
 const elapsed = ref(0)
 
 const activeScenario = computed(() => scenarios.find(s => s.id === activeId.value)!)
@@ -290,7 +296,7 @@ function buildLayoutInput(): { nodes: LayoutNode[]; edges: LayoutEdge[] } {
   }
 }
 
-function compute() {
+async function compute() {
   const preset = VIEW_MODE_PRESETS[viewMode.value]
   const engine = new LayoutEngine({
     canvasSize: { width: 1400, height: 800 },
@@ -307,7 +313,11 @@ function compute() {
   })
   const t0 = performance.now()
   const input = buildLayoutInput()
-  layout.value = engine.calculateLayout(input.nodes, input.edges)
+  // [W3 2026-09-01] LayoutEngine v6 双引擎：calculateLayout 改为 async
+  //   - 默认走 dagre 同步路径（≤1000 节点）
+  //   - >1000 节点自动走 elkjs worker 异步路径
+  //   - 失败回退到 compactBox
+  layout.value = await engine.calculateLayout(input.nodes, input.edges)
   elapsed.value = +(performance.now() - t0).toFixed(2)
   // 重置主画布 transform 与选中状态，避免切换场景后 transform 残留
   selectedNodeId.value = null
@@ -376,7 +386,16 @@ function edgeStroke(edge: LayoutEdge): string {
  * 诊断指标计算
  * - 夫妻中心距比（dist / spouseWidth）：应 ≤ 1.3（plan §二验收指标）
  * - 夫妻间隙被穿过：检测夫妻水平区间内是否存在其他节点（应不发生）
- * - 一夫多妻 span：第 1 妻与最后 1 妻的中心距（衡量 CoupleUnit 总宽度）
+ * - 一夫多妻 span：相邻配偶卡片中心距 vs 理论 (spouseW + spouseGap)，
+ *   衡量 CoupleUnit 内配偶节点是否「整齐对齐」（无累加偏差）
+ *
+ * [2026-09-02 P1 #8 修复] 一夫多妻 span 比算法：
+ *   旧实现按 spouseId 字符串排序找首尾，与 layout-engine 内部按 marriageOrder 排序
+ *   的契约不一致。当配偶命名形如 W1/W2/.../W10 时字符串排序错位（W10 < W2），
+ *   导致 span 计算错误。
+ *   修复：把算法抽到 src/utils/couple-unit-span.ts 纯函数模块，
+ *   内部按 marriageOrder 升序排序（与 tree-positioning.ts positionSpouseNodes 一致），
+ *   同时输出"首-尾 span 比"与"相邻间距均值比"两个互补指标。
  */
 interface DiagnosticMetric {
   label: string
@@ -392,21 +411,10 @@ const diagnosticMetrics = computed<DiagnosticMetric[]>(() => {
   const spouseW = preset.nodeWidth
   const spouseGap = preset.spouseGap
 
-  // 1) 收集所有 spouse 边，按夫分组计算「夫妻中心距比」
-  const couplesByMain = new Map<string, { mainId: string; spouseId: string; dist: number }[]>()
-  for (const e of layout.value.edges) {
-    if (e.kind !== 'spouse') continue
-    const mainId = e.source
-    const spouseId = e.target
-    const mainPos = layout.value.nodes.find(n => n.id === mainId)
-    const spousePos = layout.value.nodes.find(n => n.id === spouseId)
-    if (!mainPos || !spousePos) continue
-    const dist = Math.abs(spousePos.x - mainPos.x)
-    if (!couplesByMain.has(mainId)) couplesByMain.set(mainId, [])
-    couplesByMain.get(mainId)!.push({ mainId, spouseId, dist })
-  }
+  // 1) 按夫分组收集 spouse 边（保留 marriageOrder）—— [P1 #8] 委托给纯函数模块
+  const couplesByMain = collectCouplesByMain(layout.value.edges, layout.value.nodes)
 
-  // 计算所有夫妻中心距比的最大值
+  // 2) 夫妻中心距比（dist / spouseWidth）：应 ≤ 1.3（plan §二验收指标）
   let maxRatio = 0
   let worstCouple: { mainId: string; spouseId: string; dist: number } | null = null
   for (const list of couplesByMain.values()) {
@@ -425,20 +433,19 @@ const diagnosticMetrics = computed<DiagnosticMetric[]>(() => {
     hint: worstCouple ? `最差：${worstCouple.mainId} ↔ ${worstCouple.spouseId}（目标 ≤ 1.3）` : undefined,
   })
 
-  // 2) 夫妻间隙被穿过：检查「夫 X 区间 + 妻 X 区间」之间是否存在其他节点
+  // 3) 夫妻间隙被穿过：检查「夫 X 区间 + 妻 X 区间」之间是否存在其他节点
+  const nodePosById = new Map(layout.value.nodes.map(n => [n.id, n]))
   let pairViolations = 0
   for (const list of couplesByMain.values()) {
     for (const c of list) {
-      const mainPos = layout.value.nodes.find(n => n.id === c.mainId)
-      const spousePos = layout.value.nodes.find(n => n.id === c.spouseId)
+      const mainPos = nodePosById.get(c.mainId)
+      const spousePos = nodePosById.get(c.spouseId)
       if (!mainPos || !spousePos) continue
-      // 夫妻水平间隙：[mainRight, spouseLeft]
       const mainRight = mainPos.x + mainPos.width / 2
       const spouseLeft = spousePos.x - spousePos.width / 2
-      // 在另一代际（y 与夫妻不同）找节点中心 X 落入 [mainRight, spouseLeft]
       for (const n of layout.value.nodes) {
         if (n.id === c.mainId || n.id === c.spouseId) continue
-        if (Math.abs(n.y - mainPos.y) < 0.5) continue // 同一 Y（夫妻同代）跳过
+        if (Math.abs(n.y - mainPos.y) < 0.5) continue
         if (n.x > mainRight && n.x < spouseLeft) {
           pairViolations++
           break
@@ -453,34 +460,24 @@ const diagnosticMetrics = computed<DiagnosticMetric[]>(() => {
     hint: pairViolations === 0 ? '所有夫妻对未被其他代际节点穿过' : '存在夫妻子树被拆开的违规场景',
   })
 
-  // 3) 一夫多妻 span 占比：第 1 妻 → 最后 1 妻的中心距 vs CoupleUnit 宽度预期
-  let maxSpouses = 0
-  let maxSpanRatio = 0
-  for (const list of couplesByMain.values()) {
-    if (list.length < 2) continue
-    const sorted = list.slice().sort((a, b) => a.spouseId.localeCompare(b.spouseId))
-    const firstId = sorted[0].spouseId
-    const lastId = sorted[sorted.length - 1].spouseId
-    const firstPos = layout.value.nodes.find(n => n.id === firstId)
-    const lastPos = layout.value.nodes.find(n => n.id === lastId)
-    if (!firstPos || !lastPos) continue
-    const span = lastPos.x - firstPos.x
-    // 预期 span = (N-1) × (spouseW + spouseGap)
-    const expected = (list.length - 1) * (spouseW + spouseGap)
-    const ratio = span / expected
-    if (list.length > maxSpouses) maxSpouses = list.length
-    if (Math.abs(ratio - 1) > Math.abs(maxSpanRatio - 1)) maxSpanRatio = ratio
-  }
-  if (maxSpouses >= 2) {
+  // 4) 一夫多妻 span 比 —— [P1 #8] 委托给纯函数模块（按 marriageOrder 升序）
+  const worstSpan = computeWorstSpanRatio(couplesByMain, layout.value.nodes, spouseW, spouseGap)
+  if (worstSpan) {
     metrics.push({
-      label: '一夫多妻 span 比',
-      value: maxSpanRatio.toFixed(2) + ' ×（预期 1.00）',
-      status: Math.abs(maxSpanRatio - 1) < 0.05 ? 'pass' : 'warn',
-      hint: `${maxSpouses} 位妻的实际 span / 理论 span，越接近 1.0 越说明 CoupleUnit 整齐对齐`,
+      label: '一夫多妻 span 比（首-尾）',
+      value: worstSpan.endToEndRatio.toFixed(3) + ' ×（预期 1.000）',
+      status: spanRatioStatus(worstSpan.endToEndRatio),
+      hint: `${worstSpan.maxSpouses} 位妻 CoupleUnit，第 1 妻→最后 1 妻中心距 / 理论值；1.0 即整齐`,
+    })
+    metrics.push({
+      label: '一夫多妻 span 比（相邻均值）',
+      value: worstSpan.adjacentRatio.toFixed(3) + ' ×（预期 1.000）',
+      status: spanRatioStatus(worstSpan.adjacentRatio),
+      hint: `相邻配偶中心距均值 / 理论值；偏离 >5% 提示存在累加偏差`,
     })
   }
 
-  // 4) 节点总重叠检测（继承自主测试中的 maxHorizontalOverlap）
+  // 5) 节点总重叠检测（继承自主测试中自的 maxHorizontalOverlap）
   const overlap = (() => {
     let worst = 0
     const positions = layout.value.nodes
@@ -716,100 +713,125 @@ const selectedDetail = computed(() => {
  * 实现：
  *  1. 在主节点列表中找出「选中节点 ±2 代」可达的所有节点
  *  2. 过滤边
- *  3. 调用 LayoutEngine.calculateLayout
+ *  3. 调用 LayoutEngine.calculateLayout（async）
  *  4. 输出 {nodes, edges, viewBox}
  */
-const thumbnailLayout = computed(() => {
-  if (!selectedNodeId.value || !layout.value) return null
-  const sel = selectedNodeId.value
-  const fullNodes = activeScenario.value.nodes
-  const fullEdges = activeScenario.value.edges
+type ThumbnailLayoutData = {
+  nodes: ReturnType<LayoutEngine['calculateLayout']> extends Promise<infer R>
+    ? R extends { nodes: infer N }
+      ? N
+      : never
+    : never
+  edges: LayoutEdge[]
+  viewBox: string
+  highlighted: Set<string>
+  sel: string
+} | null
 
-  // BFS 求 2 代祖先 + 2 代后代的可达集合
-  const ancestors = new Set<string>([sel])
-  const descendants = new Set<string>([sel])
-  const edgeMap = new Map<string, string[]>()
+const thumbnailLayout = ref<ThumbnailLayoutData>(null)
 
-  for (const e of fullEdges) {
-    if (!edgeMap.has(e.source)) edgeMap.set(e.source, [])
-    edgeMap.get(e.source)!.push(e.target)
-  }
+watch(
+  [selectedNodeId, layout],
+  async () => {
+    if (!selectedNodeId.value || !layout.value) {
+      thumbnailLayout.value = null
+      return
+    }
+    const sel = selectedNodeId.value
+    const fullNodes = activeScenario.value.nodes
+    const fullEdges = activeScenario.value.edges
 
-  // 上溯 2 代
-  let upLayer = new Set<string>([sel])
-  for (let i = 0; i < 2; i++) {
-    const next = new Set<string>()
-    for (const id of upLayer) {
-      for (const e of fullEdges) {
-        if (e.kind === 'parent-child' && e.target === id && !ancestors.has(e.source)) {
-          next.add(e.source)
-          ancestors.add(e.source)
+    // BFS 求 2 代祖先 + 2 代后代的可达集合
+    const ancestors = new Set<string>([sel])
+    const descendants = new Set<string>([sel])
+    const edgeMap = new Map<string, string[]>()
+
+    for (const e of fullEdges) {
+      if (!edgeMap.has(e.source)) edgeMap.set(e.source, [])
+      edgeMap.get(e.source)!.push(e.target)
+    }
+
+    // 上溯 2 代
+    let upLayer = new Set<string>([sel])
+    for (let i = 0; i < 2; i++) {
+      const next = new Set<string>()
+      for (const id of upLayer) {
+        for (const e of fullEdges) {
+          if (e.kind === 'parent-child' && e.target === id && !ancestors.has(e.source)) {
+            next.add(e.source)
+            ancestors.add(e.source)
+          }
         }
       }
+      upLayer = next
     }
-    upLayer = next
-  }
-  // 下探 2 代
-  let downLayer = new Set<string>([sel])
-  for (let i = 0; i < 2; i++) {
-    const next = new Set<string>()
-    for (const id of downLayer) {
-      const children = edgeMap.get(id) || []
-      for (const c of children) {
-        if (!descendants.has(c)) {
-          next.add(c)
-          descendants.add(c)
+    // 下探 2 代
+    let downLayer = new Set<string>([sel])
+    for (let i = 0; i < 2; i++) {
+      const next = new Set<string>()
+      for (const id of downLayer) {
+        const children = edgeMap.get(id) || []
+        for (const c of children) {
+          if (!descendants.has(c)) {
+            next.add(c)
+            descendants.add(c)
+          }
         }
       }
+      downLayer = next
     }
-    downLayer = next
-  }
-  // 配偶关系：把 sel 的配偶也带上（不计入代数）
-  for (const e of fullEdges) {
-    if (e.kind !== 'spouse') continue
-    if (e.source === sel) ancestors.add(e.target)
-    if (e.target === sel) ancestors.add(e.source)
-  }
+    // 配偶关系：把 sel 的配偶也带上（不计入代数）
+    for (const e of fullEdges) {
+      if (e.kind !== 'spouse') continue
+      if (e.source === sel) ancestors.add(e.target)
+      if (e.target === sel) ancestors.add(e.source)
+    }
 
-  const keep = new Set<string>([...ancestors, ...descendants])
-  const subNodes = fullNodes.filter(n => keep.has(n.id))
-  // 边：仅保留两端都在 keep 内的边
-  const subEdges = fullEdges.filter(e => keep.has(e.source) && keep.has(e.target))
+    const keep = new Set<string>([...ancestors, ...descendants])
+    const subNodes = fullNodes.filter(n => keep.has(n.id))
+    // 边：仅保留两端都在 keep 内的边
+    const subEdges = fullEdges.filter(e => keep.has(e.source) && keep.has(e.target))
 
-  if (subNodes.length === 0) return null
+    if (subNodes.length === 0) {
+      thumbnailLayout.value = null
+      return
+    }
 
-  const tEngine = new LayoutEngine({
-    canvasSize: { width: 400, height: 260 },
-    config: {
-      nodeSep: 18,
-      rankSep: 40,
-      spouseGap: 24,
-      marriageJunctionOffset: 10,
-      edgeHorizontalSeparation: 4,
-      resolveSubtreeOverlap: true,
-      mainLineageCenter: false, // 缩略图不强制居中主脉
-    },
-  })
-  const result = tEngine.calculateLayout(subNodes, subEdges)
+    const tEngine = new LayoutEngine({
+      canvasSize: { width: 400, height: 260 },
+      config: {
+        nodeSep: 18,
+        rankSep: 40,
+        spouseGap: 24,
+        marriageJunctionOffset: 10,
+        edgeHorizontalSeparation: 4,
+        resolveSubtreeOverlap: true,
+        mainLineageCenter: false, // 缩略图不强制居中主脉
+      },
+    })
+    // [W3 2026-09-01] LayoutEngine v6 双引擎：calculateLayout 改为 async
+    const result = await tEngine.calculateLayout(subNodes, subEdges)
 
-  // 高亮选中节点及其相邻节点（在缩略图中）
-  const highlighted = new Set<string>([sel])
+    // 高亮选中节点及其相邻节点（在缩略图中）
+    const highlighted = new Set<string>([sel])
 
-  // viewBox 自适应
-  const pad = 12
-  const minX = result.bounds.minX - pad
-  const minY = result.bounds.minY - pad
-  const w = result.bounds.maxX - result.bounds.minX + pad * 2
-  const h = result.bounds.maxY - result.bounds.minY + pad * 2
+    // viewBox 自适应
+    const pad = 12
+    const minX = result.bounds.minX - pad
+    const minY = result.bounds.minY - pad
+    const w = result.bounds.maxX - result.bounds.minX + pad * 2
+    const h = result.bounds.maxY - result.bounds.minY + pad * 2
 
-  return {
-    nodes: result.nodes,
-    edges: result.edges,
-    viewBox: `${minX} ${minY} ${w} ${h}`,
-    highlighted,
-    sel,
-  }
-})
+    thumbnailLayout.value = {
+      nodes: result.nodes,
+      edges: result.edges,
+      viewBox: `${minX} ${minY} ${w} ${h}`,
+      highlighted,
+      sel,
+    }
+  },
+  { immediate: true, deep: true },
+)
 
 function thumbEdgeColor(edge: LayoutEdge): string {
   // 缩略图配偶边用妻子 palette
@@ -841,7 +863,7 @@ function thumbNodeClass(id: string): string[] {
     <header class="demo-header">
       <h1>一夫多妻 + 子树避让优化 Demo</h1>
       <p class="desc">
-        直接调用 LayoutEngine 渲染布局，用于人工验收 v4 优化方案。
+        直接调用 LayoutEngine 渲染布局，用于人工验收 v6.0.8 优化方案（走线解耦母亲归属 + 共享 drop line + 同世代卡片不重叠）。
         切换下方场景查看梳状分岔、T 形分支、子树避让等效果。
       </p>
     </header>
@@ -1116,7 +1138,7 @@ function thumbNodeClass(id: string): string[] {
     <!-- [2026-08-28 D1] 诊断面板：实时输出布局关键指标 -->
     <div class="diagnostic-panel" data-test="diagnostic-panel">
       <div class="diag-header">
-        <span class="diag-title">诊断指标 [2026-08-28 v5]</span>
+        <span class="diag-title">诊断指标 [2026-09-02 v6.0.8]</span>
         <span class="diag-mode">模式：{{ viewMode }}（{{ activeScenario.id }}）</span>
       </div>
       <div class="diag-grid">

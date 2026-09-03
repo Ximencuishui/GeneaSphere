@@ -1367,14 +1367,19 @@ export class DemoSeedService implements OnModuleInit {
   private static readonly HISTORICAL_FIGURES: HistoricalFigure[] = [
     { name: '朱熹', gender: 'male', birth: 1130, death: 1200, generation: 1, branch: 'A' },
     { name: '刘氏', gender: 'female', birth: 1132, death: 1195, generation: 1, branch: 'A' },
+    // [2026-09-01 §11.10 P3] motherId 字段完善：朱熹妾，1134 年生。
+    //   朱埜（次子）改挂为庶出（吴氏所生）。妾不挂子下，仅作为 FamilyUnit.wife_id 区分母归属。
+    { name: '吴氏', gender: 'female', birth: 1134, death: 1193, generation: 1, branch: 'A' },
     { name: '朱塾', gender: 'male', birth: 1153, death: 1191, generation: 2, father: '朱熹', mother: '刘氏', branch: 'A' },
-    { name: '朱埜', gender: 'male', birth: 1156, death: 1212, generation: 2, father: '朱熹', mother: '刘氏', branch: 'B' },
+    { name: '朱埜', gender: 'male', birth: 1156, death: 1212, generation: 2, father: '朱熹', mother: '吴氏', branch: 'B' },
     { name: '朱在', gender: 'male', birth: 1169, death: 1239, generation: 2, father: '朱熹', mother: '刘氏', branch: 'C' },
     { name: '林氏', gender: 'female', birth: 1155, death: 1215, generation: 2, branch: 'A' },
+    // [2026-09-01 §11.10 P3] motherId 字段完善：朱塾妾，朱铨为庶出。
+    { name: '陈氏', gender: 'female', birth: 1157, death: 1218, generation: 2, branch: 'A' },
     { name: '赵氏', gender: 'female', birth: 1158, death: 1218, generation: 2, branch: 'B' },
     { name: '范氏', gender: 'female', birth: 1172, death: 1240, generation: 2, branch: 'C' },
     { name: '朱鉴', gender: 'male', birth: 1190, death: 1258, generation: 3, father: '朱塾', mother: '林氏', branch: 'A' },
-    { name: '朱铨', gender: 'male', birth: 1195, death: 1260, generation: 3, father: '朱塾', mother: '林氏', branch: 'A' },
+    { name: '朱铨', gender: 'male', birth: 1195, death: 1260, generation: 3, father: '朱塾', mother: '陈氏', branch: 'A' },
     { name: '朱潜', gender: 'male', birth: 1200, death: 1270, generation: 3, father: '朱埜', mother: '赵氏', branch: 'B' },
     { name: '朱鋆', gender: 'male', birth: 1205, death: 1275, generation: 3, father: '朱在', mother: '范氏', branch: 'C' },
     { name: '郑氏', gender: 'female', birth: 1192, death: 1265, generation: 3, branch: 'A' },
@@ -1424,6 +1429,12 @@ export class DemoSeedService implements OnModuleInit {
       burial_place: '与夫同坆',
       marital_notes: '朱熹继配,封硕人。',
     },
+    // [2026-09-01 §11.10 P3] motherId 字段完善：朱熹妾吴氏——作为朱埜生母入册谱。
+    '吴氏': {
+      native_place: '崇安',
+      burial_place: '唐石里',
+      marital_notes: '朱熹妾,朱埜(次子)生母。',
+    },
     '朱塾': {
       courtesy_name: '子厚',
       native_place: '建阳崇安',
@@ -1446,6 +1457,8 @@ export class DemoSeedService implements OnModuleInit {
       biography: '朱熹季子。自幼随父讲学,《朱子语类》多载其问对。庆元党禁解后任迪功郎,嘉定年间编刻《朱子实纪》十二卷,为后世研究朱子重要文献。',
     },
     '林氏': { native_place: '崇安', burial_place: '与夫同坆', marital_notes: '朱塾配,先卒。' },
+        // [2026-09-01 §11.10 P3] motherId 字段完善：朱塾妾陈氏——作为朱铨生母入册谱。
+        '陈氏': { native_place: '建阳', burial_place: '唐石里', marital_notes: '朱塾妾,朱铨(次子)生母。' },
     '赵氏': { native_place: '宗室', burial_place: '建阳', marital_notes: '朱埜配,宗室女。' },
     '范氏': { native_place: '建阳', burial_place: '唐石里', marital_notes: '朱在配。' },
     '朱鉴': {
@@ -1592,10 +1605,20 @@ export class DemoSeedService implements OnModuleInit {
       return idx;
     };
     const addChild = (familyKey: string, childName: string, birthOrder: number) => { childrenArr.push({ family_key: familyKey, child_key: childName, birth_order: birthOrder }); };
+    // [2026-09-01 §11.10 P3] 演示数据 motherId 字段完善：
+    //   - 创建 F-朱熹-妾（妻：刘氏 / 妾：吴氏）和 F-朱塾-妾（妻：林氏 / 妾：陈氏），
+    //     把朱埜（次子）挂到 F-朱熹-妾、朱铨（次子）挂到 F-朱塾-妾，
+    //   - mother_id 在后端 buildChildLinksMap 由 family_unit.wife_id 派生（见 tree.service.ts:1187）。
+    //   - 这样前端的 child_links 即可自然出现 mother_id 不同的子节点，
+    //     浏览器实测下朱埜 v.s. 朱塾、朱铨 v.s. 朱鉴 两组兄弟卡片会展示不同的生母标签。
     createCouple('F-朱熹','朱熹','刘氏');
-    addChild('F-朱熹','朱塾',1);addChild('F-朱熹','朱埜',2);addChild('F-朱熹','朱在',3);
+    addChild('F-朱熹','朱塾',1);addChild('F-朱熹','朱在',3);
+    createCouple('F-朱熹-妾','朱熹','吴氏');
+    addChild('F-朱熹-妾','朱埜',1);
     createCouple('F-朱塾','朱塾','林氏');
-    addChild('F-朱塾','朱鉴',1);addChild('F-朱塾','朱铨',2);
+    addChild('F-朱塾','朱鉴',1);
+    createCouple('F-朱塾-妾','朱塾','陈氏');
+    addChild('F-朱塾-妾','朱铨',1);
     createCouple('F-朱埜','朱埜','赵氏');
     addChild('F-朱埜','朱潜',1);
     createCouple('F-朱在','朱在','范氏');
@@ -1790,6 +1813,17 @@ export class DemoSeedService implements OnModuleInit {
     //   修复：显式按 1/3 拆分 A/B/C 三房，每代 targetNewMales 中 i % 3 决定本轮房支，
     //   从该房支的男性池里就近选父亲（池空时托底任意男性，保证不中断繁衍）。
     const BRANCHES = ['A', 'B', 'C'] as const;
+    // [2026-09-01 §11.10 P3] motherId 字段完善：合成代妾家庭单元概率参数
+    //   CONCUBINE_CREATE_PROB：当父亲已挂 ≥1 子时，新建妾家庭单元的触发概率（25%）
+    //   CONCUBINE_ROUTE_PROB：新建后，后续每个儿子挂到妾家庭的概率（30%）
+    //   概率组合下，约每 4 位父亲中会有 1 位有妾家庭、妾家庭中约 30% 子女为庶出。
+    //   设计意图：覆盖度足以测试前端的「庶出标签 / 多母渲染 / birthOrder 排序」分支，
+    //   又不会让妾夫人数据超出演示规模。
+    const CONCUBINE_CREATE_PROB = 0.25;
+    const CONCUBINE_ROUTE_PROB = 0.30;
+    type ConcubineFamily = { key: string; husbandName: string; wifeName: string; childNames: string[]; childOrders: number[] };
+    const concubineFamsByFather = new Map<string, ConcubineFamily>();
+    let concubineFamilyCounter = 0;
     while (totalCreated < totalTarget && generation <= 35) {
       const targetNewMales = totalTargetByGen[generation] || 0;
       if (targetNewMales === 0 || allMalesArr.length === 0) {
@@ -1872,8 +1906,35 @@ export class DemoSeedService implements OnModuleInit {
         }
         // 儿子挂到父亲家庭下（同一父亲多个儿子复用同一 FamilyUnit，避免唯一约束冲突）
         const fatherFam = getCoupleFamily(father.name, fatherWife);
-        fatherFam.childNames.push(sonName);
-        fatherFam.childOrders.push(fatherFam.childNames.length);
+        // [2026-09-01 §11.10 P3] motherId 字段完善：concubine path
+        //   当 fatherFam 已挂 ≥1 子（保证庶出排在长幼之后），且尚未为本父亲建过妾家庭时，
+        //   以 25% 概率创建一个妾家庭（包括一位新女性人物 + 一个 FamilyUnit）。
+        //   创建完成后，后续儿子按 30% 概率挂到妾家庭，从前端角度看即母归属不同。
+        //   注意：妾家庭 key 含 generation + counter 避免跨代 key 冲突；
+        //   FamilyUnit 唯一约束 ([husband_id, wife_id, marriage_order])，
+        //   父亲+主妻与父亲+妾 = 不同 wife_id，故可并存不冲突。
+        let concubineFam: ConcubineFamily | undefined = concubineFamsByFather.get(father.name);
+        if (!concubineFam && fatherFam.childNames.length >= 1 && Math.random() < CONCUBINE_CREATE_PROB) {
+          const concubineName = ensureUnique(nextWifeName(), false);
+          const cBirth = father.birth + 16 + ((nameIdx + i) % 6);
+          const cDeath = cBirth + 45 + ((nameIdx + i) % 50);
+          const cLiving = false; // 古代妾均已故
+          newPeopleData.push({
+            name: concubineName, gender: 'female', birth: cBirth, death: cDeath,
+            gen: generation, branch: father.branch, is_living: cLiving,
+          });
+          totalCreated++;
+          const concubineKey = `F-${father.name}-妾-${generation}-${concubineFamilyCounter++}`;
+          // wifeName 字段与 newFamiliesData 的元素类型对齐（妾也是 family_unit.wife_id，只是 marriage_order 不同）
+          concubineFam = { key: concubineKey, husbandName: father.name, wifeName: concubineName, childNames: [], childOrders: [] };
+          newFamiliesData.push(concubineFam);
+          concubineFamsByFather.set(father.name, concubineFam);
+        }
+        const targetFam: typeof fatherFam = (concubineFam && Math.random() < CONCUBINE_ROUTE_PROB)
+          ? concubineFam
+          : fatherFam;
+        targetFam.childNames.push(sonName);
+        targetFam.childOrders.push(targetFam.childNames.length);
         allMalesArr.push({name: sonName, gen: generation, birth: sonBirth, branch: father.branch, wifeName: wname});
         // 同步进入本代男性池，供下一代选父（保证血缘链逐代推进）
         if (!malesByGen.has(generation)) malesByGen.set(generation, []);

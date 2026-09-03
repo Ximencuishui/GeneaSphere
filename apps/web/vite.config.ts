@@ -32,7 +32,7 @@ const ElementPlusIconsResolver = {
  * 1. unplugin-auto-import + unplugin-vue-components + ElementPlusResolver
  *    实现 element-plus 的**按需引入**：
  *    - 模板中用到的组件自动注册（不再打包全量 element-plus）
- *    - 命令式 API（ElMessage / ElMessageBox 等）自动 import
+ *    - 命令式 API 保持显式 import，避免 AutoImport 误生成无效的 Element Plus 组件导入
  *    - 预期：vendor-element-plus 从 ~946KB 降至仅用到的组件总和
  *
  * 2. 自定义 ElementPlusIconsResolver：把 PascalCase 的图标名
@@ -46,13 +46,12 @@ export default defineConfig({
   plugins: [
     vue(),
     AutoImport({
-      // 自动 import 以下 API：Vue / Vue Router / Pinia + element-plus 命令式 API
+      // 自动 import 以下 API：Vue / Vue Router / Pinia；Element Plus 命令式 API 保持显式导入
       imports: [
         'vue',
         'vue-router',
         'pinia',
       ],
-      resolvers: [ElementPlusResolver()],
       // 把自动生成的 import 声明落到 .gitignore 的目录，避免污染 git
       dts: 'src/auto-imports.d.ts',
     }),
@@ -81,6 +80,11 @@ export default defineConfig({
     exclude: ['@antv/g6'],
     include: [
       '@antv/hierarchy',
+      // [W3 2026-09-01] LayoutEngine v6 双引擎：dagre 同步路径需 esbuild 预构建
+      //   解决 @dagrejs/dagre 内部 CJS 模块的 ESM interop 问题，
+      //   避免运行时 "Cannot read properties of undefined (reading '...')" 错误
+      '@dagrejs/dagre',
+      // elkjs 用 web worker 不需要 optimizeDeps 调整（web worker 自带打包）
       // CJS → ESM interop
       'eventemitter3',
       'svg-path-parser',
