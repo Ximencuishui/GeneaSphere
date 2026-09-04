@@ -1,14 +1,23 @@
 /**
- * useG6GraphInit — G6 图实例初始化 composable
+ * useGraphInit — G6 图实例初始化 composable
  *
- * [2026-09-03 s7-6] 从 GenealogyTree.vue 抽离 initGraph / runInitGraphBody /
- *   debouncedInitGraph / setupGraphResize / teardownGraphResize / loadG6 / loadG6Runtime
- *   + 自定义 GenealogyNode 类，共 1459 行搬迁到本模块。
+ * [2026-09-03 拆分 P1] 从 useG6GraphInit.ts (1889 行) 拆出 4 个模块：
+ *   - useG6Runtime.ts：G6 Graph + 扩展 register
+ *   - useGenealogyNode.ts：自定义 GenealogyNode 类
+ *   - useOrthEdge.ts：自定义 OrthEdge 类
+ *   - useGraphInit.ts（本文件）：主入口 composable，编排 initGraph + runInitGraphBody +
+ *     debouncedInitGraph + teardown + ResizeObserver + 视口裁剪/LOD
  *
  * 设计目标：
- *   - 主文件 GenealogyTree.vue 从 4468 行降至 ~3000 行（再减 ~1500 行）
- *   - 工厂参数化注入 setup 顶层依赖（genealogyStore / graph / viewModeConfig / ...）
- *   - 通过"aliases 暴露同名变量"模式让主文件调用方式不变
+ *   - 拆分后本文件 ~750 行（原 1889 行减少约 60%），定位 initGraph 失败段更快
+ *   - 对 GenealogyTree.vue 的契约零变更：仍返回 { initGraph, debouncedInitGraph, teardown }
+ *   - 通过"工厂参数化注入 setup 顶层依赖（genealogyStore / graph / viewModeConfig / ...）"
+ *     保持原调用方式不变
+ *
+ * 与 useG6Runtime 的协作：
+ *   - 本文件持有 `g6RuntimePromise` 闭包缓存（per-factory-instance，与原行为一致）
+ *   - 通过 loadG6Runtime({ genealogyStore, viewModeConfig }) 把业务 deps 传给 G6 runtime
+ *   - GenealogyNode 类在 useG6Runtime 内创建，捕获本组件实例的 deps
  *
  * 不破坏既有契约：
  *   - initGraph(data) / debouncedInitGraph(data) 签名不变
@@ -28,46 +37,8 @@ import {
   applyOrthogonalPathsToGraphData,
 } from '@/utils/pending-spouse';
 import { paletteShadow } from '@/utils/spouse-palette';
-
-/**
- * G6 精细化按需加载
- *
- * G6 5.x 的 package 主入口会触发 `import './preset'`，preset 会调
- * `registerBuiltInExtensions()`，一次性 register 100+ 扩展
- * （17 个 layout / 19 个 element / 14 个 behavior / 18 个 plugin / ...），
- * 并把 @antv/layout（3.6MB，含 d3-force / dagre / ml-matrix 等重型依赖）
- * 作为静态依赖拉入。这导致 vendor-antv 体积稳在 1.2MB+。
- *
- * 拆成子路径后：
- * - Graph 类从 `esm/runtime/graph` 子路径取（G6 本体 60KB）
- * - treeToGraphData 从 `esm/utils/tree` 取（1.7KB 独立实现）
- * - 节点 / 边 / 行为 / 布局按需取并手动 register（仅注册家族树实际用到的 7 个）
- * - 不导入 preset -> @antv/layout 整个包不会被拉入
- * - compact-box 布局来自 @antv/hierarchy（19.6KB），
- *   不再经过 @antv/layout 路径
- *
- * 预期 vendor-antv 从 1.2MB gzip 434KB -> 400-600KB gzip 200-250KB
- */
-type G6GraphCtor = any;
-type G6TreeToGraphData = (tree: any) => { nodes?: any[]; edges?: any[] };
-type G6Runtime = { Graph: G6GraphCtor; treeToGraphData: G6TreeToGraphData };
-
-/**
- * 双指缩放行为（移动端 H5，2026-08-17）
- *
- * 背景：G6 内置 zoom-canvas 的 pinch 分支与 wheel 分支互斥（trigger 数组二选一），
- * 且 PinchHandler 发送的 scale=(ratio-1)*5 会被自带分支再 ÷100 当作 wheel delta 处理，
- * 默认灵敏度下双指缩放几乎无效。
- *
- * 本行为复用 G6 的 Shortcut + PinchHandler（pointer 事件双指跟踪），
- * 还原真实两点距离比 ratio = 1 + scale/5 后直接 graph.zoomTo，缩放体验自然；
- * wheel 缩放仍由 zoom-canvas 负责，两者互不干扰。
- *
- * [2026-08-19 修复] BaseBehavior/Shortcut/CommonEvent/parsePoint 原先为顶层静态导入，
- * 会把 G6 深层循环依赖（base-behavior ↔ elements ↔ base-node）拖进静态合并路径，
- * 导致生产构建出现 "Cannot access 'Bn' before initialization"（TDZ）。
- * 现改为在 loadG6Runtime() 内动态加载，与 Graph/节点/边等其余 G6 扩展保持一致。
- */
+import { loadG6Runtime } from './useG6Runtime';
+import type { G6Runtime } from './useG6Runtime';
 
 // ==================== 类型：composable 依赖 ====================
 
@@ -97,6 +68,11 @@ interface PerfStatsSlice {
   elkjs1000Ms: number;
   renderBreakdown: {
     loadG6Ms: number;
+    // [P0-B 修复 2026-09-03] g6Graph.setData() 单独计时。
+    //   实测发现 dev 模式下 g6Graph.render() 陷入同步死循环(67s 内 rAF 仅触发 2 次)。
+    //   拆出 setData 计时便于下次定位 setData 本身是否就是死循环源头,
+    //   还是死循环真正发生在 setData 之后的 render 阶段。
+    setDataMs: number;
     transformMs: number;
     layoutEngineMs: number;
     g6RenderMs: number;
@@ -153,437 +129,24 @@ export interface G6GraphInitReturn {
 // ==================== composable factory ====================
 
 export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
-  // ---- 模块级缓存（每个 composable 实例一份） ----
+  // ---- 工厂闭包缓存（per-factory-instance，与原 useG6GraphInit 行为一致）----
+  // 每个组件实例的 useG6GraphInit 调用有自己独立的 g6RuntimePromise。
+  // 保证 GenealogyNode 类捕获的 deps 与本组件实例一致。
   let g6RuntimePromise: Promise<G6Runtime> | null = null;
   let graphResizeObserver: ResizeObserver | null = null;
   let initGraphDebounceTimer: number | null = null;
   let lastViewportConfig: ViewportConfig | null = null;
 
-  async function loadG6Runtime(): Promise<G6Runtime> {
-    // 1) Graph / treeToGraphData / register 从 G6 子路径取，绕过主入口的 preset
-    //    themes/light 是必需的：G6 默认 theme='light'（见 Graph.defaultOptions），
-    //    绕过 preset 后若不显式注册，themeOf() 会 warn "The theme of light is not registered"
-    //    并返回空对象，导致 node 的 fill/palette 退化（节点背景变白、palette 失效）
-    const [{ Graph }, treeMod, { register }, { light }] = await Promise.all([
-      import('@antv/g6/esm/runtime/graph'),
-      import('@antv/g6/esm/utils/tree'),
-      import('@antv/g6/esm/registry/register'),
-      import('@antv/g6/esm/themes/light'),
-    ]);
-    const treeToGraphData = treeMod.treeToGraphData as G6TreeToGraphData;
-
-    // 2) 注册家族树实际用到的扩展
-    //    Tooltip 组件使用自定义 HTML 实现（见 node:mouseenter handler），
-    //    无需注册 G6 内置 Tooltip 插件
-    const [
-      { Rect },
-      { CubicHorizontal },
-      { CubicVertical },
-      { Line },
-      { Polyline },
-      { Fade },
-      { compactBox },
-      { DragCanvas },
-      { ZoomCanvas },
-      { DragElement },
-      { ArrangeDrawOrder },
-      { CollapseExpandCombo },
-      { CollapseExpandNode },
-      { GetEdgeActualEnds },
-      { UpdateRelatedEdge },
-      // [2026-08-19 修复] 双指缩放行为依赖：动态加载避免 G6 深层循环依赖
-      // 进入静态合并路径（BaseBehavior ↔ elements ↔ base-node 导致 TDZ）。
-      { BaseBehavior },
-      { Shortcut },
-      { CommonEvent },
-      { parsePoint },
-      // [树谱卡片 2026-08-26] 引入底层图形 Shape，用于自定义绘制身份标签/日期/称谓
-      { Text: GText, Rect: GRect },
-    ] = await Promise.all([
-      import('@antv/g6/esm/elements/nodes/rect'),
-      import('@antv/g6/esm/elements/edges/cubic-horizontal'),
-      import('@antv/g6/esm/elements/edges/cubic-vertical'),
-      import('@antv/g6/esm/elements/edges/line'),
-      import('@antv/g6/esm/elements/edges/polyline'),
-      import('@antv/g6/esm/animations/index').then(m => ({ Fade: m.Fade })),
-      // compactBox 是唯一一个不依赖 @antv/layout 的 layout
-      // （来自 @antv/hierarchy，19.6KB 轻量库），
-      // 使用 as any 绕开 TS 类型检查：@antv/hierarchy 导出的是纯函数，
-      // 而 ExtensionRegistry.layout 期望类构造器，G6 内部也是这样注册的
-      import('@antv/hierarchy').then(m => ({ compactBox: m.compactBox })),
-      import('@antv/g6/esm/behaviors/drag-canvas'),
-      // zoom-canvas 行为：绑定 canvas 滚轮事件实现缩放。
-      // 注意：MCP browser-use 的 evaluate_script 注入合成 wheel 事件时不会触发此行为
-      // （G6 v5 + 按需子模块导入场景下事件绑定在特定渲染层，CDP 注入事件不冒泡）。
-      // 自动化测试时请改用工具栏 zoomIn/zoomOut 按钮或直接调 graph.value.zoomTo()。
-      import('@antv/g6/esm/behaviors/zoom-canvas'),
-      import('@antv/g6/esm/behaviors/drag-element'),
-      // transforms：treeToGraphData + compact-box 布局内部依赖的 transforms
-      import('@antv/g6/esm/transforms/arrange-draw-order'),
-      import('@antv/g6/esm/transforms/collapse-expand-combo'),
-      import('@antv/g6/esm/transforms/collapse-expand-node'),
-      import('@antv/g6/esm/transforms/get-edge-actual-ends'),
-      import('@antv/g6/esm/transforms/update-related-edge'),
-      import('@antv/g6/esm/behaviors/base-behavior'),
-      import('@antv/g6/esm/utils/shortcut'),
-      import('@antv/g6/esm/constants'),
-      import('@antv/g6/esm/utils/point'),
-      // [树谱卡片 2026-08-26] @antv/g-lite 导出基础 Text/Rect shape
-      import('@antv/g-lite'),
-    ]);
-
-    // 自定义节点：按传统树谱卡片绘制身份标签、生卒日期、姓名、称谓
-    class GenealogyNode extends Rect {
-      render(attributes = this.parsedAttributes, container = this) {
-        // [树谱卡片 2026-08-27 P1 修复] G6 v5 不会把 datum.data 透传到 element.attributes
-        // （element.js:208 getElementComputedStyle 只读 datum.style），所以 attributes.data 始终 undefined。
-        // 这里用 this.context.model.getElementDataById(this.id) 兜底从 graph model 拿原始数据。
-        let dataFromModel: any = null;
-        try {
-          dataFromModel = (this as any).context?.model?.getElementDataById(this.id);
-        } catch (_) {
-          // context / model 可能尚未就绪，回退到 attributes.data
-        }
-        const attrsAny = attributes as any;
-        const realD = dataFromModel?.data || attrsAny.data || {};
-
-        // 1. key shape (background)
-        // [P0-3 2026-09-03] _drawKeyShape 是 G6 BaseNode 的 private 方法，
-        // TS 报 TS2341。这里通过 (this as any) 绕过类型检查（实际 G6 v5 内部
-        // 仍暴露该方法供子类调用）。
-        (this as any)._drawKeyShape(attributes, container);
-        if (!(this as any).getShape('key')) return;
-        // 2. halo
-        this.drawHaloShape(attributes, container);
-
-        const [width, height] = this.getSize(attributes);
-        const d = realD;
-
-        // 3. 紧凑/横排小卡片保持原有 label + icon 渲染
-        if (height < 70) {
-          this.drawLabelShape(attributes, container);
-          this.drawIconShape(attributes, container);
-          this.drawBadgeShapes(attributes, container);
-          this.drawPortShapes(attributes, container);
-          return;
-        }
-
-        // 3. 传统竖排卡片：身份标签 / 生卒日期 / 姓名 / 称谓
-        // [P0-3 2026-09-03] 把 dataFromModel 作为第 6 个参数传入，避免在
-        // drawTraditionalContent 闭包内引用 render 的局部变量（TS 报 undefined）。
-        this.drawTraditionalContent(attributes, container, width, height, d, dataFromModel);
-        // 4. icon（缩略图）渲染在文字上方
-        this.drawIconShape(attributes, container);
-        // 5. badges
-        this.drawBadgeShapes(attributes, container);
-        // 6. ports
-        this.drawPortShapes(attributes, container);
-      }
-
-      /**
-       * 自定义 render 已绘制所有文字，禁止默认 label shape 覆盖
-       */
-      onframe() {
-        this.drawBadgeShapes(this.parsedAttributes, this);
-      }
-
-      /**
-       * [树谱卡片 2026-08-27] 传统横排卡片渲染（PRD §2.1.6）
-       * - 字段：身份标识（顶部彩色条）+ 排行（如「第3」）+ 姓名（横排大字）+ 生卒年（横排小字）
-       * - 传记/葬地/功名/字号不在卡片展示（册谱世录卷承载）
-       * - 原实现竖排姓名 + 竖排生卒年 + 下方称谓，阅读不连贯；改为横排为主后像传统谱牌。
-       */
-      private drawTraditionalContent(
-        attributes: any,
-        container: any,
-        width: number,
-        height: number,
-        d: any,
-        // [P0-3 2026-09-03] dataFromModel 从 render 传入，避免 TS 报
-        // "Cannot find name 'dataFromModel'"（原本是 render 内的闭包变量）。
-        dataFromModel: any,
-      ) {
-        const halfW = width / 2;
-        const halfH = height / 2;
-        const isMale = d.gender === 'male';
-        const identity = d.identity_label || '';
-        // [树谱卡片 2026-08-27] 排行来自 child_links.birth_order，transformToG6Data 已透出
-        const birthOrder: number | undefined =
-          typeof d.birth_order === 'number' && d.birth_order > 0 ? d.birth_order : undefined;
-        // [树谱卡片 2026-08-27] 横排卡片使用四位年份（1328）避免「一三二八年九月十八日」过长；
-        // transformToG6Data 已把 birth_year/death_year 写入 data，直接读取。
-        const birth = d.birth_year ? String(d.birth_year) : '';
-        const death = d.is_living ? '' : (d.death_year ? String(d.death_year) : '');
-        // [树谱卡片 2026-08-27 P1 修复] G6 v5 不会把 datum.data/datum.label 透传到 element.attributes，
-        // attributes.label 是 G6 内部的 boolean 标志（true/false）也不是 datum.label。
-        // 这里从 model 拿完整 datum，name 才能从 datum.label（即 spouse.name / person.name）取到。
-        const fullDatum: any = dataFromModel || {};
-        const nameFromDatum: string = fullDatum.label || fullDatum.original?.full_name || '';
-        const name = nameFromDatum;
-        // [苏式 2026-08-19] 称谓（妻/子/继/养/妾/出继）来自 spouse.relation / child_links.child_type
-        const relation = d.relation || '';
-        const childType = d.child_type || '';
-        // [苏式 / 浙式] 排行字段
-        // 苏式：继 / 养 / 妾之子 → 「继X」「养X」「妾X」，前缀直接显示在排行后
-        // 浙式：排行「第N」+ 原名（女标「女」），强调谱牒编修顺序
-        const rankSuffix = isMale ? '' : '女';
-        // 调用方决定是否绘制排行（苏式 / 浙式 / 吊线图 才需要）
-        // 这里统一算出，renderByXxx 自己取舍
-        const rankPrefix = (() => {
-          if (deps.genealogyStore.viewMode === 'su' && childType === 'BIOLOGICAL') return '';
-          if (deps.genealogyStore.viewMode === 'su' && childType === 'ADOPTED') return '养';
-          if (deps.genealogyStore.viewMode === 'su' && childType === 'STEP') return '继';
-          if (deps.genealogyStore.viewMode === 'su' && relation === 'concubine') return '妾';
-          return '';
-        })();
-        const rankText = (() => {
-          if (deps.genealogyStore.viewMode === 'su' && (birthOrder || rankPrefix)) {
-            return `${rankPrefix}${birthOrder ?? ''}`;
-          }
-          if (deps.genealogyStore.viewMode === 'zhe' && birthOrder) {
-            return `第${birthOrder}`;
-          }
-          if (deps.genealogyStore.viewMode === 'xianshi' && birthOrder) {
-            return `第${birthOrder}`;
-          }
-          return '';
-        })();
-
-        // 计算字号（容器宽决定姓名能放多大）
-        const config = deps.viewModeConfig.value[deps.genealogyStore.viewMode];
-        const nameFontSize = Math.max(10, Math.min(18, Math.floor(width / 6)));
-        const subFontSize = Math.max(8, Math.floor(nameFontSize * 0.7));
-        const tagFontSize = Math.max(8, Math.floor(nameFontSize * 0.6));
-        const yearsLine = birth && death ? `${birth} - ${death}` : birth ? `${birth} - ` : '';
-        const tagW = Math.max(20, width * 0.32);
-        const tagH = tagFontSize + 4;
-        // 标签条：顶端彩色块（PRD §2.1.6 顶部色带）
-        const tagX = -halfW;
-        const tagY = -halfH;
-        const contentTop = tagY + tagH + 2;
-
-        // 标签条（顶部彩色 + 排行 / 身份文字）
-        const tagFill = (() => {
-          if (deps.genealogyStore.viewMode === 'xianshi') return d.palette || '#9E9E9E';
-          if (d.is_main_lineage) return '#C9A96E';
-          return isMale ? '#1976D2' : '#C2185B';
-        })();
-        // [G-lite 2026-08-27] 用 addShape 画 rect + text
-        if (GText && (this as any).context?.canvas) {
-          try {
-            (this as any).context.canvas.addShape?.('rect', {
-              style: {
-                x: tagX,
-                y: tagY,
-                width: tagW,
-                height: tagH,
-                fill: tagFill,
-                radius: 4,
-              },
-            });
-            (this as any).context.canvas.addShape?.('text', {
-              style: {
-                x: tagX + tagW / 2,
-                y: tagY + tagH / 2 + tagFontSize * 0.35,
-                fontSize: tagFontSize,
-                fill: '#FFFFFF',
-                text: identity || rankText,
-                textAlign: 'center',
-                textBaseline: 'middle',
-              },
-            });
-          } catch (_) { /* G6 context not ready */ }
-        }
-
-        // 姓名（横排大字）
-        if (GText) {
-          try {
-            (this as any).context?.canvas?.addShape?.('text', {
-              style: {
-                x: 0,
-                y: contentTop + (height - tagH) * 0.35,
-                fontSize: nameFontSize,
-                fontWeight: 600,
-                fill: '#2C3E50',
-                text: name + (rankSuffix && rankText ? rankText : ''),
-                textAlign: 'center',
-                textBaseline: 'middle',
-              },
-            });
-          } catch (_) { /* G6 context not ready */ }
-        }
-
-        // 生卒年（横排小字）
-        if (GText && yearsLine) {
-          try {
-            (this as any).context?.canvas?.addShape?.('text', {
-              style: {
-                x: 0,
-                y: contentTop + (height - tagH) * 0.7,
-                fontSize: subFontSize,
-                fill: '#7F8C8D',
-                text: yearsLine,
-                textAlign: 'center',
-                textBaseline: 'middle',
-              },
-            });
-          } catch (_) { /* G6 context not ready */ }
-        }
-
-        // 称谓（苏式专属：竖排小字）
-        if (GText && deps.genealogyStore.viewMode === 'su' && (relation || childType)) {
-          const subLabel = relation === 'concubine' ? '妾' :
-            childType === 'ADOPTED' ? '养' :
-            childType === 'STEP' ? '继' : '';
-          if (subLabel) {
-            try {
-              (this as any).context?.canvas?.addShape?.('text', {
-                style: {
-                  x: halfW - subFontSize,
-                  y: -halfH + subFontSize + 2,
-                  fontSize: subFontSize,
-                  fill: '#9E9E9E',
-                  text: subLabel,
-                  textAlign: 'right',
-                  textBaseline: 'top',
-                },
-              });
-            } catch (_) { /* G6 context not ready */ }
-          }
-        }
-
-        // 把横排布局同步回 d，供 G6 默认 label 路径兜底使用
-        d.identity_label = identity;
-        d.rank_text = rankText;
-      }
-    }
-
-    register('node', 'rect', GenealogyNode);
-
-    // 自定义边：使用布局引擎预计算的正交路径
-    // 完全覆盖 getKeyPath 和 getEndpoints，直接使用预计算的绝对坐标
-    // [2026-08-28 C1] 生成圆角拐弯路径，使牵引线视觉上更柔顺（代替硬直角）。
-    //   仅在路径点数 ≥ 3 且是拐点时插入圆弧，未拐点处保持纯直线。
-    //   默认圆角半径 4 px（与 plan §C1 设定一致）。
-    const ORTH_CORNER_RADIUS = 4
-    // [P0-3 2026-09-03] OrthEdge 继承 G6 Polyline，父类对 getEndpoints / getKeyPath
-    // 的签名约束很严格（Point[] tuple / PathArray），自定义实现返回 any / any[]，
-    // TS 报 TS2416。这里在类方法前加 `// @ts-expect-error` 抑制单条类型检查。
-    class OrthEdge extends Polyline {
-      // @ts-expect-error -- G6 Polyline 基类签名与 OrthEdge 实现不兼容（TS2416）
-      getEndpoints(attributes: any, optimize = true, controlPoints: any = []) {
-        const orthPath = attributes.orthPath;
-        if (orthPath?.points && orthPath.points.length >= 2) {
-          const pts = orthPath.points;
-          return [[pts[0].x, pts[0].y], [pts[pts.length - 1].x, pts[pts.length - 1].y]];
-        }
-      }
-
-      // @ts-expect-error -- G6 Polyline 基类签名与 OrthEdge 实现不兼容（TS2416）
-      getKeyPath(attributes: any) {
-        const orthPath = attributes.orthPath;
-        if (orthPath?.points && orthPath.points.length >= 2) {
-          const pts = orthPath.points;
-          const radius = attributes.cornerRadius ?? ORTH_CORNER_RADIUS;
-          const path: any[] = [['M', pts[0].x, pts[0].y]];
-
-          // [2026-08-28 C1] 插入圆角拐弯：
-          //   每 3 个连续点 (a, b, c) 检查是否构成拐弯（非共线），
-          //   如是：从 a 走到 b 之前插入 L（到 b 靠近 a 侧），然后 Q（二次贝塞尔）绕到 b 靠近 c 侧
-          //   ，再从那里直线走到 c。
-          //   仅相邻点产生"折角"时才插入圆弧，避免退化点（2 点或共线点）产生额外零长度路径。
-          for (let i = 1; i < pts.length; i++) {
-            const prev = pts[i - 1];
-            const curr = pts[i];
-            const next = pts[i + 1];
-            if (!next) {
-              // 终点：纯直线
-              path.push(['L', curr.x, curr.y]);
-              continue;
-            }
-            // 检测拐弯：prev→curr 与 curr→next 不共线
-            const inHoriz = curr.y === prev.y
-            const inVert = curr.x === prev.x
-            const outHoriz = next.y === curr.y
-            const outVert = next.x === curr.x
-            const isTurn = (inHoriz && outVert) || (inVert && outHoriz)
-            if (!isTurn) {
-              path.push(['L', curr.x, curr.y]);
-              continue;
-            }
-            // 计算圆角起止点（在 curr 两侧各退 radius）
-            // 入边方向
-            const inDx = Math.sign(curr.x - prev.x)
-            const inDy = Math.sign(curr.y - prev.y)
-            // 出边方向
-            const outDx = Math.sign(next.x - curr.x)
-            const outDy = Math.sign(next.y - curr.y)
-            const startX = curr.x - inDx * radius
-            const startY = curr.y - inDy * radius
-            const endX = curr.x + outDx * radius
-            const endY = curr.y + outDy * radius
-            path.push(['L', startX, startY])
-            // 二次贝塞尔曲线：控制点 curr，走向 endX/endY
-            path.push(['Q', curr.x, curr.y, endX, endY])
-          }
-          return path;
-        }
-      }
-    }
-    register('edge', 'cubic-horizontal', CubicHorizontal);
-    register('edge', 'cubic-vertical', CubicVertical);
-    register('edge', 'line', Line);
-    register('edge', 'polyline', Polyline);
-    register('edge', 'orth', OrthEdge);
-    register('animation', 'fade', Fade);
-    register('layout', 'compact-box', compactBox as any);
-    register('behavior', 'drag-canvas', DragCanvas);
-    register('behavior', 'zoom-canvas', ZoomCanvas);
-    register('behavior', 'drag-element', DragElement);
-    // [移动端 H5 2026-08-17] 双指缩放（触摸）
-    // [2026-08-19 修复] 类定义移入动态加载区域：BaseBehavior 等依赖随本函数一起
-    // 动态 import，避免 G6 深层循环依赖进入静态合并路径导致生产构建 TDZ。
-    // [P0-3 2026-09-03] Shortcut 是 G6 导出的类构造器（值），不能作为类型注解。
-    // 这里改为 any，等价于「不约束字段类型」，运行行为不变。
-    class PinchZoomBehavior extends BaseBehavior {
-      private shortcut: any;
-      constructor(context: any, options: any) {
-        super(context, options);
-        this.shortcut = new Shortcut(context.graph);
-        this.shortcut.bind([CommonEvent.PINCH], (event: any) => {
-          const { graph } = this.context;
-          const ratio = 1 + (event.scale || 0) / 5; // 还原两点距离比
-          const zoom = graph.getZoom();
-          const target = Math.min(2, Math.max(0.25, zoom * ratio));
-          const origin = event.viewport ? parsePoint(event.viewport) : undefined;
-          graph.zoomTo(target, false, origin);
-        });
-      }
-      destroy() {
-        this.shortcut.destroy();
-        super.destroy();
-      }
-    }
-    register('behavior', 'pinch-zoom', PinchZoomBehavior);
-
-    // transforms：treeToGraphData + compact-box 布局内部依赖的 transforms
-    // 注册 key 使用 G6 内置的扩展名（build-in.js 中的 key）
-    register('transform', 'arrange-draw-order', ArrangeDrawOrder);
-    register('transform', 'collapse-expand-combo', CollapseExpandCombo);
-    register('transform', 'collapse-expand-node', CollapseExpandNode);
-    register('transform', 'get-edge-actual-ends', GetEdgeActualEnds);
-    register('transform', 'update-related-edges', UpdateRelatedEdge);
-
-    // theme：注册 light 主题（G6 默认 theme='light'）
-    // 仅注册 light，dark 暂未使用，待需要深色模式时再补 register('theme', 'dark', dark)
-    register('theme', 'light', light);
-
-    return { Graph, treeToGraphData };
-  }
-
+  /**
+   * 加载 G6 runtime（per-factory cache）。
+   * 委托给 useG6Runtime.loadG6Runtime 处理 dynamic import + 17+ register。
+   */
   function loadG6(): Promise<G6Runtime> {
     if (!g6RuntimePromise) {
-      g6RuntimePromise = loadG6Runtime();
+      g6RuntimePromise = loadG6Runtime({
+        genealogyStore: deps.genealogyStore,
+        viewModeConfig: deps.viewModeConfig,
+      });
     }
     return g6RuntimePromise;
   }
@@ -974,7 +537,24 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       container: deps.container.value,
       width: _canvasWidth,
       height: _canvasHeight,
-      autoResize: true,
+      // [P0-C 修复 2026-09-04] 关闭全局 element-level 动画(节点/边 fade-in)。
+      //   精确根因:G6 v5 dev mode 下 @antv/g-lite AnimationTimeline 冻结,
+      //   124 个 shape.animate() 入场动画 currentTime=0、playState='running' 但永无 frame 推进,
+      //   runtime/animation.js 第 30/46 行 await animation.finished.then(...) 永不 resolve,
+      //   最终挂死在 graph.render() 内部 yield Promise.all([animation.finished, autoFit()]).
+      //   修复链路:getElementAnimationOptions(options, ...) 在 animation=false 时返回 [],
+      //   executor 不创建 animation 实例,animation.animate() 同步返回 null,after() 直接调用,
+      //   render 不再 await 任何 animation.finished,直接进入下一阶段。
+      //   不影响 viewport.transform(独立动画通道,见 runtime/viewport.js)和 layout 动画。
+      //   详见 docs/testing/2026-09-04-layout-v6-p0-reverify/REPORT.md §0 根因表。
+      animation: false,
+      // [P0-B 修复 2026-09-03] 关闭 autoResize。
+      //   实测根因:G6 v5 的 autoResize:true 在 dev 模式 + 容器尺寸不稳定时,
+      //   内部 ResizeObserver 与 setupGraphResize 形成同步死循环,
+      //   g6Graph.render() 进入永不返回的死循环(67s 内 rAF 仅触发 2 次)。
+      //   改为由我们自己的 setupGraphResize(ResizeObserver) 主动调用 g.setSize 接管。
+      //   详见 docs/testing/2026-09-03-layout-v6-reverify/REPORT.md §6.1。
+      autoResize: false,
       behaviors: [
         'drag-canvas',
         'zoom-canvas',
@@ -1693,7 +1273,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
         const name = data.original.full_name || data.original.label || '未知';
         const gender = data.gender === 'male' ? '男' : '女';
         const birthYear = data.birth_year ? `出生: ${data.birth_year}` : '';
-        const deathYear = data.death_year ? `去世: ${data.death_year}` : '';
+        const deathYear = data.death_date ? `去世: ${data.death_date}` : '';
         const status = data.is_living ? '在世' : '已故';
 
         const tooltip = getTooltip();
@@ -1726,7 +1306,45 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       //   不让出主线程会让用户感觉进度条卡死在 96%。
       //   一个 microtask 后再进入 G6 重活，Vue 有机会 commit loadingPercent=99 的更新。
       await Promise.resolve();
+      // [P0-B 修复 2026-09-03] setData 与 render 拆开计时。
+      //   实测根因:g6Graph.render() 进入同步死循环(67s 内 rAF 仅触发 2 次)。
+      //   把 setData 单独计时便于下次定位 setData 本身是否就是死循环源头。
+      const tSetDataStart = performance.now();
       g6Graph.setData(graphData);
+      deps.perfStats.renderBreakdown.setDataMs = performance.now() - tSetDataStart;
+      // [P0-B 修复 2026-09-03] dev 探针挂载移到 setData 之后、render 之前。
+      //   原挂在 deps.graph.value = g6Graph 之后,意味着 G6 render 失败时永远不挂载。
+      //   这里把 layoutEngine / graphData / lastViewport 立即挂到 window,
+      //   即使后续 render 超时,console 也能直接 inspect 中间状态。
+      if (import.meta.env.DEV) {
+        (window as any).__g6_graph__ = g6Graph;
+        (window as any).__layoutDebug = {
+          engine: layoutEngine,
+          config: (layoutEngine as any).config,
+          canvasSize: (layoutEngine as any).canvasSize,
+          coupleUnitByMain: (layoutEngine as any).coupleUnitByMain,
+          lastViewport: lastViewportConfig,
+          perf: {
+            runElkjs1000: (nodeCount = 1000) => deps.runPerfTestElkjs(nodeCount),
+            getStats: () => ({
+              elkjs1000Ms: deps.perfStats.elkjs1000Ms,
+              elkjsInitMs: deps.perfStats.elkjsInitMs,
+              elkjsLayoutMs: deps.perfStats.elkjsLayoutMs,
+              renderMs: deps.perfStats.renderMs,
+            }),
+          },
+        };
+        // adapter 与各引擎函数按需 import（避免生产环境打入）
+        Promise.all([
+          import('@/utils/layout-engine-adapter'),
+          import('@/utils/dagre-layout'),
+          import('@/utils/elkjs-layout'),
+        ]).then(([adapter, dagre, elkjs]) => {
+          (window as any).__adapter = adapter;
+          (window as any).__layoutWithDagre = dagre.layoutWithDagre;
+          (window as any).__layoutWithElkjs = elkjs.layoutWithElkjs;
+        });
+      }
       // [2026-09-02 P0 修复] g6Graph.render() 20s 超时 + 进度 96→99%
       //   G6 v5 内部 setData + draw() 是同步重活（1325 节点下可能 3-10s），
       //   dev mode 下首次 register 14+ 扩展可能更慢。包超时避免无限卡死。
@@ -1877,7 +1495,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
     if (tip) tip.remove();
   }
 
-  // ---- 模块级 rAF 状态（每个 composable 实例一份） ----
+  // ---- 工厂闭包级 rAF 状态（每个 composable 实例一份） ----
   let perfRafId = 0;
   let cullingRafId = 0;
 

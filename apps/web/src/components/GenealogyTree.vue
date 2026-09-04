@@ -85,6 +85,8 @@ const perfStats = reactive({
   //   - totalMs: 整个 initGraph 端到端
   renderBreakdown: {
     loadG6Ms: 0,
+    // [P0-B 修复 2026-09-03] g6Graph.setData() 单独计时,与 useG6GraphInit 的 PerfStatsSlice 同步
+    setDataMs: 0,
     waitContainerMs: 0,
     transformMs: 0,
     layoutEngineMs: 0,

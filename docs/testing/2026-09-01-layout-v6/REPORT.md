@@ -58,8 +58,11 @@
 | 后端 | `http://localhost:3101`（NestJS） |
 | 数据库 | 远程 Lighthouse PostgreSQL（SSH 隧道 15432） |
 | 演示家族 | slug = `zhuxi-demo`（朱熹族谱，1325 人 seed） |
-| 演示账号 | phone=`13800000000`，role=`OWNER` |
+| 演示账号（OWNER） | phone=`13800000000`，role=`OWNER`，nickname=`演示用户·管理员`（管理员视角） |
+| 演示账号（EDITOR） | phone=`13800000001`，role=`EDITOR`，nickname=`演示族员·朱小小`（族员视角，本报告未涉及） |
 | 路由 | `/tree/zhuxi-demo` |
+
+> **演示账号约定**：zhuxi-demo 家族共 2 个有效演示账号，角色与视角对照详见 [2026-09-03-layout-v6-reverify/REPORT.md §6.5](file:///e:/GeneaSphere/docs/testing/2026-09-03-layout-v6-reverify/REPORT.md)。本报告选用 OWNER 视角验证管理员功能流。
 
 ### 2.2 实测数据（朱熹族谱首屏）
 
