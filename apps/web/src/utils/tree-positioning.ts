@@ -29,6 +29,7 @@ import type {
   BoundingBox,
   CoupleUnit,
 } from '@/types/layout';
+import { shiftSubtree } from '@/utils/tree-overlap';
 
 // ==================== 工具函数 ====================
 
@@ -198,8 +199,15 @@ export function computeAutoRankSep(nodeHeight: number): number {
  *
  * - 未指定 birthOrder 的兄弟保持在原 X 不动（向后兼容）
  * - 仅对至少一条边指定了 birthOrder 的兄弟组生效
- * - 取组内最小 X 作为锚点 + 当前兄弟间距（中位数）作平均间距
- *   → 不破坏已对齐的父节点中心 X（anchor 来自子节点组内 minX）
+ * - 取组内最小 X 作为锚点，间距 = (maxX - minX) / (兄弟数 - 1)
+ * - 兄弟中心距不得小于「左侧夫妻单元宽度 + nodeSep」。原跨度不够时向右撑开。
+ * - 这里的 X 是工作坐标的兄弟轴。LR 在进入本函数前已经把屏幕坐标转置过来，
+ *   代际跨度在 Y 上，不会被算进兄弟均分。
+ * - avgGap 大于夫妻组最小中心距的 1.5 倍，或大于 500 时，收回到紧凑间距，
+ *   避免避让把兄弟轴拉爆之后，均分把空洞原样保留下来。
+ * - 改兄弟的 x 时整棵子树一起走，子孙留在原列会和次子交叉。
+ * - 重排后若父节点 x 与子节点组中心相差超过 1px，把父节点（及其配偶）改到该中心。
+ *   不搬子女，避免中心跟着跑。单子女的父亲在 packSubtreesByBirthOrder 里对齐。
  */
 export function reorderSiblingsByBirthOrder(
     positions: Map<string, NodePosition>,
@@ -212,9 +220,12 @@ export function reorderSiblingsByBirthOrder(
     childrenByParent.get(e.source)!.push(e);
   }
 
-  const nodeSep = typeof config.nodeSep === 'number' ? config.nodeSep : 24;
+  const shiftIndex = buildBirthOrderShiftIndex(positions, sortedEdges);
 
-  for (const [, childEdges] of childrenByParent) {
+  const nodeSep = typeof config.nodeSep === 'number' ? config.nodeSep : 24;
+  const reorderedParents: string[] = [];
+
+  for (const [parentId, childEdges] of childrenByParent) {
     // 仅处理至少有一条指定了 birthOrder 的组
     const withBO = childEdges.filter((e) => e.birthOrder != null);
     if (withBO.length === 0) continue;
@@ -224,22 +235,367 @@ export function reorderSiblingsByBirthOrder(
     const xs = ordered.map((e) => positions.get(e.target)?.x).filter((x): x is number => x !== undefined);
     if (xs.length < 2) continue;
 
-    // 计算原顺序的兄弟间距（中位数）
-    const gaps: number[] = [];
-    for (let i = 1; i < xs.length; i++) {
-      gaps.push(Math.abs(xs[i] - xs[i - 1]));
-    }
-    const avgGap = gaps.length > 0
-      ? gaps.reduce((a, b) => a + b, 0) / gaps.length
-      : (nodeSep + 64); // 64 = 默认 nodeWidth
-
-    // 取最小 X 作为锚点
+    // 按整组跨度均分。不用出生序相邻 |Δx| 的平均值：顺序和左右位置不一致时，折线长度会大于整体跨度。
+    // X 是工作坐标兄弟轴（LR 已转置），跨度里没有代际间隔。
     const minX = Math.min(...xs);
-    // 按 birthOrder 升序重新分配 X
-    for (let i = 0; i < ordered.length; i++) {
+    const maxX = Math.max(...xs);
+    let avgGap = ordered.length > 1 ? (maxX - minX) / (ordered.length - 1) : 0;
+    let minCenterGap = 0;
+    for (let i = 0; i < ordered.length - 1; i++) {
       const pos = positions.get(ordered[i].target);
-      if (pos) pos.x = minX + i * avgGap;
+      if (!pos) continue;
+      const unitWidth = shiftIndex.unitWidthOf(ordered[i].target);
+      minCenterGap = Math.max(minCenterGap, unitWidth + nodeSep);
     }
+    const compactGap = Math.max(minCenterGap, nodeSep + 64);
+    if (avgGap > 500 || (minCenterGap > 0 && avgGap > minCenterGap * 1.5)) avgGap = compactGap;
+    if (avgGap < minCenterGap) avgGap = minCenterGap;
+
+    const targets: { id: string; x: number }[] = [];
+    for (let i = 0; i < ordered.length; i++) {
+      targets.push({ id: ordered[i].target, x: minX + i * avgGap });
+    }
+    for (const target of targets) {
+      const pos = positions.get(target.id);
+      if (!pos) continue;
+      const dx = target.x - pos.x;
+      if (Math.abs(dx) < 0.01) continue;
+      // 兄弟换位必须带走整棵子树。只改本人的 x，子孙会留在原处，
+      // 长子卡片在左、长孙却还压在次子下面。
+      shiftSubtree(
+        target.id,
+        dx,
+        positions,
+        shiftIndex.childrenByParent,
+        shiftIndex.spouseByMain,
+        shiftIndex.coupleUnitByMain,
+        new Set(),
+        shiftIndex.nodeMap,
+      );
+    }
+    reorderedParents.push(parentId);
+  }
+
+  // 子节点组中心依赖更深层父节点的最终 x，所以从深到浅同步。
+  const parentOf = new Map<string, string>();
+  for (const [parentId, childEdges] of childrenByParent) {
+    for (const edge of childEdges) {
+      if (edge.kind === 'spouse' || edge.fromVirtualSpouse) continue;
+      if (!parentOf.has(edge.target)) parentOf.set(edge.target, parentId);
+    }
+  }
+  const depthCache = new Map<string, number>();
+  const depthOf = (id: string): number => {
+    const cached = depthCache.get(id);
+    if (cached != null) return cached;
+    let depth = 0;
+    let cur = id;
+    const seen = new Set<string>();
+    while (parentOf.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      cur = parentOf.get(cur)!;
+      depth += 1;
+    }
+    depthCache.set(id, depth);
+    return depth;
+  };
+
+  for (const parentId of [...new Set(reorderedParents)].sort((a, b) => depthOf(b) - depthOf(a))) {
+    const xs: number[] = [];
+    for (const edge of childrenByParent.get(parentId) || []) {
+      if (edge.kind === 'spouse' || edge.fromVirtualSpouse) continue;
+      const x = positions.get(edge.target)?.x;
+      if (x != null) xs.push(x);
+    }
+    if (xs.length === 0) continue;
+    const center = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const parent = positions.get(parentId);
+    if (parent && Math.abs(parent.x - center) > 1) {
+      const dx = center - parent.x;
+      const unit = shiftIndex.coupleUnitByMain.get(parentId);
+      if (unit) {
+        // 只带走配偶，不搬子女。子女的 x 就是刚刚算出来的中心依据。
+        parent.x += dx;
+        for (const spouseId of unit.spouseIds) {
+          const spouse = positions.get(spouseId);
+          if (spouse) spouse.x += dx;
+        }
+      } else {
+        parent.x = center;
+      }
+    }
+  }
+}
+
+/**
+ * 从虚拟配偶链还原「谁有贴在身边的配偶」，供出生序重排平移。
+ * 配偶还没贴附（不在同一行）时不建 CoupleUnit，避免第一次 dagre 重排把人拖走。
+ */
+function buildBirthOrderShiftIndex(
+  positions: Map<string, NodePosition>,
+  edges: LayoutEdge[],
+) {
+  const virtualIds = new Set<string>();
+  const mainByVirtual = new Map<string, string>();
+  for (const edge of edges) {
+    if (!edge.fromVirtualSpouse) continue;
+    virtualIds.add(edge.target);
+    mainByVirtual.set(edge.target, edge.source);
+  }
+
+  const spousesByMain = new Map<string, string[]>();
+  for (const edge of edges) {
+    const mainId = mainByVirtual.get(edge.source);
+    if (!mainId) continue;
+    const list = spousesByMain.get(mainId) ?? [];
+    if (!list.includes(edge.target)) list.push(edge.target);
+    spousesByMain.set(mainId, list);
+  }
+
+  const coupleUnitByMain = new Map<string, CoupleUnit>();
+  const spouseByMain = new Map<string, LayoutEdge[]>();
+  for (const [mainId, spouseIds] of spousesByMain) {
+    const main = positions.get(mainId);
+    if (!main) continue;
+    const attached = spouseIds.filter((sid) => {
+      const spouse = positions.get(sid);
+      return !!spouse && Math.abs(spouse.y - main.y) <= 1 && spouse.x >= main.x;
+    });
+    if (attached.length === 0) continue;
+    let right = main.x + main.width / 2;
+    for (const sid of attached) {
+      const spouse = positions.get(sid)!;
+      right = Math.max(right, spouse.x + spouse.width / 2);
+    }
+    coupleUnitByMain.set(mainId, {
+      mainId,
+      spouseIds: attached,
+      unitWidth: right - (main.x - main.width / 2),
+      unitRightX: right,
+    });
+    spouseByMain.set(mainId, attached.map((sid) => ({
+      id: `${mainId}__${sid}`,
+      source: mainId,
+      target: sid,
+      kind: 'spouse' as const,
+    })));
+  }
+
+  const childrenByParent = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (edge.kind === 'spouse' || edge.fromVirtualSpouse) continue;
+    if (virtualIds.has(edge.source) || virtualIds.has(edge.target)) continue;
+    const list = childrenByParent.get(edge.source) ?? [];
+    list.push(edge.target);
+    childrenByParent.set(edge.source, list);
+  }
+
+  const nodeMap = new Map<string, LayoutNode>();
+  for (const virtualId of virtualIds) {
+    nodeMap.set(virtualId, { virtualSpouse: true } as LayoutNode);
+  }
+
+  const unitWidthOf = (id: string): number => {
+    const pos = positions.get(id);
+    if (!pos) return 0;
+    if (typeof pos.effectiveWidth === 'number' && pos.effectiveWidth > pos.width) {
+      return pos.effectiveWidth;
+    }
+    return coupleUnitByMain.get(id)?.unitWidth ?? pos.width;
+  };
+
+  return { coupleUnitByMain, spouseByMain, childrenByParent, nodeMap, unitWidthOf };
+}
+
+/**
+ * 按排行把每一家的子树收成从左到右的连续横带，再把父节点挪到子女中心。
+ *
+ * dagre / elkjs 即使兄弟顺序对了，也可能把长孙留在次子那一列（配偶虚拟链占过槽，
+ * 或后续避让只推了子孙没推父亲）。这里自底向上：
+ * 1. 先把每个子女的子树收拢到他自己脚下；
+ * 2. 再按 birthOrder 从左到右铺开这些子树，长子的整棵子树占左边；
+ * 3. 最后把父节点（连同贴在身边的配偶）平移到直接子女 X 的中点。
+ *    单子的父亲会落在这个孩子的正上方。
+ *
+ * 配偶卡片不参与兄弟排序。已贴在丈夫身边的妻子不再单独被拉去对齐子女，
+ * 避免把夫妻拆开；她的子女在上一步已经铺在她下方。
+ */
+export function packSubtreesByBirthOrder(
+  positions: Map<string, NodePosition>,
+  edges: LayoutEdge[],
+  nodeMap: Map<string, LayoutNode>,
+  spouseByMain: Map<string, LayoutEdge[]>,
+  coupleUnitByMain: Map<string, CoupleUnit>,
+  childrenByParent: Map<string, string[]>,
+  nodeSep: number,
+): void {
+  const gap = Number.isFinite(nodeSep) ? nodeSep : 24;
+  const kidsOf = new Map<string, string[]>();
+  const edgeByChild = new Map<string, LayoutEdge>();
+
+  for (const edge of edges) {
+    if (edge.kind !== 'parent-child' || edge.fromVirtualSpouse) continue;
+    if (edge.source.startsWith('__virt_') || edge.target.startsWith('__virt_')) continue;
+    if (nodeMap.get(edge.source)?.virtualSpouse || nodeMap.get(edge.target)?.virtualSpouse) continue;
+    const list = kidsOf.get(edge.source) ?? [];
+    if (!list.includes(edge.target)) list.push(edge.target);
+    kidsOf.set(edge.source, list);
+    const prev = edgeByChild.get(`${edge.source}\0${edge.target}`);
+    if (!prev || (prev.birthOrder == null && edge.birthOrder != null)) {
+      edgeByChild.set(`${edge.source}\0${edge.target}`, edge);
+    }
+  }
+
+  const rankOf = (parentId: string, childId: string): number => {
+    const order = edgeByChild.get(`${parentId}\0${childId}`)?.birthOrder;
+    return order == null || Number.isNaN(Number(order)) ? Number.POSITIVE_INFINITY : Number(order);
+  };
+  for (const [parentId, kids] of kidsOf) {
+    kids.sort((a, b) => {
+      const ra = rankOf(parentId, a);
+      const rb = rankOf(parentId, b);
+      if (ra === rb) return 0;
+      return ra < rb ? -1 : 1;
+    });
+  }
+
+  const parentOf = new Map<string, string>();
+  for (const [parentId, kids] of kidsOf) {
+    for (const kid of kids) {
+      if (!parentOf.has(kid)) parentOf.set(kid, parentId);
+    }
+  }
+  const depthCache = new Map<string, number>();
+  const depthOf = (id: string): number => {
+    const cached = depthCache.get(id);
+    if (cached != null) return cached;
+    let depth = 0;
+    let cur = id;
+    const seen = new Set<string>();
+    while (parentOf.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      cur = parentOf.get(cur)!;
+      depth += 1;
+    }
+    depthCache.set(id, depth);
+    return depth;
+  };
+
+  const attachedSpouses = new Set<string>();
+  for (const unit of coupleUnitByMain.values()) {
+    for (const spouseId of unit.spouseIds) attachedSpouses.add(spouseId);
+  }
+
+  const spanOf = (id: string): { minX: number; maxX: number } | null => {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    const seen = new Set<string>();
+    const visit = (nodeId: string) => {
+      if (seen.has(nodeId)) return;
+      seen.add(nodeId);
+      if (nodeMap.get(nodeId)?.virtualSpouse) return;
+      const pos = positions.get(nodeId);
+      if (pos && pos.width > 0) {
+        minX = Math.min(minX, pos.x - pos.width / 2);
+        maxX = Math.max(maxX, pos.x + pos.width / 2);
+      }
+      const unit = coupleUnitByMain.get(nodeId);
+      const spouseIds = unit
+        ? unit.spouseIds
+        : (spouseByMain.get(nodeId) || []).map((edge) =>
+          edge.source === nodeId ? edge.target : edge.source,
+        );
+      for (const spouseId of spouseIds) visit(spouseId);
+      for (const childId of childrenByParent.get(nodeId) || []) {
+        if (nodeMap.get(childId)?.virtualSpouse) continue;
+        visit(childId);
+      }
+    };
+    visit(id);
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || maxX <= minX) return null;
+    return { minX, maxX };
+  };
+
+  const moveCouple = (id: string, dx: number) => {
+    if (Math.abs(dx) < 0.01) return;
+    const pos = positions.get(id);
+    if (pos) pos.x += dx;
+    const unit = coupleUnitByMain.get(id);
+    if (unit) {
+      unit.unitRightX += dx;
+      for (const spouseId of unit.spouseIds) {
+        const spouse = positions.get(spouseId);
+        if (spouse) spouse.x += dx;
+      }
+    } else {
+      for (const edge of spouseByMain.get(id) || []) {
+        const spouseId = edge.source === id ? edge.target : edge.source;
+        const spouse = positions.get(spouseId);
+        if (spouse) spouse.x += dx;
+      }
+    }
+    for (const childId of childrenByParent.get(id) || []) {
+      if (!nodeMap.get(childId)?.virtualSpouse) continue;
+      const virtual = positions.get(childId);
+      if (virtual) virtual.x += dx;
+    }
+  };
+
+  const parents = [...kidsOf.keys()].sort((a, b) => depthOf(b) - depthOf(a));
+  for (const parentId of parents) {
+    const parent = positions.get(parentId);
+    const kids = kidsOf.get(parentId) || [];
+    if (!parent || kids.length === 0) continue;
+
+    const boxes: { id: string; minX: number; maxX: number }[] = [];
+    for (const kid of kids) {
+      const box = spanOf(kid);
+      if (box) boxes.push({ id: kid, ...box });
+    }
+    if (boxes.length === 0) continue;
+
+    let total = 0;
+    for (const box of boxes) total += box.maxX - box.minX;
+    total += gap * (boxes.length - 1);
+    let cursor = parent.x - total / 2;
+    for (const box of boxes) {
+      const width = box.maxX - box.minX;
+      const dx = cursor - box.minX;
+      if (Math.abs(dx) >= 0.01) {
+        shiftSubtree(
+          box.id,
+          dx,
+          positions,
+          childrenByParent,
+          spouseByMain,
+          coupleUnitByMain,
+          new Set(),
+          nodeMap,
+        );
+        const unit = coupleUnitByMain.get(box.id);
+        if (unit) unit.unitRightX += dx;
+      }
+      cursor += width + gap;
+    }
+
+    if (attachedSpouses.has(parentId)) continue;
+    const xs: number[] = [];
+    for (const kid of kids) {
+      const x = positions.get(kid)?.x;
+      if (x != null) xs.push(x);
+    }
+    if (xs.length === 0) continue;
+    const center = (Math.min(...xs) + Math.max(...xs)) / 2;
+    moveCouple(parentId, center - parent.x);
+  }
+
+  for (const edge of edges) {
+    if (!edge.fromVirtualSpouse) continue;
+    const main = positions.get(edge.source);
+    const virtual = positions.get(edge.target);
+    if (!main || !virtual) continue;
+    virtual.x = main.x;
+    virtual.y = main.y;
   }
 }
 
@@ -292,6 +648,8 @@ export function computeMaxGeneration(
  *   - 虚拟节点 Y = mainPos.y（与 main 同 Y）
  *   - 真实配偶节点 X = mainPos.x + mainPos.width/2 + spouseGap + spouseWidth/2
  *   - 真实配偶节点 Y = mainPos.y
+ * LR 屏幕上配偶要贴在主节点下方（Y+）。本函数仍贴在工作坐标的 X+，
+ * 流水线在 LR 时先把屏幕坐标转置进来，出去再转置回去，X+ 就变成 Y+。
  *   同时注册 CoupleUnit（mainId 为单位）和 CoupleUnitByMain。
  *
  * 副作用：把每个 mainId 的 CoupleUnit 注册到 coupleUnitByMain。
@@ -351,13 +709,16 @@ export function positionSpouseNodes(
         });
       }
 
-      // 继子女子树：从配偶节点正下方延伸，以配偶卡片中心为轴
+      // 继子女子树：工作坐标里从配偶正下方延伸。
+      // rankSep 在这里是中心距。LR 转置后卡片在代际轴上的尺寸是屏幕宽度，
+      // 可能大于配置的 rankSep，中心距至少要让两张卡片边框分开。
       const spouseChildren = childrenByParent.get(spouseId) || [];
       if (spouseChildren.length > 0) {
+        const childRowHeight = maxNodeHeight(spouseChildren, nodeMap, config.nodeHeight);
         layoutSpouseSubtree(
           spouseId,
           spouseCenterX,
-          mainPos.y + rankSep,
+          mainPos.y + generationCenterGap(spouseHeight, childRowHeight, rankSep),
           nodePositions,
           nodeMap,
           childrenByParent,
@@ -384,6 +745,21 @@ export function positionSpouseNodes(
       coupleUnitByMain.set(mainId, unit);
     }
   }
+}
+
+/** 配偶子树的代际中心距。配置的 rankSep 不够放下两张卡片时，按卡片高度撑开。 */
+function generationCenterGap(parentHeight: number, childHeight: number, rankSep: number): number {
+  return Math.max(rankSep, parentHeight / 2 + childHeight / 2 + 8);
+}
+
+function maxNodeHeight(
+  ids: string[],
+  nodeMap: Map<string, LayoutNode>,
+  fallback: number,
+): number {
+  let height = 0;
+  for (const id of ids) height = Math.max(height, nodeMap.get(id)?.height ?? fallback);
+  return height || fallback;
 }
 
 /**
@@ -427,17 +803,21 @@ function layoutSpouseSubtree(
       height: childHeight,
     });
 
-    layoutSpouseSubtree(
-      childId,
-      currentX + childWidth / 2,
-      y + rankSep,
-      nodePositions,
-      nodeMap,
-      childrenByParent,
-      config,
-      rankSep,
-      nodeSep,
-    );
+    const grandChildren = childrenByParent.get(childId) || [];
+    if (grandChildren.length > 0) {
+      const nextHeight = maxNodeHeight(grandChildren, nodeMap, config.nodeHeight);
+      layoutSpouseSubtree(
+        childId,
+        currentX + childWidth / 2,
+        y + generationCenterGap(childHeight, nextHeight, rankSep),
+        nodePositions,
+        nodeMap,
+        childrenByParent,
+        config,
+        rankSep,
+        nodeSep,
+      );
+    }
 
     currentX += childWidth + nodeSep;
   }

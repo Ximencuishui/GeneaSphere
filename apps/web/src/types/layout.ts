@@ -134,8 +134,10 @@ export interface LayoutEdge {
 export interface EdgePath {
   points: Point[];
   type: 'cubic' | 'line' | 'orthogonal';
-  /** 一夫多妻婚姻汇聚点坐标（仅 spouse 边使用），用于按妻子颜色绘制分岔段 */
+  /** 配偶总线的衔接点。串联时是上一段卡片的外侧锚点，不是穿进卡片的汇聚点。 */
   junction?: Point;
+  /** 配偶总线：同一条平行双线，渲染时不要按妻子拆成不同颜色。 */
+  doubleLine?: boolean;
   /**
    * [2026-09-01 修复] 共享总线组标识：标记本路径属于哪个"父-多妻妾组共享 drop line"。
    * 同一 junctionGroup 的多条边在 busY 上的水平段应保持 Y 一致（重合），
@@ -143,6 +145,21 @@ export interface EdgePath {
    * 仅 parent-child 边使用。
    */
   junctionGroup?: string;
+  /**
+   * 这一代的垂直空隙放不下车道（间距会小于 2px）时为 true。
+   * 总线已经合并到同一条 Y，resolveEdgeHorizontalOverlaps 不得再把它推开。
+   */
+  laneCollapsed?: boolean;
+  /**
+   * 没法避开的正交交叉点。渲染时在竖线上拱一个小桥，避免画成十字死结。
+   * 坐标与 points 同一套（工作坐标；LR 转置时一起交换）。
+   */
+  bridges?: Point[];
+  /**
+   * 古谱垂丝：直角直线，不圆角、不拱桥。
+   * OrthEdge 见到此标记就按折线原样描。
+   */
+  classic?: boolean;
 }
 
 // ==================== 布局结果 ====================
@@ -257,6 +274,12 @@ export interface LayoutConfig {
   marriageJunctionOffset: number; // 丈夫节点底部到婚姻汇聚点的垂线长度
   edgeHorizontalSeparation: number; // 同层水平边段最小错开距离
   
+  /**
+   * 布局方向。TB：代际向下、兄弟向右。LR：代际向右、兄弟向下。
+   * 默认 TB。配偶贴附、避让和正交边随这个方向翻转。
+   */
+  layoutDirection: 'TB' | 'LR';
+
   // 布局行为
   mainLineageCenter: boolean;    // 主脉是否居中
   spouseOptimization: boolean;   // 是否优化配偶位置
@@ -321,6 +344,13 @@ export interface LayoutConfig {
   edgeInset?: number;
 
   /**
+   * 父子边走线。
+   * - modern（默认）：分车道、避让、桥接
+   * - traditional：每户一条居中横担，保留交叉，不圆角不拱桥
+   */
+  edgeRouting?: 'modern' | 'traditional';
+
+  /**
    * 宽树自适应缩放阈值（默认 3）
    *
    * 用途：autoFit 当 contentW/contentH > 该阈值 且 scaleX 已低于 minZoom 时，
@@ -364,6 +394,7 @@ export const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   // [2026-08-27 调优] 之前默认 6 px 太近，同层水平边段仍会贴近；
   // 调到 10 后梳状布线肉眼可辨，避免边段重合。
   edgeHorizontalSeparation: 10,
+  layoutDirection: 'TB',
   mainLineageCenter: true,
   spouseOptimization: true,
   generationAlign: true,

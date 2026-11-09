@@ -108,7 +108,7 @@ async function _loadG6RuntimeInternal(deps: G6RuntimeDeps): Promise<G6Runtime> {
     { CommonEvent },
     { parsePoint },
     // [树谱卡片 2026-08-26] 引入底层图形 Shape，用于自定义绘制身份标签/日期/称谓
-    { Text: GText, Rect: GRect },
+    { Text: GText, Rect: GRect, Image: GImage, Circle: GCircle },
   ] = await Promise.all([
     import('@antv/g6/esm/elements/nodes/rect'),
     import('@antv/g6/esm/elements/edges/cubic-horizontal'),
@@ -147,6 +147,8 @@ async function _loadG6RuntimeInternal(deps: G6RuntimeDeps): Promise<G6Runtime> {
   const GenealogyNode = createGenealogyNodeClass({
     Rect,
     GText,
+    GImage,
+    GCircle,
     genealogyStore: deps.genealogyStore,
     viewModeConfig: deps.viewModeConfig,
   });

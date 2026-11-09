@@ -1,4 +1,4 @@
-﻿import { IsString, IsEnum, IsOptional, IsBoolean, IsDateString, IsNumber } from 'class-validator';
+﻿import { IsString, IsEnum, IsOptional, IsBoolean, IsDateString, IsNumber, IsIn } from 'class-validator';
 
 export enum Gender {
   male = 'male',
@@ -30,4 +30,9 @@ export class CreatePersonDto {
   @IsOptional()
   @IsNumber()
   parent_id?: bigint;
+
+  /** 与当前父母的关系。缺省亲生。 */
+  @IsOptional()
+  @IsIn(['BIOLOGICAL', 'ADOPTED', 'STEP', 'FOSTER', 'ADOPTED_OUT'])
+  child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER' | 'ADOPTED_OUT';
 }

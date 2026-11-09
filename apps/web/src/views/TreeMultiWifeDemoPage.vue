@@ -10,6 +10,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { LayoutEngine } from '@/utils/layout-engine'
+import { cardSizeForDirection } from '@/utils/genealogy-card'
+import { DEMO_PROFILES, type PersonStory } from '@/mock/tree-data'
 import type { LayoutNode, LayoutEdge } from '@/types/layout'
 import {
   collectCouplesByMain,
@@ -254,6 +256,9 @@ const viewMode = ref<ViewMode>(
 )
 /** 缩放百分比，支持 URL ?zoom= 持久化，默认 100% */
 const zoomPercent = ref<number>(Math.min(400, Math.max(25, Number(route.query.zoom) || 100)))
+const layoutDirection = ref<'TB' | 'LR'>(
+  String(route.query.direction || '').toUpperCase() === 'LR' ? 'LR' : 'TB',
+)
 const activeId = ref(scenarios[0].id)
 const layout = ref<Awaited<ReturnType<LayoutEngine['calculateLayout']>> | null>(null)
 const elapsed = ref(0)
@@ -271,11 +276,12 @@ function syncUrl() {
       mode: viewMode.value,
       zoom: String(zoomPercent.value),
       scenario: activeId.value,
+      direction: layoutDirection.value,
     },
   }).catch(() => {/* 路由重复 replace 静默忽略 */})
 }
 
-watch([viewMode, zoomPercent, activeId], () => {
+watch([viewMode, zoomPercent, activeId, layoutDirection], () => {
   syncUrl()
 })
 
@@ -285,12 +291,12 @@ watch([viewMode, zoomPercent, activeId], () => {
  * - LayoutEngine.calculateLayout 内部会用到节点 width/height
  */
 function buildLayoutInput(): { nodes: LayoutNode[]; edges: LayoutEdge[] } {
-  const preset = VIEW_MODE_PRESETS[viewMode.value]
+  const card = cardSizeForDirection(VIEW_MODE_PRESETS[viewMode.value], layoutDirection.value)
   return {
     nodes: activeScenario.value.nodes.map(n => ({
       ...n,
-      width: preset.nodeWidth,
-      height: preset.nodeHeight,
+      width: card.nodeWidth,
+      height: card.nodeHeight,
     })),
     edges: activeScenario.value.edges,
   }
@@ -298,11 +304,13 @@ function buildLayoutInput(): { nodes: LayoutNode[]; edges: LayoutEdge[] } {
 
 async function compute() {
   const preset = VIEW_MODE_PRESETS[viewMode.value]
+  const card = cardSizeForDirection(preset, layoutDirection.value)
   const engine = new LayoutEngine({
     canvasSize: { width: 1400, height: 800 },
     config: {
-      nodeWidth: preset.nodeWidth,
-      nodeHeight: preset.nodeHeight,
+      nodeWidth: card.nodeWidth,
+      nodeHeight: card.nodeHeight,
+      layoutDirection: layoutDirection.value,
       nodeSep: preset.nodeSep,
       rankSep: preset.rankSep,
       spouseGap: preset.spouseGap,
@@ -326,7 +334,7 @@ async function compute() {
 }
 
 // [2026-08-27 §2.7 验收] viewMode / zoomPercent 变化都要重算 + 重置 transform
-watch([viewMode, zoomPercent], () => compute())
+watch([viewMode, zoomPercent, layoutDirection], () => compute())
 
 onMounted(() => {
   // 同步 URL 上的 scenario 参数（首次访问 ?scenario=multi-wife 时）
@@ -373,11 +381,34 @@ function nodeStroke(id: string, isMain: boolean): string {
 }
 
 function edgeStroke(edge: LayoutEdge): string {
-  if (edge.kind === 'spouse') {
-    // 调色板锚到女性配偶 id（target 是配偶）
-    return getWifePaletteColor(edge.target)
-  }
-  return '#999'
+  if (edge.kind === 'spouse') return '#8D6E63'
+  const child = activeScenario.value.nodes.find((node) => node.id === edge.target)
+  return child?.isMainLineage ? '#8C7344' : '#9AA0A6'
+}
+
+function edgeWidth(edge: LayoutEdge): number {
+  if (isEdgeHighlighted(edge)) return edge.kind === 'spouse' ? 2.5 : 3
+  if (isEdgeDimmed(edge)) return 1
+  if (edge.kind === 'spouse') return 1.25
+  const child = activeScenario.value.nodes.find((node) => node.id === edge.target)
+  return child?.isMainLineage ? 2 : 1
+}
+
+/** 配偶画成一对平行虚线。横线上下错开，竖线左右错开，端点仍落在卡片边缘。 */
+function edgePathDs(edge: LayoutEdge): string[] {
+  const pts = edge.path?.points || []
+  if (pts.length < 2) return []
+  if (edge.kind !== 'spouse') return [pathToD(pts)]
+  const a = pts[0]
+  const b = pts[pts.length - 1]
+  const horizontal = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)
+  const offset = 1.6
+  const shift = (sign: number) => pts.map((point) => (
+    horizontal
+      ? { x: point.x, y: point.y + sign * offset }
+      : { x: point.x + sign * offset, y: point.y }
+  ))
+  return [pathToD(shift(-1)), pathToD(shift(1))]
 }
 
 // ---------- 诊断指标 [2026-08-28 D1] ----------
@@ -408,7 +439,7 @@ const diagnosticMetrics = computed<DiagnosticMetric[]>(() => {
   if (!layout.value) return []
   const metrics: DiagnosticMetric[] = []
   const preset = VIEW_MODE_PRESETS[viewMode.value]
-  const spouseW = preset.nodeWidth
+  const spouseW = cardSizeForDirection(preset, layoutDirection.value).nodeWidth
   const spouseGap = preset.spouseGap
 
   // 1) 按夫分组收集 spouse 边（保留 marriageOrder）—— [P1 #8] 委托给纯函数模块
@@ -508,6 +539,16 @@ const diagnosticMetrics = computed<DiagnosticMetric[]>(() => {
 
 /** 当前选中节点 id（null 表示未选中） */
 const selectedNodeId = ref<string | null>(null)
+
+const selectedProfile = computed<PersonStory | null>(() => {
+  if (!selectedNodeId.value) return null
+  return DEMO_PROFILES[`${activeId.value}:${selectedNodeId.value}`] ?? null
+})
+
+const selectedPerson = computed(() => {
+  if (!selectedNodeId.value) return null
+  return activeScenario.value.nodes.find((node) => node.id === selectedNodeId.value) ?? null
+})
 
 /**
  * 与某节点相关的边 id 集合
@@ -797,9 +838,13 @@ watch(
       return
     }
 
+    const tCard = cardSizeForDirection(VIEW_MODE_PRESETS[viewMode.value], layoutDirection.value)
     const tEngine = new LayoutEngine({
       canvasSize: { width: 400, height: 260 },
       config: {
+        nodeWidth: tCard.nodeWidth,
+        nodeHeight: tCard.nodeHeight,
+        layoutDirection: layoutDirection.value,
         nodeSep: 18,
         rankSep: 40,
         spouseGap: 24,
@@ -893,6 +938,17 @@ function thumbNodeClass(id: string): string[] {
         >{{ m === 'compact' ? '紧凑卡片' : '详细卡片（detailed）' }}</button>
       </div>
       <div class="tool-group">
+        <span class="tool-label">方向：</span>
+        <button
+          :class="['tool-btn', { active: layoutDirection === 'TB' }]"
+          @click="layoutDirection = 'TB'"
+        >纵向 TB</button>
+        <button
+          :class="['tool-btn', { active: layoutDirection === 'LR' }]"
+          @click="layoutDirection = 'LR'"
+        >横向 LR</button>
+      </div>
+      <div class="tool-group">
         <span class="tool-label">缩放：</span>
         <button class="tool-btn zoom-btn" @click="zoomPercent = Math.max(25, zoomPercent - 25)" data-action="zoom-out">−</button>
         <span class="zoom-readout" data-test="zoom-readout">{{ zoomPercent }}%</span>
@@ -923,18 +979,17 @@ function thumbNodeClass(id: string): string[] {
         <!-- 边 -->
         <g class="edges" :transform="`translate(${renderTransform.tx}, ${renderTransform.ty}) scale(${renderTransform.scale})`">
           <path
-            v-for="e in layout?.edges"
-            :key="e.id"
-            :d="pathToD(e.path?.points || [])"
-            :stroke="edgeStroke(e)"
-            :stroke-width="
-              isEdgeHighlighted(e) ? (e.kind === 'spouse' ? 4 : 3) :
-              isEdgeDimmed(e) ? 1 : (e.kind === 'spouse' ? 2 : 1.5)
-            "
-            :opacity="isEdgeDimmed(e) ? 0.18 : 1"
+            v-for="d in (layout?.edges ?? []).flatMap((e) => edgePathDs(e).map((path, i) => ({ id: e.id + '-' + i, e, path })))"
+            :key="d.id"
+            :d="d.path"
+            :stroke="edgeStroke(d.e)"
+            :stroke-width="edgeWidth(d.e)"
+            :stroke-dasharray="d.e.kind === 'spouse' ? '7 4' : undefined"
+            :opacity="isEdgeDimmed(d.e) ? 0.18 : 1"
             fill="none"
             stroke-linejoin="miter"
-            :class="['edge', { highlighted: isEdgeHighlighted(e), dimmed: isEdgeDimmed(e) }]"
+            stroke-linecap="butt"
+            :class="['edge', { highlighted: isEdgeHighlighted(d.e), dimmed: isEdgeDimmed(d.e) }]"
           />
         </g>
 
@@ -1135,6 +1190,42 @@ function thumbNodeClass(id: string): string[] {
       </div>
     </div>
 
+    <el-drawer
+      :model-value="!!selectedPerson"
+      title="人物详情"
+      direction="rtl"
+      size="380px"
+      @close="selectedNodeId = null"
+    >
+      <div v-if="selectedPerson" class="person-story">
+        <img
+          v-if="selectedProfile?.photoUrl"
+          class="person-photo"
+          :src="selectedProfile.photoUrl"
+          :alt="selectedPerson.label"
+        />
+        <h2>{{ selectedPerson.label }}</h2>
+        <p class="person-meta">
+          <span v-if="selectedProfile?.generationWord">字辈 {{ selectedProfile.generationWord }}</span>
+          <span>{{ selectedPerson.gender === 'male' ? '男' : '女' }}</span>
+          <span v-if="selectedProfile">
+            {{ selectedProfile.birthYear ?? '—' }}–{{ selectedProfile.deathYear ?? (selectedPerson.isLiving ? '今' : '—') }}
+          </span>
+          <span v-if="selectedPerson.isMainLineage">主脉</span>
+        </p>
+        <h3>简介</h3>
+        <p class="person-bio">{{ selectedProfile?.bio || '这位人物的简介尚未录入。' }}</p>
+        <h3>生平事迹</h3>
+        <ul v-if="selectedProfile?.events?.length" class="person-events">
+          <li v-for="(event, index) in selectedProfile.events" :key="index">
+            <strong>{{ event.year }}</strong>
+            <span>{{ event.text }}</span>
+          </li>
+        </ul>
+        <p v-else class="person-bio">暂无生平事迹。</p>
+      </div>
+    </el-drawer>
+
     <!-- [2026-08-28 D1] 诊断面板：实时输出布局关键指标 -->
     <div class="diagnostic-panel" data-test="diagnostic-panel">
       <div class="diag-header">
@@ -1161,10 +1252,10 @@ function thumbNodeClass(id: string): string[] {
     <details class="legend">
       <summary>图例 / 验收要点</summary>
       <ul>
-        <li><strong>一夫多妻走线</strong>：丈夫节点 → 婚姻汇聚点（夹在丈夫底与妻子顶之间） → 各妻子。</li>
-        <li><strong>妻子调色板</strong>：每条配偶边按妻子 palette 上色，便于一眼区分妻支。</li>
+        <li><strong>夫妻总线</strong>：丈夫到各位妻子是同一条双虚线，在每张卡片边缘断开。</li>
+        <li><strong>子女总线</strong>：不论生母是谁，线都从父亲引出，再经一条分发总线接入子女。</li>
+        <li><strong>主脉</strong>：主脉线条 2px，旁系 1px。</li>
         <li><strong>同世代卡片不重叠</strong>：同 Y 节点外接矩形间距 ≥ nodeSep。</li>
-        <li><strong>牵引线不重叠</strong>：T 形分支水平段共享一条 Y，分岔到各子节点。</li>
         <li><strong>配偶子树避让</strong>：妻的继子女子树撑开 effectiveWidth，避免侵入其他分支。</li>
       </ul>
     </details>
@@ -1627,4 +1718,21 @@ function thumbNodeClass(id: string): string[] {
 .diag-pass { color: #2E7D32; font-weight: 700; }
 .diag-warn { color: #E65100; font-weight: 700; }
 .diag-fail { color: #C62828; font-weight: 700; }
+.person-story { color: #3e342c; }
+.person-photo {
+  width: 160px;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 12px;
+  background: #f3efe8;
+}
+.person-story h2 { margin: 0 0 8px; font-size: 22px; }
+.person-story h3 { margin: 18px 0 8px; font-size: 14px; color: #6e5830; }
+.person-meta { display: flex; flex-wrap: wrap; gap: 8px; color: #6b6258; font-size: 13px; }
+.person-bio { margin: 0; line-height: 1.7; font-size: 14px; }
+.person-events { list-style: none; padding: 0; margin: 0; }
+.person-events li { display: flex; gap: 10px; margin-bottom: 8px; line-height: 1.6; font-size: 14px; }
+.person-events strong { flex: 0 0 52px; color: #8c7344; }
 </style>

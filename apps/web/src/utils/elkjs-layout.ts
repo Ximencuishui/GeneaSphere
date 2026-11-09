@@ -33,6 +33,7 @@ import type {
   NodePosition,
   LayoutConfig,
 } from '@/types/layout';
+import { edgesForEngine } from '@/utils/dagre-layout';
 
 const elk = new ELK({
   workerUrl: new URL('../workers/elkjs-layout.worker.ts', import.meta.url).href,
@@ -64,8 +65,10 @@ export async function layoutWithElkjs(
       'elk.layered.spacing.nodeNodeBetweenLayers': String(
         typeof config.rankSep === 'number' ? config.rankSep : 48,
       ),
-      // 方向：族谱惯例 TB（top-to-bottom）
-      'elk.direction': 'DOWN',
+      // TB = DOWN（代际向下），LR = RIGHT（代际向右）
+      'elk.direction': config.layoutDirection === 'LR' ? 'RIGHT' : 'DOWN',
+      // 边已经按 birthOrder 升序排过。优先沿用这个模型顺序，长子在左。
+      'elk.layered.considerModelOrder.strategy': 'PREFER_EDGES',
     },
     children: virtualNodes.map((n) => ({
       id: n.id,
@@ -73,13 +76,11 @@ export async function layoutWithElkjs(
       height: n.height,
       // 虚拟节点 width=0，elkjs 会按 0 宽度处理（不影响布局）
     })),
-    edges: virtualEdges
-      .filter((e) => e.kind === 'parent-child')
-      .map((e) => ({
-        id: e.id,
-        sources: [e.source],
-        targets: [e.target],
-      })),
+    edges: edgesForEngine(virtualEdges).map((e) => ({
+      id: e.id,
+      sources: [e.source],
+      targets: [e.target],
+    })),
   };
 
   // 异步执行布局（关闭 elkjs 内部 logging）

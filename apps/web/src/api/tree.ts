@@ -1,5 +1,5 @@
 import request from '@/utils/request';
-import type { PersonDetail } from '@/types';
+import type { GenealogyNode, PersonDetail } from '@/types';
 
 /**
  * 家族成员搜索结果项（轻量级，用于人物下拉搜索）
@@ -63,6 +63,21 @@ export const treeApi = {
     }),
 
   /**
+   * 以某人为中心的聚焦树：上 up 代父系 + 本人 + 下 down 代子孙。
+   * 根节点是窗口里最上面的祖先。up / down 缺省 3，范围 0–12。
+   */
+  getFocusTree: (personId: string, params?: { up?: number; down?: number }) =>
+    request.get<{ root: GenealogyNode; centerId: string; up: number; down: number }>(
+      `/api/tree/person/${personId}/focus`,
+      {
+        params: {
+          up: params?.up ?? 3,
+          down: params?.down ?? 3,
+        },
+      },
+    ),
+
+  /**
    * Get single person detail (parents / spouses / children)
    * - 用于侧栏编辑抽屉打开时一次性拉取
    */
@@ -88,6 +103,7 @@ export const treeApi = {
     death_date?: string;
     is_living?: boolean;
     parent_id?: string;
+    child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER' | 'ADOPTED_OUT';
   }) => request.post('/api/tree/person', data),
 
   /**
@@ -104,6 +120,10 @@ export const treeApi = {
       birth_place?: string | null;
       death_place?: string | null;
       migration_branch?: string | null;
+      bio?: Record<string, string | boolean | null>;
+      events?: { event_year?: number | null; content: string; sort_order?: number }[];
+      child_types?: { child_id: string; child_type: string }[];
+      unions?: { family_id: string; union_type: string }[];
     },
   ) => request.patch(`/api/tree/person/${personId}`, updates),
 

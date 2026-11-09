@@ -228,10 +228,28 @@ export class MediaService {
       data: { media_id, person_id },
     });
 
-    // Generate avatar thumbnail in the background
-    this.generatePersonAvatar(person_id, media_id).catch((err) =>
-      console.error('Failed to generate avatar:', err),
-    );
+    try {
+      const thumb = await this.generatePersonAvatar(person_id, media_id);
+      if (thumb) return;
+    } catch (err) {
+      this.logger.error('Failed to generate avatar', err as Error);
+    }
+
+    // 本地缩略图失败时（例如文件在对象存储），仍把可访问地址写到人物上。
+    // 人物更新接口不接收 photo_url，详情重拉只能靠 avatar_url。
+    const media = await prisma.mediaArchive.findUnique({
+      where: { id: media_id },
+      select: { file_url: true, display_url: true, thumb_url: true },
+    });
+    const avatarUrl = media?.display_url || media?.file_url;
+    if (!avatarUrl) return;
+    await (prisma.person.update as any)({
+      where: { id: person_id },
+      data: {
+        avatar_url: avatarUrl,
+        thumbnail_url: media?.thumb_url || avatarUrl,
+      },
+    });
   }
 
   async unlinkMediaFromPerson(media_id: bigint, person_id: bigint): Promise<void> {

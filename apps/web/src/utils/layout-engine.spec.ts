@@ -159,34 +159,18 @@ describe('layout-engine: 一夫多妻走线', () => {
       expect(e.path?.junction).toBeDefined()
     }
 
-    // 2) 所有 spouse 边共享同一汇聚点（X = 丈夫右边缘 X）
-    //    [2026-08-28 A3] 丈夫中心 → 丈夫右边缘，junction 从主节点右边缘走，避免“穿卡而过”。
-    const junctions = spouseEdges.map(e => e.path!.junction!)
-    const j0 = junctions[0]
+    // 2) 配偶总线：按从左到右串联。第一段从丈夫右缘出发，之后每段从前一位妻子的右缘接到下一位的左缘。
     const husbandPos = result.nodes.find(n => n.id === '1')!
-    const expectedJunctionX = husbandPos.x + husbandPos.width / 2
-    expect(j0.x).toBeCloseTo(expectedJunctionX, 0)
-    for (const j of junctions) {
-      expect(j.x).toBe(j0.x)
-    }
-
-    // 3) 每条 spouse 边至少有 4 个 path 点（起点 → junction → 水平 → 终点）
-    for (const e of spouseEdges) {
-      expect(e.path!.points.length).toBeGreaterThanOrEqual(4)
-    }
-
-    // 4) junction 位于丈夫节点底部与配偶节点顶部之间的范围内
-    //    [2026-08-28 A3] marriageJunctionOffset 仍接受为 16，所以 junction.y = mainBottomY - 16。
-    //    范围仍为 [spouseTop, husbandBottom]。
-    const husbandBottom = husbandPos.y + husbandPos.height / 2
-    for (const e of spouseEdges) {
-      const j = e.path!.junction!
-      const spouseId = e.source === '1' ? e.target : e.source
-      const spousePos = result.nodes.find(n => n.id === spouseId)!
-      const spouseTop = spousePos.y - spousePos.height / 2
-      expect(spouseTop).toBeLessThanOrEqual(husbandBottom)
-      expect(j.y).toBeGreaterThanOrEqual(spouseTop)
-      expect(j.y).toBeLessThanOrEqual(husbandBottom)
+    const ordered = [...spouseEdges].sort((a, b) => (a.path!.points[0].x) - (b.path!.points[0].x))
+    expect(ordered[0].path!.points[0].x).toBeCloseTo(husbandPos.x + husbandPos.width / 2, 0)
+    expect(ordered[0].path!.points[0].y).toBeCloseTo(husbandPos.y, 0)
+    for (const edge of ordered) {
+      const spouseId = edge.source === '1' ? edge.target : edge.source
+      const spouse = result.nodes.find(n => n.id === spouseId)!
+      const end = edge.path!.points[edge.path!.points.length - 1]
+      expect(end.x).toBeCloseTo(spouse.x - spouse.width / 2, 0)
+      expect(end.y).toBeCloseTo(spouse.y, 0)
+      expect(edge.path?.doubleLine).toBe(true)
     }
 
     // 5) 每条 spouse 边的 path 严格正交（无斜线）
@@ -213,16 +197,12 @@ describe('layout-engine: 一夫多妻走线', () => {
       } as Partial<LayoutConfig>,
     })
     const resultDefault = await engineDefault.calculateLayout(nodes, edges)
-    // [2026-08-28 A3] 默认 junctionOffset=0：所有 4 位妻子的 junction X 都锚定丈夫右边缘
-    const jDefaults = resultDefault.edges.filter(e => e.kind === 'spouse').map(e => e.path!.junction!)
-    for (const j of jDefaults) {
-      expect(j.x).toBeCloseTo(husbandPos.x + husbandPos.width / 2, 0)
-    }
-    // junction Y 钳制到 [spouseTopY, mainBottomY-2] 区间（保证路径不与卡片边界相交），
-    // 因为一夫多妻下中心妻（中间索引）的 junction Y 接近 mainBottomY；本断言验证最严格的边界。
-    for (const j of jDefaults) {
-      expect(j.y).toBeLessThanOrEqual(husbandBottom)
-      expect(j.y).toBeGreaterThanOrEqual(husbandBottom - 2.5)
+    const defaults = resultDefault.edges.filter(e => e.kind === 'spouse')
+    for (const edge of defaults) {
+      const pts = edge.path!.points
+      expect(pts.length).toBe(2)
+      expect(pts[0].y).toBeCloseTo(pts[1].y, 0)
+      expect(pts[0].y).toBeCloseTo(husbandPos.y, 0)
     }
   })
 })
@@ -1068,16 +1048,14 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
     const j = spouseEdge.path!.junction!
     const h = result.nodes.find(n => n.id === 'H')!
 
-    // junction.x 锚定到丈夫右边缘 X
+    // 锚点在丈夫右缘、妻子左缘，高度是卡片中线，不穿进卡片。
     expect(j.x).toBeCloseTo(h.x + h.width / 2, 0)
-    // junctionOffset=0 → junction.y = mainBottomY = h.y + h.height/2
-    expect(j.y).toBeCloseTo(h.y + h.height / 2, 0)
-
-    // 此时 path 退化为两点水平直线（junction Y == mainBottomY == mainY，
-    // 起点 (mainRight, mainBottom) → 终点 (spouseLeft, spouseTop=mainBottom)）
+    expect(j.y).toBeCloseTo(h.y, 0)
     const pts = spouseEdge.path!.points
+    const w = result.nodes.find(n => n.id === 'W')!
     expect(pts.length).toBe(2)
     expect(pts[0].y).toBe(pts[1].y)
+    expect(pts[1].x).toBeCloseTo(w.x - w.width / 2, 0)
   })
 
   it('A3: junctionOffset=16 时 path 仍是正交阶梯（保持向后兼容）', async () => {
@@ -1100,10 +1078,10 @@ describe('layout-engine: v5 修复 [2026-08-28] A1/A2/A3 回归', () => {
     const j = spouseEdge.path!.junction!
     const h = result.nodes.find(n => n.id === 'H')!
 
-    // junction X 仍是丈夫右边缘
+    // 配偶总线不再随 junctionOffset 下移，始终贴着卡片侧边中点。
     expect(j.x).toBeCloseTo(h.x + h.width / 2, 0)
-    // junction Y = mainBottomY - 16
-    expect(j.y).toBeCloseTo(h.y + h.height / 2 - 16, 0)
+    expect(j.y).toBeCloseTo(h.y, 0)
+    expect(spouseEdge.path!.points.length).toBe(2)
   })
 
   it('A5: CoupleUnit 绑定：resolveSubtreeOverlap 后夫妻对不被其他主节点穿过', async () => {
@@ -1201,20 +1179,16 @@ describe('layout-engine: v6.0.8 一妻多妾 — 父子边共享 drop line（与
     // [v6.0.8] 找最右配偶 W2
     const w1Pos = pos.get('W1')!
     const w2Pos = pos.get('W2')!
-    const rightmostSpouseX = Math.max(w1Pos.x, w2Pos.x)
-    const expectedStartX = (fPos.x + rightmostSpouseX) / 2
     const c1Edge = result.edges.find(e => e.id === 'e-fc1')!
 
     expect(c1Edge.path).toBeDefined()
     const pts = c1Edge.path!.points
     expect(pts.length).toBeGreaterThanOrEqual(2)
-    // [v6.0.8 核心] 首点 X = coupleUnitMidX（不再是父节点中心 X）
-    expect(pts[0].x).toBeCloseTo(expectedStartX, 0)
-    // [v6.0.8 核心] 起点 X 不再等于父节点中心 X（v6.0.7 时为父节点中心 X）
-    expect(pts[0].x).not.toBeCloseTo(fPos.x, 0)
-    // 首点 Y 应为父节点底部 Y
-    expect(pts[0].y).toBeGreaterThanOrEqual(fPos.y - fPos.height)
-    expect(pts[0].y).toBeLessThanOrEqual(fPos.y + fPos.height * 2 + 100)
+    // 子女线从父亲底部中心锚点引出，不从妻子、也不从夫妻间隙的空中点引出。
+    expect(pts[0].x).toBeCloseTo(fPos.x, 0)
+    expect(pts[0].y).toBeCloseTo(fPos.y + fPos.height / 2, 0)
+    expect(pts[0].x).not.toBeCloseTo(w1Pos.x, 0)
+    expect(pts[0].x).not.toBeCloseTo(w2Pos.x, 0)
   })
 
   it('P1.2 v6.0.8：motherId=妾时起点 = coupleUnitMidX（不再是妾节点中心 X）', async () => {
@@ -1235,18 +1209,15 @@ describe('layout-engine: v6.0.8 一妻多妾 — 父子边共享 drop line（与
     const fPos = pos.get('F')!
     const w1Pos = pos.get('W1')!
     const w2Pos = pos.get('W2')!
-    const expectedStartX = (fPos.x + Math.max(w1Pos.x, w2Pos.x)) / 2
     const c2Edge = result.edges.find(e => e.id === 'e-fc2')!
 
     expect(c2Edge.path).toBeDefined()
     const pts = c2Edge.path!.points
     expect(pts.length).toBeGreaterThanOrEqual(2)
-    // [v6.0.8 核心] 首点 X = coupleUnitMidX（不再是妾节点中心 X）
-    expect(pts[0].x).toBeCloseTo(expectedStartX, 0)
-    // [v6.0.8 核心] 不再 = 妾节点中心 X
+    expect(pts[0].x).toBeCloseTo(fPos.x, 0)
+    expect(pts[0].y).toBeCloseTo(fPos.y + fPos.height / 2, 0)
     expect(pts[0].x).not.toBeCloseTo(w2Pos.x, 0)
-    // [v6.0.8 核心] 也不 = 父节点中心 X
-    expect(pts[0].x).not.toBeCloseTo(fPos.x, 0)
+    expect(pts[0].x).not.toBeCloseTo(w1Pos.x, 0)
   })
 
   it('P1.3 v6.0.8：多母亲混合，正妻之子 + 妾之子起点 = coupleUnitMidX（共享 drop line）', async () => {
@@ -1266,19 +1237,14 @@ describe('layout-engine: v6.0.8 一妻多妾 — 父子边共享 drop line（与
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const fPos = pos.get('F')!
     const w2Pos = pos.get('W2')!
-    const expectedStartX = (fPos.x + w2Pos.x) / 2
 
     const c1Edge = result.edges.find(e => e.id === 'e-fc1')!  // 正妻之子
     const c2Edge = result.edges.find(e => e.id === 'e-fc2')!  // 妾之子
 
-    // [v6.0.8 核心] c1（正妻之子，motherId=W1）起点 = coupleUnitMidX
-    expect(c1Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
-    // [v6.0.8 核心] c2（妾之子，motherId=W2）起点 = coupleUnitMidX
-    expect(c2Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
-    // [v6.0.8 核心] 两个兄弟起点 X 完全相同（共享 drop line）
+    expect(c1Edge.path!.points[0].x).toBeCloseTo(fPos.x, 0)
+    expect(c2Edge.path!.points[0].x).toBeCloseTo(fPos.x, 0)
     expect(c1Edge.path!.points[0].x).toBeCloseTo(c2Edge.path!.points[0].x, 0)
-    // [v6.0.8 核心] 都不 = 父节点中心 X
-    expect(c1Edge.path!.points[0].x).not.toBeCloseTo(fPos.x, 0)
+    expect(c1Edge.path!.points[0].x).not.toBeCloseTo(w2Pos.x, 0)
   })
 
   it('P1.4 v6.0.8：同父的所有兄弟共享 T 形汇聚点（不再按 motherId 分组）', async () => {
@@ -1309,26 +1275,24 @@ describe('layout-engine: v6.0.8 一妻多妾 — 父子边共享 drop line（与
     const pos = new Map(result.nodes.map(n => [n.id, n]))
     const fPos = pos.get('F')!
     const cPos = pos.get('C')!
-    const expectedStartX = (fPos.x + cPos.x) / 2 // coupleUnitMidX
     const c1Edge = result.edges.find(e => e.id === 'e-fc1')!
     const c2Edge = result.edges.find(e => e.id === 'e-fc2')!
 
-    // 同父亲组的 2 个子节点：路径 4 点 T 形
-    expect(c1Edge.path!.points.length).toBe(4)
-    expect(c2Edge.path!.points.length).toBe(4)
-    // [v6.0.8 核心] 起点头相同（都从 coupleUnitMidX 出发）
-    expect(c1Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
-    expect(c2Edge.path!.points[0].x).toBeCloseTo(expectedStartX, 0)
-    // [v6.0.8 核心] 两个兄弟起点 X 完全相同（v6.0.7 时各自从母亲节点 X 出发）
+    expect(c1Edge.path!.points.length).toBeGreaterThanOrEqual(3)
+    expect(c2Edge.path!.points.length).toBeGreaterThanOrEqual(3)
+    expect(c1Edge.path!.points[0].x).toBeCloseTo(fPos.x, 0)
+    expect(c2Edge.path!.points[0].x).toBeCloseTo(fPos.x, 0)
     expect(c1Edge.path!.points[0].x).toBeCloseTo(c2Edge.path!.points[0].x, 0)
+    expect(c1Edge.path!.points[0].x).not.toBeCloseTo(cPos.x, 0)
     // 终点 X 不同（c1 和 c2 在不同 X）
-    expect(c1Edge.path!.points[3].x).not.toBeCloseTo(c2Edge.path!.points[3].x, 0)
+    const c1End = c1Edge.path!.points[c1Edge.path!.points.length - 1]
+    const c2End = c2Edge.path!.points[c2Edge.path!.points.length - 1]
+    expect(c1End.x).not.toBeCloseTo(c2End.x, 0)
     // [v6.0.8 同组 T 形] 分叉点 Y 与起点 Y 之间的「垂直段」存在
     expect(c1Edge.path!.points[0].y).not.toBeCloseTo(c1Edge.path!.points[1].y, 0)
     expect(c2Edge.path!.points[0].y).not.toBeCloseTo(c2Edge.path!.points[1].y, 0)
     // [v6.0.8 共享总线] 兄弟间水平段在同一 busY 上
     expect(c1Edge.path!.points[1].y).toBeCloseTo(c2Edge.path!.points[1].y, 0)
-    expect(c1Edge.path!.points[2].y).toBeCloseTo(c2Edge.path!.points[2].y, 0)
   })
 })
 
@@ -1449,5 +1413,65 @@ describe('layout-engine: P3 按 birth_order 排序子节点', () => {
     // y (有 birthOrder) 应排在最左，x 和 z (无 birthOrder) 在右侧
     expect(yX).toBeLessThan(xX)
     expect(yX).toBeLessThan(zX)
+  })
+
+  it('P3.4 长子子树在左，父节点落在子女正上方，配偶不把长孙插到次子下面', async () => {
+    const W = 64
+    const H = 28
+    const person = (
+      id: string,
+      label: string,
+      generation: number,
+      main = false,
+    ): LayoutNode => ({
+      id,
+      label,
+      gender: id === 'W' ? 'female' : 'male',
+      isMainLineage: main,
+      isLiving: false,
+      generation,
+      width: W,
+      height: H,
+    })
+    const nodes: LayoutNode[] = [
+      person('F', '朱熹', 0, true),
+      person('W', '妻', -1),
+      person('S1', '朱塾', 1, true),
+      person('S2', '朱在', 1),
+      person('G1', '朱鉴', 2, true),
+      person('G2', '朱在子', 2),
+    ]
+    const edges: LayoutEdge[] = [
+      { id: 'fw', source: 'F', target: 'W', kind: 'spouse', marriageOrder: 1, isCurrent: true },
+      { id: 'e2', source: 'F', target: 'S2', kind: 'parent-child', birthOrder: 2 },
+      { id: 'e1', source: 'F', target: 'S1', kind: 'parent-child', birthOrder: 1 },
+      { id: 'g1', source: 'S1', target: 'G1', kind: 'parent-child', birthOrder: 1 },
+      { id: 'g2', source: 'S2', target: 'G2', kind: 'parent-child', birthOrder: 1 },
+    ]
+    const engine = new LayoutEngine({
+      canvasSize: { width: 1200, height: 800 },
+      config: {
+        nodeWidth: W,
+        nodeHeight: H,
+        nodeSep: 24,
+        rankSep: 48,
+        spouseGap: 48,
+        mainLineageCenter: true,
+        spouseOptimization: true,
+        resolveSubtreeOverlap: true,
+      } as Partial<LayoutConfig>,
+    })
+    const result = await engine.calculateLayout(nodes, edges)
+    const pos = new Map(result.nodes.map((n) => [n.id, n]))
+    const s1 = pos.get('S1')!
+    const s2 = pos.get('S2')!
+    const g1 = pos.get('G1')!
+    const g2 = pos.get('G2')!
+
+    expect(s1.x).toBeLessThan(s2.x)
+    expect(g1.x).toBeLessThan(g2.x)
+    expect(g1.x).toBeLessThan(s2.x)
+    expect(s1.x).toBeCloseTo(g1.x, 0)
+    expect(s2.x).toBeCloseTo(g2.x, 0)
   })
 })

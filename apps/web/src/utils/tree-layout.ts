@@ -23,6 +23,7 @@ export {
   computeAutoNodeSep,
   computeAutoRankSep,
   reorderSiblingsByBirthOrder,
+  packSubtreesByBirthOrder,
   computeMaxGeneration,
   positionSpouseNodes,
   detectCycle,

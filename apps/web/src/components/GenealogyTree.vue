@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, shallowRef, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
+import { ref, reactive, shallowRef, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   ZoomIn,
@@ -28,7 +28,10 @@ import {
   Reading,
 } from '@element-plus/icons-vue';
 import { useGenealogyStore } from '@/stores/genealogy';
-import type { ViewMode } from '@/stores/genealogy';
+import type { CardDensity, TreeStyle, ViewMode } from '@/stores/genealogy';
+import { CLASSIC_FONT_FAMILY, classicGenerationLines, majorityGenerationWord } from '@/utils/traditional-column';
+import { downloadTraditionalChart } from '@/utils/traditional-export';
+import { buildSkewedGenealogyTree } from '@/utils/__fixtures__/skewed-clan';
 import { treeApi } from '@/api/tree';
 import type { GenealogyNode } from '@/types';
 import PersonEditDrawer from './PersonEditDrawer.vue';
@@ -203,7 +206,13 @@ const genealogyStore = useGenealogyStore();
 const loading = ref(false);
 /** 画布内错误占位状态：null 表示无错误 */
 const errorState = ref<{ code: number; message: string } | null>(null);
-const layoutDirection = ref<'TB' | 'LR'>('TB');
+function parseDirectionFromUrl(): 'TB' | 'LR' {
+  if (typeof window === 'undefined') return 'TB';
+  const raw = new URLSearchParams(window.location.search).get('direction')?.toUpperCase();
+  return raw === 'LR' ? 'LR' : 'TB';
+}
+
+const layoutDirection = ref<'TB' | 'LR'>(parseDirectionFromUrl());
 
 /**
  * [2026-09-01 P1 修复] 引擎选择状态（auto/dagre/elkjs/compactBox 四档）。
@@ -994,15 +1003,193 @@ const handleViewModeChange = (mode: ViewMode) => {
   }
 };
 
+const isTraditional = computed(() => genealogyStore.treeStyle === 'traditional');
+const classicFontFamily = CLASSIC_FONT_FAMILY;
+const exportingChart = ref(false);
+const classicSkewNote = ref('');
+
+async function exportClassicChart() {
+  if (!graph.value || exportingChart.value) return;
+  exportingChart.value = true;
+  try {
+    await downloadTraditionalChart(graph.value);
+    ElMessage.success('古谱图片已开始下载');
+  } catch (error: any) {
+    ElMessage.error(error?.message || '导出失败');
+  } finally {
+    exportingChart.value = false;
+  }
+}
+
+const handleTreeStyleChange = (style: TreeStyle) => {
+  if (genealogyStore.treeStyle === style) return;
+  genealogyStore.setTreeStyle(style);
+  if (genealogyStore.treeData) {
+    debouncedInitGraph(genealogyStore.treeData);
+  }
+};
+
+interface ClassicGenerationRow {
+  gen: number;
+  lines: string[];
+  top: number;
+  fontSize: number;
+}
+
+const classicGenerations = ref<ClassicGenerationRow[]>([]);
+
+/** 世代表头的屏幕 Y 跟画布上那一代的中心对齐，平移和缩放时重算。 */
+function syncClassicRail() {
+  if (!isTraditional.value || !graph.value?.getNodeData) {
+    classicGenerations.value = [];
+    return;
+  }
+  try {
+    const [vw, vh] = graph.value.getSize();
+    const [cx, cy] = graph.value.getViewportCenter();
+    const zoom = graph.value.getZoom() || 1;
+    void vw;
+    void cx;
+    const buckets = new Map<number, { y: number; words: Map<string, number> }>();
+    for (const node of graph.value.getNodeData() || []) {
+      const gen = node?.data?.generation;
+      if (typeof gen !== 'number' || gen < 0) continue;
+      const pos = graph.value.getElementPosition?.(String(node.id));
+      const y = pos?.[1];
+      if (typeof y !== 'number') continue;
+      let bucket = buckets.get(gen);
+      if (!bucket) {
+        bucket = { y, words: new Map() };
+        buckets.set(gen, bucket);
+      }
+      const word = String(node.data?.generation_word || '').trim();
+      if (word) bucket.words.set(word, (bucket.words.get(word) || 0) + 1);
+    }
+    classicGenerations.value = [...buckets.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([gen, bucket]) => {
+        return {
+          gen,
+          lines: classicGenerationLines(gen, majorityGenerationWord(bucket.words)),
+          top: (bucket.y - cy) * zoom + vh / 2,
+          fontSize: Math.max(11, Math.min(14, 13 * zoom)),
+        };
+      });
+  } catch {
+    classicGenerations.value = [];
+  }
+}
+
+watch(graph, (next, prev) => {
+  try {
+    prev?.off?.('aftertransform', syncClassicRail);
+    prev?.off?.('afterrender', syncClassicRail);
+  } catch {
+    /* 旧图已经 destroy，监听会跟着画布一起丢掉 */
+  }
+  next?.on?.('aftertransform', syncClassicRail);
+  next?.on?.('afterrender', syncClassicRail);
+  syncClassicRail();
+});
+
+watch(isTraditional, () => syncClassicRail());
+
+/** 切换卡片密度会改高宽，必须整图重排。缩放和视口中心锁在当前人物上。 */
+const handleCardDensityChange = (density: CardDensity) => {
+  if (genealogyStore.cardDensity === density) return;
+  genealogyStore.setCardDensity(density);
+  if (genealogyStore.treeData) {
+    debouncedInitGraph(genealogyStore.treeData, { preserveViewport: true });
+  }
+};
+
 // 性别/照片过滤：直接走 useGenealogyFilter 中已暴露的同名 handler，
 // 保证「谓词变化 → 重建缓存 → 增量重绘」与搜索流程一致。
 const handleGenderFilterChange = () => filter.handleGenderFilterChange();
 const handlePhotoFilterChange = () => filter.handlePhotoFilterChange();
 
 const refreshGraph = () => {
+  if (genealogyStore.viewType === 'focus' && genealogyStore.focusCenterId) {
+    void loadFocusTree(genealogyStore.focusCenterId);
+    return;
+  }
   if (graph.value && genealogyStore.treeData) {
     initGraph(genealogyStore.treeData);
   }
+};
+
+/** 拉全局世系并重画。工具栏「全局世系」和首屏共用。 */
+const loadGlobalTree = async () => {
+  const previousType = genealogyStore.viewType;
+  errorState.value = null;
+  genealogyStore.setViewType('global');
+  const rootId = props.rootPersonId || '1';
+  try {
+    const limit = props.clanId ? computeInitialCardLimit() : undefined;
+    const data = await fetchTreeData(rootId, limit ? { limit } : undefined);
+    if (!data) return;
+    const treeData = (data as any).data || data;
+    genealogyStore.setTreeData(treeData);
+    await initGraph(treeData);
+  } catch {
+    genealogyStore.setViewType(previousType);
+    // 错误已由 fetchTreeData 写到 errorState
+  }
+};
+
+/**
+ * 拉聚焦窗：上 ancestorDepth 代、下 descendantDepth 代，用返回的 root 重算布局。
+ * 渲染结束后 initGraph 会 focusElement(focusCenterId)。
+ */
+const loadFocusTree = async (personId: string) => {
+  const previousType = genealogyStore.viewType;
+  errorState.value = null;
+  genealogyStore.setFocusCenter(personId);
+  startLoading();
+  try {
+    const response: any = await treeApi.getFocusTree(personId, {
+      up: genealogyStore.ancestorDepth,
+      down: genealogyStore.descendantDepth,
+    });
+    const root = response?.root ?? response?.data?.root;
+    if (!root) {
+      throw new Error('聚焦树没有返回根节点');
+    }
+    setLoadingStage('parse');
+    partialTree.value = false;
+    shownPersons.value = collectNodeIds(root).length;
+    genealogyStore.totalPersons = shownPersons.value;
+    genealogyStore.setTreeData(root);
+    await initGraph(root);
+  } catch (error: any) {
+    const status: number = error?.status || error?.response?.status || 0;
+    const message: string = error?.message || String(error);
+    if (!errorState.value) {
+      errorState.value = {
+        code: status || 500,
+        message: describeError(status, message),
+      };
+    }
+    genealogyStore.setViewType(previousType);
+    failLoading();
+  }
+};
+
+const handleViewTypeChange = (type: 'global' | 'focus') => {
+  if (type === 'global') {
+    void loadGlobalTree();
+    return;
+  }
+  const centerId = genealogyStore.focusCenterId || genealogyStore.selectedNode?.id;
+  if (!centerId) {
+    ElMessage.warning('请先点开一位人物，或在详情里点「设为中心」');
+    return;
+  }
+  void loadFocusTree(String(centerId));
+};
+
+const handleSetFocusCenter = (personId: string | number) => {
+  void loadFocusTree(String(personId));
 };
 
 // ==================== Zoom Controls ====================
@@ -1142,12 +1329,101 @@ function buildLargeGraph(TOTAL = 1000): { root: any; count: number } {
  * - 完成后调 refreshGraph 走一遍 setData/render 流水线
  * - 记录 setData → render 完成耗时到 perfStats.renderMs
  */
+function sampleFrames(ms: number): Promise<number> {
+  return new Promise((resolve) => {
+    let frames = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      frames += 1;
+      if (now - start >= ms) {
+        resolve(Math.round((frames * 1000) / (now - start)));
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+/** 畸形 1000 人古谱：切到古谱、缩放到 0.4，分别量静止和拖拽帧率。 */
+async function runClassicSkewPerf() {
+  if (perfTestLoading.value) return;
+  perfTestLoading.value = true;
+  classicSkewNote.value = '生成中…';
+  try {
+    genealogyStore.setTreeStyle('traditional');
+    const { root, count } = buildSkewedGenealogyTree(1000);
+    partialTree.value = false;
+    shownPersons.value = count;
+    genealogyStore.totalPersons = count;
+    genealogyStore.setTreeData(root);
+    const started = performance.now();
+    await initGraph(root);
+    const renderMs = Math.round(performance.now() - started);
+    perfStats.renderMs = renderMs;
+    // 对准人数最多的那一世中部，再放到 0.4。
+    const laidOut = graph.value?.getNodeData?.() || [];
+    const rankCount = new Map<number, number>();
+    for (const node of laidOut) {
+      const gen = node?.data?.generation;
+      if (typeof gen === 'number' && gen >= 0) rankCount.set(gen, (rankCount.get(gen) || 0) + 1);
+    }
+    let widestGen = 0;
+    let widestCount = 0;
+    for (const [gen, rank] of rankCount) {
+      if (rank > widestCount) {
+        widestGen = gen;
+        widestCount = rank;
+      }
+    }
+    const rankNodes = laidOut.filter((node: any) => node?.data?.generation === widestGen);
+    const wideNode = rankNodes[Math.floor(rankNodes.length / 2)];
+    const frameWideRank = async () => {
+      if (wideNode) await graph.value.focusElement(String(wideNode.id), { duration: 0 });
+      await graph.value?.zoomTo?.(0.4, { duration: 0 });
+    };
+    await frameWideRank();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const idleFps = await sampleFrames(2000);
+    let dragFrames = 0;
+    const dragStart = performance.now();
+    await new Promise<void>((resolve) => {
+      const step = async () => {
+        dragFrames += 1;
+        try {
+          await graph.value?.translateBy?.([72, 0], { duration: 0 });
+        } catch {
+          /* 图已经换掉时，这一下平移作废 */
+        }
+        if (performance.now() - dragStart >= 2000) {
+          resolve();
+          return;
+        }
+        requestAnimationFrame(() => { void step(); });
+      };
+      requestAnimationFrame(() => { void step(); });
+    });
+    const dragFps = Math.round((dragFrames * 1000) / (performance.now() - dragStart));
+    await frameWideRank();
+    const zoomText = graph.value?.getZoom?.()?.toFixed?.(2) ?? '?';
+    classicSkewNote.value = `${count} 人 · 渲染 ${renderMs}ms · 静止 ${idleFps} FPS · 拖拽 ${dragFps} FPS · 缩放 ${zoomText}`;
+    ElMessage.success(classicSkewNote.value);
+  } catch (error: any) {
+    classicSkewNote.value = '';
+    ElMessage.error(`古谱压测失败：${error?.message || error}`);
+  } finally {
+    perfTestLoading.value = false;
+  }
+}
+
 async function runPerfTest() {
   if (perfTestLoading.value) return;
   perfTestLoading.value = true;
   try {
     const { root, count } = buildLargeGraph(1000);
-
+    partialTree.value = false;
+    shownPersons.value = count;
+    genealogyStore.totalPersons = count;
     genealogyStore.setTreeData(root);
     ElMessage.info(`已生成 ${count} 个合成节点，开始渲染测试…`);
 
@@ -1412,10 +1688,6 @@ function handleDrawerNavigate(personId: string | number) {
   const target = findNodeInTree(genealogyStore.treeData, String(personId));
   if (target) {
     genealogyStore.selectNode(target);
-    // 增量选中 + 聚焦，避免全量重建
-    if (graph.value && typeof graph.value.draw === 'function') {
-      graph.value.draw();
-    }
     try {
       graph.value?.focusElement?.(String(personId), { duration: 500 });
     } catch { /* graph may be mid-destroy */ }
@@ -1440,6 +1712,53 @@ function handleDrawerMutated() {
   refreshGraph();
 }
 
+/** 新增子女后挂到当前父节点下再重画。保留选中，抽屉不关。 */
+function appendChild(
+  parentId: string | number,
+  child: {
+    id: string;
+    full_name: string;
+    gender: 'male' | 'female';
+    child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER' | 'ADOPTED_OUT';
+  },
+) {
+  const parent = findNodeInTree(genealogyStore.treeData, String(parentId));
+  if (!parent) return;
+  parent.children = parent.children || [];
+  if (parent.children.some((item) => String(item.id) === child.id)) return;
+  parent.children.push({
+    id: child.id,
+    full_name: child.full_name,
+    label: child.full_name,
+    gender: child.gender,
+    is_living: true,
+    has_photo: false,
+    children: [],
+  });
+  const nextOrder = (parent.child_links || []).reduce((max, link) => {
+    const order = Number(link.birth_order);
+    return Number.isFinite(order) ? Math.max(max, order) : max;
+  }, 0) + 1;
+  parent.child_links = parent.child_links || [];
+  parent.child_links.push({
+    child_id: child.id,
+    child_type: child.child_type || 'BIOLOGICAL',
+    birth_order: nextOrder,
+  });
+  refreshGraph();
+}
+
+function handleChildAdded(child: {
+  id: string;
+  full_name: string;
+  gender: 'male' | 'female';
+  child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER' | 'ADOPTED_OUT';
+}) {
+  const parentId = genealogyStore.selectedNode?.id;
+  if (!parentId || !child?.id) return;
+  appendChild(parentId, child);
+}
+
 function findNodeInTree(root: GenealogyNode | null, id: string): GenealogyNode | null {
   if (!root) return null;
   if (String(root.id) === id) return root;
@@ -1452,32 +1771,9 @@ function findNodeInTree(root: GenealogyNode | null, id: string): GenealogyNode |
 
 // ==================== Watch & Lifecycle ====================
 
-watch(
-  () => genealogyStore.selectedNode,
-  () => {
-    if (graph.value && typeof graph.value.draw === 'function') {
-      graph.value.draw();
-    }
-  },
-);
-
 onMounted(async () => {
   await nextTick();
-  const rootId = props.rootPersonId || '1';
-  try {
-    // [渐进加载 2026-08-20] 首屏只拉取核心子集：
-    // 按屏幕大小计算卡片上限（最多 100 张），后端 limit 截断，
-    // 打开速度与首帧渲染都大幅提升；完整族谱由提示条按钮按需加载。
-    const limit = props.clanId ? computeInitialCardLimit() : undefined;
-    const data = await fetchTreeData(rootId, limit ? { limit } : undefined);
-    if (data) {
-      const treeData = (data as any).data || data;
-      genealogyStore.setTreeData(treeData);
-      await initGraph(treeData);
-    }
-  } catch {
-    // 错误已在 fetchTreeData 中设置到 errorState，画布将展示错误占位
-  }
+  await loadGlobalTree();
 });
 
 onUnmounted(() => {
@@ -1498,7 +1794,11 @@ defineExpose({
   resetZoom,
   addPerson,
   graphChangeVersion,
+  /** 当前布局方向。TreePage 世代标尺据此在左侧纵向 / 顶部横向之间切换。 */
+  layoutDirection,
   refresh: refreshGraph,
+  /** 把新建子女挂到当前树上再重画。不改布局算法。 */
+  appendChild,
   focusMainLineage,
   /** 外部调用：高亮指定节点集合（如三代亲属） */
   setHighlight,
@@ -1524,6 +1824,7 @@ defineExpose({
           // [世代浮窗跟随画布 2026-08-20] 节点世代深度（由 transformToG6Data 写入），
           // 供 TreePage 把浮窗 item 按画布 y 投影到对应屏幕 y。配偶节点 gen=-1。
           gen: typeof n.data?.generation === 'number' ? n.data.generation : 1,
+          word: String(n.data?.generation_word || '').trim(),
           gender: n.data?.gender,
           isMain: n.data?.is_main_lineage === true,
           isLiving: n.data?.is_living === true,
@@ -1581,7 +1882,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="genealogy-tree-container">
+  <div class="genealogy-tree-container" :class="{ 'is-traditional': isTraditional }">
     <!-- Compact Toolbar (单行布局，隐藏 label 节省空间) -->
     <div class="tree-toolbar" :class="{ 'is-collapsed': toolbarCollapsed }">
       <el-button
@@ -1609,8 +1910,56 @@ defineExpose({
 
       <el-divider direction="vertical" />
 
+      <el-button-group class="tree-style-group">
+        <el-button
+          size="small"
+          :type="genealogyStore.treeStyle === 'modern' ? 'primary' : 'default'"
+          @click="handleTreeStyleChange('modern')"
+        >
+          现代视图
+        </el-button>
+        <el-button
+          size="small"
+          :type="genealogyStore.treeStyle === 'traditional' ? 'primary' : 'default'"
+          @click="handleTreeStyleChange('traditional')"
+        >
+          古谱视图
+        </el-button>
+      </el-button-group>
+
+      <el-button
+        v-if="isTraditional"
+        class="classic-export-btn"
+        size="small"
+        :loading="exportingChart"
+        @click="exportClassicChart"
+      >
+        导出图片
+      </el-button>
+
+      <el-divider direction="vertical" />
+
+      <el-button-group class="view-scope-group">
+        <el-button
+          size="small"
+          :type="genealogyStore.viewType === 'global' ? 'primary' : 'default'"
+          @click="handleViewTypeChange('global')"
+        >
+          全局世系
+        </el-button>
+        <el-button
+          size="small"
+          :type="genealogyStore.viewType === 'focus' ? 'primary' : 'default'"
+          @click="handleViewTypeChange('focus')"
+        >
+          亲属聚焦
+        </el-button>
+      </el-button-group>
+
+      <el-divider v-show="!isTraditional" direction="vertical" />
+
       <!-- View Mode -->
-      <el-button-group class="view-mode-group">
+      <el-button-group v-show="!isTraditional" class="view-mode-group">
         <el-tooltip content="紧凑视图" placement="bottom">
           <el-button
             :type="genealogyStore.viewMode === 'compact' ? 'primary' : 'default'"
@@ -1663,6 +2012,29 @@ defineExpose({
             size="small"
           >
             <el-icon><Grid /></el-icon>
+          </el-button>
+        </el-tooltip>
+      </el-button-group>
+
+      <el-divider v-show="!isTraditional" direction="vertical" />
+
+      <el-button-group v-show="!isTraditional" class="density-group">
+        <el-tooltip content="卡片密度：简洁（头像、姓名、生卒）" placement="bottom">
+          <el-button
+            size="small"
+            :type="genealogyStore.cardDensity === 'simple' ? 'primary' : 'default'"
+            @click="handleCardDensityChange('simple')"
+          >
+            简洁
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="卡片密度：详情（字辈、排行、迁徙）" placement="bottom">
+          <el-button
+            size="small"
+            :type="genealogyStore.cardDensity === 'detailed' ? 'primary' : 'default'"
+            @click="handleCardDensityChange('detailed')"
+          >
+            详情
           </el-button>
         </el-tooltip>
       </el-button-group>
@@ -1728,7 +2100,7 @@ defineExpose({
       <el-divider direction="vertical" />
 
       <!-- Layout -->
-      <el-tooltip content="切换纵向/横向布局" placement="bottom">
+      <el-tooltip v-if="!isTraditional" content="切换纵向/横向布局" placement="bottom">
         <el-button
           @click="toggleLayout"
           :icon="layoutDirection === 'TB' ? Grid : Rank"
@@ -1739,7 +2111,7 @@ defineExpose({
       </el-tooltip>
 
       <!-- [2026-09-01 P1 修复] 引擎 4 选 1 按钮组：auto / dagre / elkjs / compactBox -->
-      <el-button-group class="engine-controls">
+      <el-button-group v-show="!isTraditional" class="engine-controls">
         <el-tooltip
           v-for="opt in ENGINE_OPTIONS"
           :key="opt.value"
@@ -1809,7 +2181,19 @@ defineExpose({
       </span>
       <span class="stat-divider" v-if="partialTree">|</span>
       <span class="stat-item">
+        样式: <strong>{{ isTraditional ? '古谱' : '现代' }}</strong>
+      </span>
+      <span class="stat-divider" v-if="!isTraditional">|</span>
+      <span class="stat-item" v-if="!isTraditional">
         视图: <strong>{{ viewModeLabel }}</strong>
+      </span>
+      <span class="stat-divider" v-if="!isTraditional">|</span>
+      <span class="stat-item" v-if="!isTraditional">
+        密度: <strong>{{ genealogyStore.cardDensity === 'detailed' ? '详情' : '简洁' }}</strong>
+      </span>
+      <span class="stat-divider">|</span>
+      <span class="stat-item">
+        范围: <strong>{{ genealogyStore.viewType === 'focus' ? '亲属聚焦' : '全局世系' }}</strong>
       </span>
       <span class="stat-divider">|</span>
       <span class="stat-item">
@@ -1821,7 +2205,7 @@ defineExpose({
     </div>
 
     <!-- [渐进加载 2026-08-20] 逐批加载提示条：大族谱首屏只渲染前 N 人，可逐批追加直至加载完毕 -->
-    <div v-if="partialTree && !loading" class="partial-tree-banner">
+    <div v-if="partialTree && !loading && !isTraditional" class="partial-tree-banner">
       <div class="partial-tree-banner-text">
         <el-icon class="partial-tree-banner-icon"><Warning /></el-icon>
         <span>
@@ -1893,6 +2277,18 @@ defineExpose({
           >
             {{ perfTestLoading ? '生成中…' : '压测 1000 节点' }}
           </button>
+          <button
+            v-if="isDev"
+            class="perf-test-btn"
+            :disabled="perfTestLoading"
+            @click="runClassicSkewPerf"
+          >
+            {{ perfTestLoading ? '古谱压测中…' : '古谱畸形 1000' }}
+          </button>
+          <div v-if="isDev && classicSkewNote" class="perf-row">
+            <span class="perf-label">古谱帧率</span>
+            <span class="perf-value">{{ classicSkewNote }}</span>
+          </div>
           <button
             v-if="isDev"
             class="perf-test-btn perf-test-btn--elkjs"
@@ -2067,16 +2463,30 @@ defineExpose({
     <!-- Graph Container -->
     <div ref="container" class="genealogy-tree-canvas" v-show="!loading && !errorState"></div>
 
+    <div v-if="isTraditional && classicGenerations.length" class="classic-gen-rail">
+      <div
+        v-for="row in classicGenerations"
+        :key="row.gen"
+        class="classic-gen-label"
+        :style="{ top: row.top + 'px', fontSize: row.fontSize + 'px', fontFamily: classicFontFamily }"
+      >
+        <span v-for="(line, index) in row.lines" :key="index">{{ line }}</span>
+      </div>
+    </div>
+
     <!-- 侧栏编辑抽屉：选中节点后从右侧划出 -->
     <PersonEditDrawer
       :person-id="editDrawerOpen ? (genealogyStore.selectedNode?.id ?? null) : null"
       :person="genealogyStore.selectedNode"
+      :detail-epoch="genealogyStore.selectionNonce"
       :can-edit="true"
       @close="handleDrawerClose"
       @updated="handleDrawerUpdated"
       @navigate="handleDrawerNavigate"
       @create-marriage="handleDrawerCreateMarriage"
       @mutated="handleDrawerMutated"
+      @child-added="handleChildAdded"
+      @set-center="handleSetFocusCenter"
     />
 
     <!-- 图片预览：点击缩略图展开大图 -->
@@ -2095,6 +2505,48 @@ defineExpose({
   height: 100%;
   background: linear-gradient(135deg, #FAF8F5 0%, #F5F0E8 100%);
   overflow: hidden;
+}
+
+.genealogy-tree-container.is-traditional {
+  background: #F6F1E7;
+}
+
+.genealogy-tree-container.is-traditional .genealogy-tree-canvas {
+  background-color: #F6F1E7;
+  background-image: none;
+}
+
+.classic-gen-rail {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.classic-gen-rail::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 84px;
+  background: linear-gradient(90deg, #F6F1E7 78%, rgba(246, 241, 231, 0));
+}
+
+.classic-gen-label {
+  position: absolute;
+  left: 4px;
+  width: 72px;
+  transform: translateY(-50%);
+  text-align: center;
+  font-family: KaiTi, STKaiti, "Kaiti SC", KaiTi_GB2312, serif;
+  letter-spacing: 0.04em;
+  color: #3A3228;
+  line-height: 1.15;
+}
+
+.classic-gen-label span {
+  display: block;
 }
 
 /* [移动端 H5 2026-08-17] 触摸拖拽/双指缩放不被浏览器手势抢占 */
@@ -2129,7 +2581,7 @@ defineExpose({
 
 /* 折叠态：隐藏 divider 与次要按钮，只保留 toggle + 搜索 + 视图模式 + 缩放 + 添加 */
 .tree-toolbar.is-collapsed :deep(.el-divider),
-.tree-toolbar.is-collapsed .el-button-group:not(.zoom-controls):not(.view-mode-group),
+.tree-toolbar.is-collapsed .el-button-group:not(.zoom-controls):not(.view-mode-group):not(.view-scope-group):not(.density-group):not(.tree-style-group),
 .tree-toolbar.is-collapsed > .el-checkbox,
 .tree-toolbar.is-collapsed > .el-select {
   display: none !important;

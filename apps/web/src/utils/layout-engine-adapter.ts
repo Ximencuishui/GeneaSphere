@@ -184,10 +184,12 @@ function runCompactBoxFallback(
       .map((cid) => buildInput(cid))
       .filter((c): c is HierarchyData => c !== null);
 
+    const width = node.width > 0 ? node.width : config.nodeWidth;
+    const height = node.height > 0 ? node.height : config.nodeHeight;
     return {
       id: nodeId,
-      width: config.nodeWidth,
-      height: config.nodeHeight,
+      width,
+      height,
       hgap: nodeSep,
       vgap: rankSep,
       children: children.length > 0 ? children : undefined,
@@ -198,9 +200,15 @@ function runCompactBoxFallback(
     const input = buildInput(root.id);
     if (!input) continue;
     const laidOut = compactBox(input, {
-      direction: 'TB',
-      getWidth: () => config.nodeWidth,
-      getHeight: () => config.nodeHeight,
+      direction: config.layoutDirection === 'LR' ? 'LR' : 'TB',
+      getWidth: (d: any) => {
+        const w = d?.width ?? d?.data?.width;
+        return typeof w === 'number' && w > 0 ? w : config.nodeWidth;
+      },
+      getHeight: (d: any) => {
+        const h = d?.height ?? d?.data?.height;
+        return typeof h === 'number' && h > 0 ? h : config.nodeHeight;
+      },
       getHGap: () => nodeSep,
       getVGap: () => rankSep,
     });

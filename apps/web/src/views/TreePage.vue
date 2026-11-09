@@ -38,9 +38,14 @@
         - 点击某代际 → 在该代际 y 最小节点上调用 focusNode（与右下角滑块口径一致）
       -->
       <div
-        v-if="generationSlots.length > 0"
+        v-if="generationSlots.length > 0 && genealogyStore.treeStyle !== 'traditional'"
         class="tree-gen-rail"
-        :class="{ 'rail--hidden': showDetail, 'rail--absolute': hasViewportSnapshot }"
+        :class="{
+          'rail--hidden': showDetail,
+          'rail--absolute': hasViewportSnapshot,
+          'rail--lr': isHorizontalLayout,
+        }"
+        :style="isHorizontalLayout ? { top: lrRailTop + 'px' } : undefined"
       >
         <div class="rail__title">世代</div>
         <div class="rail__list">
@@ -53,13 +58,12 @@
               'rail__item--active': activeGen === g.gen,
               'rail__item--offscreen': !g.inViewport,
             }"
-            :style="g.screenY != null ? { top: g.screenY + 'px' } : undefined"
-            :title="`第 ${g.gen} 世 · ${g.count} 人`"
+            :style="generationRailStyle(g)"
+            :title="g.bei ? `第 ${g.gen} 世 · ${g.bei} · ${g.count} 人` : `第 ${g.gen} 世 · ${g.count} 人`"
             @click="focusGeneration(g.gen)"
           >
-            <span class="rail__num">{{ g.gen }}</span>
-            <span class="rail__sep" aria-hidden="true" />
-            <span class="rail__hint">世</span>
+            <span class="rail__gen">{{ g.gen }}世</span>
+            <span v-if="g.bei" class="rail__bei">{{ g.bei }}</span>
           </button>
         </div>
       </div>
@@ -86,6 +90,7 @@
       <!-- 模板里 `treeRef` 会被 Vue 自动 unwrap，访问 ref.value 已 unwrap 的 undefined.value 会抛错；
            因此这里直接用 `treeRef?.xxx`，optional chaining 兑底 undefined。 -->
       <TreeMinimap
+        v-if="genealogyStore.treeStyle !== 'traditional'"
         ref="minimapRef"
         :position="minimapPos"
         :size="minimapSizeRef"
@@ -95,6 +100,7 @@
 
       <!-- 代际滑块（M3）：位于右下角，hover 浮出，详情面板打开时互斥隐藏 -->
       <TreeGenerationSlider
+        v-if="genealogyStore.treeStyle !== 'traditional'"
         :visibility="sliderVis"
         :total-generations="treeRef?.getTotalGenerations?.() ?? 1"
         :get-snapshot="() => treeRef?.getMinimapSnapshot?.() ?? null"
@@ -246,15 +252,16 @@
 
     <!-- 人物编辑抽屉：编辑信息/添加亲属/删除人员 -->
     <PersonEditDrawer
-      v-if="editTarget"
-      :person-id="editTarget.id"
-      :person="editTarget.node"
+      :person-id="editTarget?.id || null"
+      :person="editTarget?.node ?? null"
       :can-edit="canEdit"
+      start-in-edit
       @close="closeEditDrawer"
       @updated="onPersonUpdated"
       @navigate="onPersonNavigate"
       @create-marriage="onCreateMarriage"
       @mutated="onPersonMutated"
+      @child-added="onChildAdded"
     />
 
     <!-- 添加亲属对话框 -->
@@ -340,7 +347,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -373,6 +380,7 @@ const GenealogyTree = defineAsyncComponent(
   () => import('@/components/GenealogyTree.vue'),
 );
 import { useGenealogyStore } from '@/stores/genealogy';
+import { classicGenerationBei, majorityGenerationWord } from '@/utils/traditional-column';
 import { useTreeLayoutOrchestrator } from '@/composables/useTreeLayoutOrchestrator';
 import { mediaApi } from '@/api/media';
 import { treeApi } from '@/api/tree';
@@ -488,17 +496,54 @@ const RAIL_ITEM_HEIGHT = 40;
  */
 interface GenerationEntry {
   gen: number;
+  /** 字辈，例如「熹辈」。这一代没有字辈时为空。 */
+  bei: string;
   count: number;
   /** 该代际首个节点 id（DFS 前序；用于点击聚焦的退化方案） */
   firstNodeId: string | null;
   /**
-   * 相对画布容器顶部的像素 y。由 generationSlots 在 snapshot 基础上算出。
-   * - 值为 number 时：动态定位该 item 的 top
-   * - 值为 null 时：snapshot 尚未就绪，template 退化为默认间距定位
+   * 纵向（TB）：相对画布容器顶部的像素 y，写入 item 的 top。
+   * 横向（LR）：不用，保持 null。
    */
   screenY: number | null;
-  /** 屏幕 y 是否在画布可视区（用于淡出越界世代） */
+  /**
+   * 横向（LR）：相对画布左缘的像素 x，写入 item 的 left。
+   * 纵向（TB）：不用，保持 null。
+   */
+  screenX: number | null;
+  /** 屏幕坐标是否在画布可视区（用于淡出越界世代） */
   inViewport: boolean;
+}
+
+/**
+ * 当前是否为 LR 横向布局。
+ * 读 GenealogyTree 暴露的 layoutDirection；切换方向或画布重绘后重算。
+ */
+const isHorizontalLayout = computed(() => {
+  const tree = treeRef.value as any;
+  const version = tree?.graphChangeVersion?.value ?? 0;
+  void version;
+  const dir = tree?.layoutDirection;
+  const value = dir && typeof dir === 'object' && 'value' in dir ? dir.value : dir;
+  return value === 'LR';
+});
+
+function generationRailStyle(g: GenerationEntry): Record<string, string> | undefined {
+  if (isHorizontalLayout.value) {
+    return g.screenX != null ? { left: `${g.screenX}px` } : undefined;
+  }
+  return g.screenY != null ? { top: `${g.screenY}px` } : undefined;
+}
+
+/** LR 标尺贴在工具栏下沿，避免被两行工具栏盖住。 */
+const lrRailTop = ref(156);
+
+function syncLrRailTop() {
+  const toolbar = document.querySelector('.genealogy-tree-container .tree-toolbar');
+  const container = document.querySelector('.tree-canvas-container');
+  if (!(toolbar instanceof HTMLElement) || !(container instanceof HTMLElement)) return;
+  const top = toolbar.getBoundingClientRect().bottom - container.getBoundingClientRect().top + 8;
+  lrRailTop.value = Math.max(108, Math.round(top));
 }
 
 /**
@@ -508,16 +553,19 @@ interface GenerationEntry {
 function computeFallbackIndex(): GenerationEntry[] {
   const tree = genealogyStore.treeData as any;
   if (!tree) return [];
-  const buckets = new Map<number, { count: number; firstNodeId: string | null }>();
+  const buckets = new Map<number, { count: number; firstNodeId: string | null; words: Map<string, number> }>();
   const visit = (node: any, depth: number) => {
     if (!node) return;
     const gen = depth + 1; // 根 = 第 1 世
     const cur = buckets.get(gen);
     if (!cur) {
-      buckets.set(gen, { count: 1, firstNodeId: String(node.id) });
+      buckets.set(gen, { count: 1, firstNodeId: String(node.id), words: new Map() });
     } else {
       cur.count++;
     }
+    const word = String(node.generation_word || '').trim();
+    const bucket = buckets.get(gen)!;
+    if (word) bucket.words.set(word, (bucket.words.get(word) || 0) + 1);
     if (Array.isArray(node.children)) {
       for (const c of node.children) visit(c, depth + 1);
     }
@@ -529,9 +577,11 @@ function computeFallbackIndex(): GenerationEntry[] {
     const b = buckets.get(g);
     arr.push({
       gen: g,
+      bei: classicGenerationBei(majorityGenerationWord(b?.words ?? new Map())),
       count: b?.count ?? 0,
       firstNodeId: b?.firstNodeId ?? null,
       screenY: null,
+      screenX: null,
       inViewport: true,
     });
   }
@@ -565,26 +615,32 @@ const generationSlots = computed<GenerationEntry[]>(() => {
     return computeFallbackIndex();
   }
 
-  const { cy, zoom, vh } = snap.viewport;
+  const horizontal = isHorizontalLayout.value;
+  const { cx, cy, zoom, vw, vh } = snap.viewport;
   // 防御性：zoom 为 0 时按 1 处理（极端边缘情况）
   const safeZoom = zoom && Number.isFinite(zoom) ? zoom : 1;
+  const viewportSpan = horizontal ? vw : vh;
 
-  // 按 gen 分组，聚合该代际节点的画布 y（取最小值 → 与 focusGeneration 代表节点同源）
-  const buckets = new Map<number, { count: number; minCanvasY: number; firstNodeId: string | null }>();
-  for (const n of snap.nodes as Array<{ id: string; y: number; gen?: number }>) {
+  // TB 按画布 y 取每代最上节点；LR 按画布 x 取每代最左节点。
+  const buckets = new Map<number, { count: number; minAlong: number; firstNodeId: string | null; words: Map<string, number> }>();
+  for (const n of snap.nodes as Array<{ id: string; x: number; y: number; gen?: number; word?: string }>) {
     // 配偶节点 generation=-1 → 跳过，不参与浮窗定位
     const gen = typeof n.gen === 'number' && n.gen >= 0 ? n.gen + 1 : null;
     if (gen == null) continue;
+    const along = horizontal ? n.x : n.y;
     const cur = buckets.get(gen);
     if (!cur) {
-      buckets.set(gen, { count: 1, minCanvasY: n.y, firstNodeId: n.id });
+      buckets.set(gen, { count: 1, minAlong: along, firstNodeId: n.id, words: new Map() });
     } else {
       cur.count++;
-      if (n.y < cur.minCanvasY) {
-        cur.minCanvasY = n.y;
+      if (along < cur.minAlong) {
+        cur.minAlong = along;
         cur.firstNodeId = n.id;
       }
     }
+    const word = String(n.word || '').trim();
+    const bucket = buckets.get(gen)!;
+    if (word) bucket.words.set(word, (bucket.words.get(word) || 0) + 1);
   }
 
   if (buckets.size === 0) return computeFallbackIndex();
@@ -594,18 +650,28 @@ const generationSlots = computed<GenerationEntry[]>(() => {
   for (let g = 1; g <= maxGen; g++) {
     const b = buckets.get(g);
     if (!b) {
-      // 缺失代际：仍占位（与旧行为一致），但 screenY = null → flex 流式布局
-      arr.push({ gen: g, count: 0, firstNodeId: null, screenY: null, inViewport: true });
+      arr.push({
+        gen: g,
+        bei: '',
+        count: 0,
+        firstNodeId: null,
+        screenY: null,
+        screenX: null,
+        inViewport: true,
+      });
       continue;
     }
-    // G6 v5 视口变换：screenY = (canvasY - cy) * zoom + vh/2
-    const screenY = (b.minCanvasY - cy) * safeZoom + vh / 2;
-    const inViewport = screenY > -RAIL_ITEM_HEIGHT && screenY < vh + RAIL_ITEM_HEIGHT;
+    // G6 v5：TB 用 y→screenY，LR 用 x→screenX
+    const origin = horizontal ? cx : cy;
+    const screen = (b.minAlong - origin) * safeZoom + viewportSpan / 2;
+    const inViewport = screen > -RAIL_ITEM_HEIGHT && screen < viewportSpan + RAIL_ITEM_HEIGHT;
     arr.push({
       gen: g,
+      bei: classicGenerationBei(majorityGenerationWord(b.words)),
       count: b.count,
       firstNodeId: b.firstNodeId,
-      screenY,
+      screenY: horizontal ? null : screen,
+      screenX: horizontal ? screen : null,
       inViewport,
     });
   }
@@ -648,15 +714,16 @@ function focusGeneration(gen: number) {
   if (!targetId) {
     const snap = typeof tree.getMinimapSnapshot === 'function' ? tree.getMinimapSnapshot() : null;
     if (snap && Array.isArray(snap.nodes) && snap.nodes.length) {
-      const ys = snap.nodes.map((n: any) => n.y).sort((a: number, b: number) => a - b);
-      const minY = ys[0];
-      const maxY = ys[ys.length - 1];
+      const axis = isHorizontalLayout.value ? 'x' : 'y';
+      const coords = snap.nodes.map((n: any) => n[axis]).sort((a: number, b: number) => a - b);
+      const minC = coords[0];
+      const maxC = coords[coords.length - 1];
       const totalGen = Math.max(1, generationSlots.value.length);
-      const range = Math.max(1, maxY - minY);
-      const targetY = minY + (gen - 0.5) * (range / totalGen);
+      const range = Math.max(1, maxC - minC);
+      const target = minC + (gen - 0.5) * (range / totalGen);
       let bestDist = Infinity;
       for (const n of snap.nodes) {
-        const d = Math.abs(n.y - targetY);
+        const d = Math.abs(n[axis] - target);
         if (d < bestDist) {
           bestDist = d;
           targetId = n.id;
@@ -722,7 +789,7 @@ watch(
   () => genealogyStore.selectedNode,
   (node) => {
     if (node) {
-      showDetail.value = true;
+      // 点卡片只打开 GenealogyTree 里的详情抽屉，不再把旧的侧栏详情面板一起拉出来。
       const personId = typeof node.id === 'string' ? parseInt(node.id) : node.id;
       fetchRelatedMedia(personId);
     } else {
@@ -742,8 +809,13 @@ watch(
   () => (treeRef.value as any)?.graphChangeVersion?.value,
   () => {
     minimapRef.value?.refreshSnapshot?.();
+    if (isHorizontalLayout.value) nextTick(() => syncLrRailTop());
   },
 );
+
+watch(isHorizontalLayout, (horizontal) => {
+  if (horizontal) nextTick(() => syncLrRailTop());
+});
 
 function closeDetail() {
   genealogyStore.selectNode(null);
@@ -941,6 +1013,17 @@ function onPersonMutated() {
   fetchRelatedMedia(Number(genealogyStore.selectedNode?.id || 0));
 }
 
+function onChildAdded(child: {
+  id: string;
+  full_name: string;
+  gender: 'male' | 'female';
+  child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER' | 'ADOPTED_OUT';
+}) {
+  const parentId = editTarget.value?.id;
+  if (!parentId || !child?.id) return;
+  treeRef.value?.appendChild?.(parentId, child);
+}
+
 function findNodeById(root: any, id: string): any | null {
   if (!root) return null;
   if (String(root.id) === id) return root;
@@ -1133,7 +1216,11 @@ async function deletePerson() {
 }
 
 onMounted(() => {
-  // Initialize
+  window.addEventListener('resize', syncLrRailTop);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', syncLrRailTop);
 });
 </script>
 
@@ -1286,10 +1373,10 @@ onMounted(() => {
   width: 100%;
   padding: 6px 0;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   cursor: pointer;
   font-family: inherit;
   color: #5D4037;
@@ -1342,32 +1429,91 @@ onMounted(() => {
   filter: grayscale(0.4);
 }
 
-.rail__num {
-  font-size: 16px;
+.rail__gen {
+  font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #5D4037;
-  line-height: 1;
+  line-height: 1.15;
 }
-.rail__item--active .rail__num {
-  color: #C9A96E;
-}
-
-.rail__sep {
-  width: 1px;
-  height: 12px;
-  background: rgba(201, 169, 110, 0.35);
-}
-
-.rail__hint {
+.rail__bei {
   font-size: 11px;
   color: #8D6E63;
-  letter-spacing: 1px;
-  line-height: 1;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
 }
-.rail__item--active .rail__hint {
+.rail__item--active .rail__gen,
+.rail__item--active .rail__bei {
   color: #C9A96E;
-  font-weight: 600;
+}
+
+
+/* LR：世代沿 X 展开，标尺改到工具栏下方的横向条，按屏幕 x 对齐各代 */
+.tree-gen-rail.rail--lr {
+  top: 156px;
+  left: 0;
+  right: 0;
+  bottom: auto;
+  width: auto;
+  height: 52px;
+  flex-direction: row;
+  align-items: stretch;
+  border-radius: 0 0 10px 10px;
+}
+.tree-gen-rail.rail--lr .rail__title {
+  padding: 0 12px;
+  letter-spacing: 2px;
+  border-bottom: none;
+  border-right: 1px solid rgba(201, 169, 110, 0.18);
+  background: rgba(255, 252, 248, 0.96);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  z-index: 1;
+}
+.tree-gen-rail.rail--lr .rail__list {
+  flex-direction: row;
+  overflow: hidden;
+  padding: 0;
+}
+.tree-gen-rail.rail--lr .rail__item {
+  width: auto;
+  flex-shrink: 0;
+  padding: 4px 8px;
+}
+.tree-gen-rail.rail--lr.rail--absolute .rail__list {
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 56px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 56px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+}
+.tree-gen-rail.rail--lr.rail--absolute .rail__item {
+  top: 50%;
+  width: auto;
+  padding: 4px 8px;
+  transform: translate(-50%, -50%);
+}
+.tree-gen-rail.rail--lr .rail__item--active::before {
+  left: 6px;
+  right: 6px;
+  top: auto;
+  bottom: 2px;
+  width: auto;
+  height: 2px;
 }
 
 /* 异步加载 GenealogyTree 期间的紧凑占位：避免 vendor-antv 慢加载时整页白屏 */
@@ -1807,13 +1953,13 @@ onMounted(() => {
   }
   /* [M4] 进一步压缩 */
   .tree-gen-rail {
-    width: 52px;
+    width: 64px;
     top: 56px;
   }
-  .rail__num {
-    font-size: 14px;
+  .rail__gen {
+    font-size: 13px;
   }
-  .rail__hint {
+  .rail__bei {
     font-size: 10px;
   }
   /* [世代浮窗跟随画布 2026-08-20] 1024px 断点 .tree-gen-rail top 改为 56，
@@ -1893,7 +2039,7 @@ onMounted(() => {
     left: 12px;
     right: 12px;
     flex-direction: row;
-    height: 36px;
+    height: 48px;
   }
   /* [世代浮窗跟随画布 2026-08-20] 移动端：横向 mini 条不需要 absolute 定位，
    * 重置 .rail__list 为 static 并去掉负偏移，恢复正常 flex 流式布局 */
@@ -1908,6 +2054,30 @@ onMounted(() => {
   }
   .tree-gen-rail.rail--absolute .rail__item {
     position: static;
+    width: auto;
+    transform: none;
+  }
+  /* LR 在窄屏沿用同一条横向 mini 轨，不再按画布 x 绝对定位 */
+  .tree-gen-rail.rail--lr {
+    top: 56px;
+    left: 12px;
+    right: 12px;
+    height: 48px;
+    border-radius: 10px;
+  }
+  .tree-gen-rail.rail--lr.rail--absolute .rail__list {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    overflow-x: auto;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .tree-gen-rail.rail--lr.rail--absolute .rail__item {
+    position: static;
+    top: auto;
     width: auto;
     transform: none;
   }
@@ -1926,9 +2096,9 @@ onMounted(() => {
     gap: 0;
   }
   .rail__item {
-    flex-direction: row;
-    padding: 4px 8px;
-    gap: 4px;
+    flex-direction: column;
+    padding: 2px 8px;
+    gap: 0;
     width: auto;
   }
   .rail__item--active::before {
@@ -1939,15 +2109,11 @@ onMounted(() => {
     width: auto;
     height: 2px;
   }
-  .rail__num {
-    font-size: 13px;
+  .rail__gen {
+    font-size: 12px;
   }
-  .rail__hint {
+  .rail__bei {
     font-size: 10px;
-  }
-  .rail__sep {
-    width: 1px;
-    height: 10px;
   }
 }
 
@@ -1972,10 +2138,10 @@ onMounted(() => {
   .rail__title {
     font-size: 11px;
   }
-  .rail__num {
+  .rail__gen {
     font-size: 12px;
   }
-  .rail__hint {
+  .rail__bei {
     font-size: 9px;
   }
 }

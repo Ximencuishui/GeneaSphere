@@ -19,6 +19,8 @@
 import type { GenealogyNode } from '@/types';
 import { getWifePaletteColor } from './spouse-palette';
 import { deriveIdentityLabel } from '@/composables/useGenealogyTransform';
+import { formatLifeYears, presentSpouseName, resolveCardOuterSize, spouseSurnameHint } from '@/utils/genealogy-card';
+import { classicColumnWidth } from '@/utils/traditional-column';
 
 /** 配偶节点（与 G6 节点结构兼容的最小子集） */
 export interface PendingSpouseNode {
@@ -40,6 +42,54 @@ export interface PendingSpouseEdge {
 export interface PendingSpousesResult {
   nodes: PendingSpouseNode[];
   edges: PendingSpouseEdge[];
+}
+
+function yearOf(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value == null || value === '') return undefined;
+  const year = new Date(String(value)).getFullYear();
+  return Number.isFinite(year) ? year : undefined;
+}
+
+/**
+ * 配偶卡片和男丁卡片同一套字段。
+ * 全名显示「陈玉」加生卒；只有姓氏时显示「陈氏」，气泡用 spouse_hint。
+ */
+function spouseCardPayload(
+  spouse: any,
+  identity: string,
+  palette?: string,
+): { label: string; data: Record<string, any> } {
+  const rawName = spouse?.full_name || spouse?.name || '';
+  const presented = presentSpouseName(rawName);
+  const place = spouse?.native_place || spouse?.birth_place || '';
+  const birthYear = yearOf(spouse?.birth_year ?? spouse?.birth_date);
+  const deathYear = yearOf(spouse?.death_year ?? spouse?.death_date);
+  const uxorilocal = spouse?.gender === 'male' && spouse?.union_type === 'uxorilocal';
+  return {
+    label: presented.text,
+    data: {
+      generation: -1,
+      gender: spouse?.gender,
+      is_living: spouse?.is_living ?? !deathYear,
+      full_name: rawName,
+      name: rawName,
+      birth_year: birthYear,
+      death_year: deathYear,
+      has_photo: false,
+      is_external_spouse: true,
+      spouse_order: spouse?.marriage_order,
+      identity_label: identity,
+      surname_only: presented.surnameOnly,
+      spouse_hint: presented.surnameOnly ? spouseSurnameHint(rawName, place) : '',
+      native_place: spouse?.native_place || null,
+      birth_place: spouse?.birth_place || null,
+      union_type: spouse?.union_type || null,
+      uxorilocal: uxorilocal || undefined,
+      original: null,
+      ...(palette ? { palette } : {}),
+    },
+  };
 }
 
 /**
@@ -86,24 +136,13 @@ export function collectPendingSpouses(
           { isSpouse: true, spouseOrder: s.marriage_order },
         );
 
+        const card = spouseCardPayload(s, spouseIdentity, wifePalette);
         if (!existingNodeMap.has(sid)) {
           // 外部配偶：用 sid 作为节点 id
           const newNode: PendingSpouseNode = {
             id: sid,
-            label: s.name,
-            data: {
-              // generation: -1 → TreePage 浮窗忽略（不参与按 gen 聚合）
-              generation: -1,
-              gender: s.gender,
-              is_living: true,
-              has_photo: false,
-              is_external_spouse: true,
-              spouse_order: s.marriage_order,
-              identity_label: spouseIdentity,
-              original: null,
-              ...(wifePalette ? { palette: wifePalette } : {}),
-            },
-            style: { opacity: 0.45 },
+            label: card.label,
+            data: card.data,
           };
           nodes.push(newNode);
           existingNodeMap.set(sid, newNode);
@@ -112,21 +151,12 @@ export function collectPendingSpouses(
           spouseNodeId = `${sid}-spouse-${edges.length}`;
           const newNode: PendingSpouseNode = {
             id: spouseNodeId,
-            label: s.name,
+            label: card.label,
             data: {
-              generation: -1,
-              gender: s.gender,
-              is_living: true,
-              has_photo: false,
-              is_external_spouse: true,
+              ...card.data,
               is_duplicate_spouse: true,
-              spouse_order: s.marriage_order,
-              identity_label: spouseIdentity,
               originalId: sid,
-              original: null,
-              ...(wifePalette ? { palette: wifePalette } : {}),
             },
-            style: { opacity: 0.45 },
           };
           nodes.push(newNode);
           existingNodeMap.set(spouseNodeId, newNode);
@@ -268,6 +298,10 @@ export interface BuildLayoutInputOptions {
   generationMap: Map<string, number>;
   /** 转换后的 GenealogyNode 树，含 data.birth_order / data.mother_id */
   treeData: any;
+  /** 古谱按姓名字数加宽单列，不用现代卡片的生卒年加宽。 */
+  traditional?: boolean;
+  /** 肖像等固定外框：节点宽高严格等于 config，不再按生卒年撑宽。 */
+  lockOuterSize?: boolean;
 }
 
 /**
@@ -296,6 +330,12 @@ export function buildLayoutInputFromGraphData(
     // [P0-3 2026-09-03] 显式窄化为字面量联合，避免宽 string 与 LayoutNode 不兼容。
     const rawGender = n.data?.gender;
     const gender: 'male' | 'female' = rawGender === 'female' ? 'female' : 'male';
+    const years = formatLifeYears(n.data?.birth_year, n.data?.death_year, n.data?.is_living);
+    const size = opts.traditional
+      ? { width: classicColumnWidth(String(n.label || ''), config.nodeWidth), height: config.nodeHeight }
+      : opts.lockOuterSize
+        ? { width: config.nodeWidth, height: config.nodeHeight }
+        : resolveCardOuterSize(config, years);
     return {
       id: String(n.id),
       label: n.label || '',
@@ -304,8 +344,8 @@ export function buildLayoutInputFromGraphData(
       isLiving: n.data?.is_living || false,
       generation: generationMap.get(String(n.id)) ?? 0,
       data: n.data,
-      width: config.nodeWidth,
-      height: config.nodeHeight,
+      width: size.width,
+      height: size.height,
     };
   });
 
@@ -395,6 +435,14 @@ export function buildLayoutInputFromGraphData(
     // [P0-3 2026-09-03] 显式窄化 gender，与 LayoutNode 字面量联合对齐。
     const spouseGender: 'male' | 'female' =
       node.data?.gender === 'female' ? 'female' : 'male';
+    const spouseYears = formatLifeYears(
+      node.data?.birth_year,
+      node.data?.death_year,
+      node.data?.is_living,
+    );
+    const spouseSize = opts.lockOuterSize
+      ? { width: config.nodeWidth, height: config.nodeHeight }
+      : resolveCardOuterSize(config, spouseYears);
     layoutNodes.push({
       id: String(node.id),
       label: node.label || '',
@@ -403,8 +451,8 @@ export function buildLayoutInputFromGraphData(
       isLiving: node.data?.is_living || false,
       generation: -1,
       data: node.data,
-      width: config.nodeWidth,
-      height: config.nodeHeight,
+      width: spouseSize.width,
+      height: spouseSize.height,
     });
   }
 
@@ -424,23 +472,28 @@ export function applySpouseLayoutResultToGraphData(
   graphData: { nodes?: any[]; edges?: any[] },
   pendingSpouseNodes: PendingSpouseNode[],
   pendingSpouseEdges: PendingSpouseEdge[],
-  layoutResult: { nodes: Array<{ id: string; x: number; y: number }> },
+  layoutResult: { nodes: Array<{ id: string; x: number; y: number; width?: number; height?: number }> },
 ): {
   orthPathCount: number;
   spouseEdgeCount: number;
   missingPathCount: number;
 } {
-  // 节点位置映射
-  const nodePositionMap = new Map<string, { x: number; y: number }>();
+  // 节点位置映射。width/height 与布局引擎入参一致，写回 G6 style.size。
+  const nodePositionMap = new Map<string, { x: number; y: number; width?: number; height?: number }>();
   for (const pos of layoutResult.nodes) {
-    nodePositionMap.set(pos.id, { x: pos.x, y: pos.y });
+    nodePositionMap.set(pos.id, { x: pos.x, y: pos.y, width: pos.width, height: pos.height });
   }
 
   // 把配偶节点位置写入 graphData.nodes
   for (const node of pendingSpouseNodes) {
     const pos = nodePositionMap.get(String(node.id));
     if (pos) {
-      node.style = { ...node.style, x: pos.x, y: pos.y };
+      node.style = {
+        ...node.style,
+        x: pos.x,
+        y: pos.y,
+        ...(pos.width && pos.height ? { size: [pos.width, pos.height] } : {}),
+      };
     }
     if (!graphData.nodes) graphData.nodes = [];
     graphData.nodes.push(node);
@@ -495,7 +548,7 @@ export function applyOrthogonalPathsToGraphData(
   for (const edge of graphData.edges || []) {
     const layoutEdge = layoutEdgeByPair.get(`${edge.source}-${edge.target}`);
     if (layoutEdge?.path) {
-      edge.style = { ...edge.style, orthPath: layoutEdge.path };
+      edge.style = { ...edge.style, orthPath: layoutEdge.path, zIndex: 0 };
       orthPathCount++;
     } else if (edge.data?.kind !== 'spouse') {
       missingPathCount++;

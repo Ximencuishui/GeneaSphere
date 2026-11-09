@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, InternalServerErrorException, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma, PrismaService, Person, Gender } from '@geneasphere/db';
+import { ChildRelationType } from '@prisma/client';
 import { serializeBigInt } from '../common/bigint-serializer';
 import { PedigreeService } from '../pedigree/pedigree.service';
 
@@ -17,6 +18,19 @@ export interface TreeNode {
   avatar_url?: string;
   thumbnail_url?: string;
   has_photo: boolean;
+  birth_place?: string | null;
+  migration_branch?: string | null;
+  /** 迁入地，来自 migration_events.to_location */
+  migration_to?: string | null;
+  native_place?: string | null;
+  generation_word?: string | null;
+  birth_order?: number;
+  child_type?: string;
+  premature?: boolean;
+  /** 本支第一个带房派 / 迁徙记录的人 */
+  is_founding_ancestor?: boolean;
+  /** 男性且婚姻为入赘 */
+  uxorilocal?: boolean;
   // 是否属于主传承线路（由 getClanFullTree 根据 mainLineage 回填）
   is_main_lineage?: boolean;
   // [树谱增强 2026-08-17] 与 children[] 一一对应（同下标）的子女边元数据：
@@ -29,7 +43,7 @@ export interface TreeNode {
  * 子女边元数据（从 FamilyChild + FamilyUnit 推导，决策清单 §E2）
  * - child_id    : 对应 children[] 里的节点 id
  * - birth_order : 排行（FamilyChild.birth_order）
- * - child_type  : BIOLOGICAL(亲生) | ADOPTED(收养) | STEP(继子女) | FOSTER(寄养/过继)
+ * - child_type  : BIOLOGICAL(亲生) | ADOPTED(收养) | STEP(继子女) | FOSTER(寄养/过继) | ADOPTED_OUT(出继)
  * - family_id   : 所属 FamilyUnit id
  * - father_id / mother_id : 该家庭中的夫/妻 id（子女从哪个父/母分支）
  */
@@ -74,6 +88,47 @@ export interface SpouseInfo {
   is_current: boolean;
   end_reason?: string | null;
   note?: string | null;
+  union_type?: string | null;
+  full_name?: string;
+  birth_date?: Date | string | null;
+  death_date?: Date | string | null;
+  is_living?: boolean;
+  birth_place?: string | null;
+  native_place?: string | null;
+}
+
+const BIO_TEXT_FIELDS = [
+  'courtesy_name', 'native_place', 'burial_place', 'achievements', 'anecdotes',
+  'biography', 'marital_notes', 'adoption_note',
+  'taboo_name', 'art_name', 'posthumous_name', 'infant_name', 'alias_name',
+  'former_name', 'nickname', 'ethnicity', 'education', 'occupation', 'job_title',
+  'alma_mater', 'employer', 'lunar_birth', 'lunar_death', 'religion', 'blood_type',
+  'epitaph', 'source_note',
+] as const;
+
+const CHILD_TYPES = new Set(['BIOLOGICAL', 'ADOPTED', 'STEP', 'FOSTER', 'ADOPTED_OUT']);
+const UNION_TYPES = new Set(['normal', 'concubine', 'uxorilocal']);
+
+function toDateOrNull(value: Date | string | null): Date | null {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) return value;
+  const text = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function blankToNull(value: unknown): string | null {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function ageAtDeath(birth?: Date | null, death?: Date | null): number | null {
+  if (!birth || !death) return null;
+  let age = death.getFullYear() - birth.getFullYear();
+  const month = death.getMonth() - birth.getMonth();
+  if (month < 0 || (month === 0 && death.getDate() < birth.getDate())) age -= 1;
+  return age >= 0 ? age : null;
 }
 
 /**
@@ -87,6 +142,14 @@ export interface SpouseEdge {
   to: string;
   order: number;
   is_current: boolean;
+}
+
+/** 聚焦树：上 up 代父系祖先 + 本人 + 下 down 代子孙，配偶挂在各自的 spouses 上。 */
+export interface FocusTreeResponse {
+  root: TreeNode;
+  centerId: string;
+  up: number;
+  down: number;
 }
 
 export interface ClanTreeResponse {
@@ -152,6 +215,7 @@ export class TreeService {
       birth_date?: Date;
       death_date?: Date;
       is_living?: boolean;
+      child_type?: ChildRelationType;
     },
     parent_id?: bigint
   ): Promise<Person> {
@@ -172,6 +236,7 @@ export class TreeService {
           clan_id: data.clan_id,
           child_id: person.id,
           parent_ids: [parent_id],
+          child_type: data.child_type,
         });
       } else {
         // 顶层祖先：仅写 self-record
@@ -332,8 +397,8 @@ export class TreeService {
         ],
       },
       include: {
-        husband: { select: { id: true, full_name: true, gender: true } },
-        wife: { select: { id: true, full_name: true, gender: true } },
+        husband: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
+        wife: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
       },
       // orderBy: [{ is_current: 'desc' }, { marriage_order: 'asc' }],
       // 上面是新增字段，client 未更新前用 as any 绕过
@@ -346,30 +411,8 @@ export class TreeService {
         const hId = fam.husband_id.toString();
         const wId = fam.wife_id.toString();
         // husband → wife
-        const wifeInfo: SpouseInfo = {
-          id: wId,
-          name: fam.wife.full_name,
-          gender: fam.wife.gender,
-          family_id: fam.id.toString(),
-          marriage_date: fam.marriage_date ?? null,
-          end_date: fam.end_date ?? null,
-          marriage_order: fam.marriage_order ?? 1,
-          is_current: fam.is_current ?? true,
-          end_reason: fam.end_reason ?? null,
-          note: fam.note ?? null,
-        };
-        const husbandInfo: SpouseInfo = {
-          id: hId,
-          name: fam.husband.full_name,
-          gender: fam.husband.gender,
-          family_id: fam.id.toString(),
-          marriage_date: fam.marriage_date ?? null,
-          end_date: fam.end_date ?? null,
-          marriage_order: fam.marriage_order ?? 1,
-          is_current: fam.is_current ?? true,
-          end_reason: fam.end_reason ?? null,
-          note: fam.note ?? null,
-        };
+        const wifeInfo = this.toSpouseInfo(fam.wife, fam);
+        const husbandInfo = this.toSpouseInfo(fam.husband, fam);
         if (!spouseMap.has(hId)) spouseMap.set(hId, []);
         if (!spouseMap.has(wId)) spouseMap.set(wId, []);
         spouseMap.get(hId)!.push(wifeInfo);
@@ -381,7 +424,307 @@ export class TreeService {
       node.spouses = spouseMap.get(node.id) || [];
     }
 
+    const clanId = ancestries[0]?.descendant?.clan_id;
+    if (clanId) await this.stampCardFacts(rootNode, clanId);
     return rootNode;
+  }
+
+  /**
+   * 以某人为中心的聚焦树。
+   * 向上只走父亲（family_children.husband，闭包表男性 depth=1 兜底），最多 up 代。
+   * 向下只收这个人的子孙，最多 down 代。每一代的配偶写在 spouses，不进入 children。
+   * 返回树的根是窗口里最上面的祖先；没有祖先时根就是本人。
+   */
+  async getFocusTree(personId: bigint, up: number, down: number): Promise<FocusTreeResponse> {
+    const center = await this.prisma.person.findFirst({
+      where: { id: personId, deleted_at: null },
+      select: { id: true, clan_id: true },
+    });
+    if (!center) {
+      throw new NotFoundException(`Person with id ${personId} not found`);
+    }
+
+    const centerId = center.id.toString();
+    const chain = await this.collectPaternalChain(center.id, up);
+    const descendantIds = await this.collectDescendantIds(center.id, down);
+    const bloodIds = [...chain, ...descendantIds];
+    const bloodBig = bloodIds.map((id) => BigInt(id));
+
+    const persons = await this.prisma.person.findMany({
+      where: { id: { in: bloodBig }, deleted_at: null },
+      select: {
+        id: true,
+        full_name: true,
+        gender: true,
+        birth_date: true,
+        death_date: true,
+        is_living: true,
+        avatar_url: true,
+        thumbnail_url: true,
+        birth_place: true,
+        migration_branch: true,
+      },
+    });
+    const avatarMap = await this.batchFindPersonAvatars(persons.map((person) => person.id));
+    const nodeMap = new Map<string, TreeNode>();
+    for (const person of persons) {
+      const id = person.id.toString();
+      nodeMap.set(id, this.toTreeNode(person, this.mergeAvatar(person, avatarMap.get(id))));
+    }
+
+    const childIds = new Map<string, string[]>();
+    const addChild = (parentId: string, childId: string) => {
+      if (!nodeMap.has(parentId) || !nodeMap.has(childId) || parentId === childId) return;
+      const list = childIds.get(parentId) ?? [];
+      if (!list.includes(childId)) list.push(childId);
+      childIds.set(parentId, list);
+    };
+    for (let i = 0; i < chain.length - 1; i++) addChild(chain[i], chain[i + 1]);
+    const childrenByFather = await this.loadChildrenByFather(
+      [center.id, ...descendantIds.map((id) => BigInt(id))],
+    );
+    const downward = new Set<string>([centerId, ...descendantIds]);
+    for (const [fatherId, kids] of childrenByFather) {
+      if (!downward.has(fatherId)) continue;
+      for (const kid of kids) {
+        if (downward.has(kid) && kid !== centerId) addChild(fatherId, kid);
+      }
+    }
+    const linked = new Set<string>([...childIds.values()].flat());
+    const unlinked = descendantIds.filter((id) => !linked.has(id));
+    if (unlinked.length > 0) {
+      const fathers = await this.fatherMapFor(unlinked.map((id) => BigInt(id)));
+      for (const id of unlinked) {
+        const father = fathers.get(id);
+        if (father && downward.has(father)) addChild(father, id);
+      }
+    }
+
+    const linkedChildIds: string[] = [];
+    for (const ids of childIds.values()) linkedChildIds.push(...ids);
+    const childLinkMap = await this.buildChildLinksMap(
+      center.clan_id,
+      [...new Set(linkedChildIds)].map((id) => BigInt(id)),
+    );
+    for (const [parentId, ids] of childIds) {
+      const parent = nodeMap.get(parentId);
+      if (!parent) continue;
+      const ordered = this.orderChildren(ids, childLinkMap);
+      parent.children = ordered
+        .map((id) => nodeMap.get(id))
+        .filter((node): node is TreeNode => !!node);
+      parent.child_links = this.buildNodeChildLinks(parentId, ordered, childLinkMap);
+    }
+
+    const spouseMap = await this.loadSpouseMap(bloodBig);
+    for (const [id, node] of nodeMap) {
+      node.spouses = spouseMap.get(id) || [];
+    }
+
+    const rootId = chain.find((id) => nodeMap.has(id)) ?? centerId;
+    const root = nodeMap.get(rootId);
+    if (!root) {
+      throw new NotFoundException(`Person with id ${personId} not found`);
+    }
+    await this.stampCardFacts(root, center.clan_id);
+    return { root, centerId, up, down };
+  }
+
+  /** 从本人沿父亲往上走，最多 up 步。返回从最顶层祖先到本人。 */
+  private async collectPaternalChain(personId: bigint, up: number): Promise<string[]> {
+    const chain = [personId.toString()];
+    const seen = new Set<string>(chain);
+    let cursor = personId;
+    for (let step = 0; step < up; step++) {
+      const father = await this.findFatherId(cursor);
+      if (!father || seen.has(father)) break;
+      seen.add(father);
+      chain.unshift(father);
+      cursor = BigInt(father);
+    }
+    return chain;
+  }
+
+  /** 本人的子孙，深度 1..down。不含本人，不含祖先的其他子女。 */
+  private async collectDescendantIds(personId: bigint, down: number): Promise<string[]> {
+    if (down <= 0) return [];
+    const found = new Set<string>();
+    let frontier = [personId];
+    for (let depth = 1; depth <= down && frontier.length > 0; depth++) {
+      const grouped = await this.loadChildrenByFather(frontier);
+      const next: bigint[] = [];
+      for (const fatherId of frontier) {
+        for (const childId of grouped.get(fatherId.toString()) ?? []) {
+          if (found.has(childId) || childId === personId.toString()) continue;
+          found.add(childId);
+          next.push(BigInt(childId));
+        }
+      }
+      frontier = next;
+    }
+
+    const closure = await this.prisma.personAncestry.findMany({
+      where: {
+        ancestor_id: personId,
+        depth: { gt: 0, lte: down },
+        descendant: { deleted_at: null },
+      },
+      select: { descendant_id: true },
+    });
+    const spouseIds = await this.spouseIdsOf([personId, ...[...found].map((id) => BigInt(id))]);
+    const missing = closure
+      .map((row) => row.descendant_id)
+      .filter((id) => {
+        const key = id.toString();
+        return !found.has(key) && id !== personId && !spouseIds.has(key);
+      });
+    if (missing.length > 0) {
+      const fathers = await this.fatherMapFor(missing);
+      const extra = new Set(missing.map((id) => id.toString()));
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const id of extra) {
+          if (found.has(id)) continue;
+          const father = fathers.get(id);
+          if (father === personId.toString() || found.has(father ?? '')) {
+            found.add(id);
+            grew = true;
+          }
+        }
+      }
+    }
+    return [...found];
+  }
+
+  /** 这些人的丈夫或妻子。闭包表有时把配偶记成后代，不能再收进子女。 */
+  private async spouseIdsOf(personIds: bigint[]): Promise<Set<string>> {
+    const ids = new Set<string>();
+    if (personIds.length === 0) return ids;
+    const families = await this.prisma.familyUnit.findMany({
+      where: {
+        OR: [
+          { husband_id: { in: personIds } },
+          { wife_id: { in: personIds } },
+        ],
+      },
+      select: { husband_id: true, wife_id: true },
+    });
+    const owners = new Set(personIds.map((id) => id.toString()));
+    for (const fam of families) {
+      const husband = fam.husband_id?.toString();
+      const wife = fam.wife_id?.toString();
+      if (husband && owners.has(husband) && wife) ids.add(wife);
+      if (wife && owners.has(wife) && husband) ids.add(husband);
+    }
+    return ids;
+  }
+
+  private async findFatherId(personId: bigint): Promise<string | null> {
+    const map = await this.fatherMapFor([personId]);
+    return map.get(personId.toString()) ?? null;
+  }
+
+  /** childId -> fatherId。先认 family_children 的丈夫，再认闭包表里的男性 depth=1。 */
+  private async fatherMapFor(personIds: bigint[]): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (personIds.length === 0) return map;
+    const links = await this.prisma.familyChild.findMany({
+      where: {
+        child_id: { in: personIds },
+        family: { husband_id: { not: null }, husband: { deleted_at: null } },
+      },
+      select: { child_id: true, family: { select: { husband_id: true } } },
+    });
+    for (const link of links) {
+      if (!link.family.husband_id) continue;
+      map.set(link.child_id.toString(), link.family.husband_id.toString());
+    }
+    const missing = personIds.filter((id) => !map.has(id.toString()));
+    if (missing.length === 0) return map;
+    const rows = await this.prisma.personAncestry.findMany({
+      where: {
+        descendant_id: { in: missing },
+        depth: 1,
+        ancestor: { deleted_at: null, gender: 'male' },
+      },
+      select: { descendant_id: true, ancestor_id: true },
+    });
+    for (const row of rows) {
+      const key = row.descendant_id.toString();
+      if (!map.has(key)) map.set(key, row.ancestor_id.toString());
+    }
+    return map;
+  }
+
+  /** fatherId -> 子女 id。只含未删除的子女。 */
+  private async loadChildrenByFather(fatherIds: bigint[]): Promise<Map<string, string[]>> {
+    const grouped = new Map<string, string[]>();
+    if (fatherIds.length === 0) return grouped;
+    const rows = await this.prisma.familyChild.findMany({
+      where: {
+        family: { husband_id: { in: fatherIds } },
+        child: { deleted_at: null },
+      },
+      select: {
+        child_id: true,
+        birth_order: true,
+        family: { select: { husband_id: true } },
+      },
+      orderBy: [{ birth_order: 'asc' }, { child_id: 'asc' }],
+    });
+    for (const row of rows) {
+      if (!row.family.husband_id) continue;
+      const fatherId = row.family.husband_id.toString();
+      const childId = row.child_id.toString();
+      const list = grouped.get(fatherId) ?? [];
+      if (!list.includes(childId)) list.push(childId);
+      grouped.set(fatherId, list);
+    }
+    return grouped;
+  }
+
+  private orderChildren(ids: string[], linkMap: Map<string, ChildLinkEntry[]>): string[] {
+    return [...ids].sort((a, b) => {
+      const ao = linkMap.get(a)?.[0]?.birth_order ?? 0;
+      const bo = linkMap.get(b)?.[0]?.birth_order ?? 0;
+      if (ao !== bo) return ao - bo;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  }
+
+  private async loadSpouseMap(personIds: bigint[]): Promise<Map<string, SpouseInfo[]>> {
+    const map = new Map<string, SpouseInfo[]>();
+    if (personIds.length === 0) return map;
+    const families = await this.prisma.familyUnit.findMany({
+      where: {
+        OR: [
+          { husband_id: { in: personIds } },
+          { wife_id: { in: personIds } },
+        ],
+      },
+      include: {
+        husband: { select: { id: true, full_name: true, gender: true, deleted_at: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
+        wife: { select: { id: true, full_name: true, gender: true, deleted_at: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
+      },
+      orderBy: { marriage_order: 'asc' },
+    });
+    const push = (ownerId: string, info: SpouseInfo) => {
+      const list = map.get(ownerId) ?? [];
+      if (!list.some((item) => item.id === info.id && item.family_id === info.family_id)) {
+        list.push(info);
+      }
+      map.set(ownerId, list);
+    };
+    for (const fam of families) {
+      if (!fam.husband_id || !fam.wife_id || !fam.husband || !fam.wife) continue;
+      if (fam.husband.deleted_at || fam.wife.deleted_at) continue;
+      const husbandId = fam.husband_id.toString();
+      const wifeId = fam.wife_id.toString();
+      push(husbandId, this.toSpouseInfo(fam.wife, fam));
+      push(wifeId, this.toSpouseInfo(fam.husband, fam));
+    }
+    return map;
   }
 
   /**
@@ -645,6 +988,10 @@ export class TreeService {
         birth_date: true,
         death_date: true,
         is_living: true,
+        avatar_url: true,
+        thumbnail_url: true,
+        birth_place: true,
+        migration_branch: true,
       },
     });
 
@@ -709,7 +1056,7 @@ export class TreeService {
     const nodeMap = new Map<string, TreeNode>();
     for (const person of allPersons) {
       const idStr = person.id.toString();
-      const avatar = avatarMap.get(idStr) || { has_photo: false };
+      const avatar = this.mergeAvatar(person, avatarMap.get(idStr));
       nodeMap.set(idStr, this.toTreeNode(person, avatar));
     }
 
@@ -737,8 +1084,8 @@ export class TreeService {
         clan_id: clanId,
       },
       include: {
-        husband: { select: { id: true, full_name: true, gender: true } },
-        wife: { select: { id: true, full_name: true, gender: true } },
+        husband: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
+        wife: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
       },
     })) as any[];
 
@@ -747,30 +1094,8 @@ export class TreeService {
       if (fam.husband_id && fam.wife_id) {
         const hId = fam.husband_id.toString();
         const wId = fam.wife_id.toString();
-        const wifeInfo: SpouseInfo = {
-          id: wId,
-          name: fam.wife.full_name,
-          gender: fam.wife.gender,
-          family_id: fam.id.toString(),
-          marriage_date: fam.marriage_date ?? null,
-          end_date: fam.end_date ?? null,
-          marriage_order: fam.marriage_order ?? 1,
-          is_current: fam.is_current ?? true,
-          end_reason: fam.end_reason ?? null,
-          note: fam.note ?? null,
-        };
-        const husbandInfo: SpouseInfo = {
-          id: hId,
-          name: fam.husband.full_name,
-          gender: fam.husband.gender,
-          family_id: fam.id.toString(),
-          marriage_date: fam.marriage_date ?? null,
-          end_date: fam.end_date ?? null,
-          marriage_order: fam.marriage_order ?? 1,
-          is_current: fam.is_current ?? true,
-          end_reason: fam.end_reason ?? null,
-          note: fam.note ?? null,
-        };
+        const wifeInfo = this.toSpouseInfo(fam.wife, fam);
+        const husbandInfo = this.toSpouseInfo(fam.husband, fam);
         if (!spouseMap.has(hId)) spouseMap.set(hId, []);
         if (!spouseMap.has(wId)) spouseMap.set(wId, []);
         spouseMap.get(hId)!.push(wifeInfo);
@@ -788,6 +1113,7 @@ export class TreeService {
       throw new NotFoundException(`Root person ${rootPersonId} not found in clan tree`);
     }
 
+    await this.stampCardFacts(rootNode, clanId);
     return rootNode;
   }
 
@@ -846,6 +1172,10 @@ export class TreeService {
         birth_date: true,
         death_date: true,
         is_living: true,
+        avatar_url: true,
+        thumbnail_url: true,
+        birth_place: true,
+        migration_branch: true,
       },
     });
 
@@ -874,7 +1204,7 @@ export class TreeService {
     const nodeMap = new Map<string, TreeNode>();
     for (const person of persons) {
       const idStr = person.id.toString();
-      const avatar = avatarMap.get(idStr) || { has_photo: false };
+      const avatar = this.mergeAvatar(person, avatarMap.get(idStr));
       nodeMap.set(idStr, this.toTreeNode(person, avatar));
     }
 
@@ -899,8 +1229,8 @@ export class TreeService {
         ],
       },
       include: {
-        husband: { select: { id: true, full_name: true, gender: true } },
-        wife: { select: { id: true, full_name: true, gender: true } },
+        husband: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
+        wife: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
       },
     })) as any[];
 
@@ -909,30 +1239,8 @@ export class TreeService {
       if (fam.husband_id && fam.wife_id) {
         const hId = fam.husband_id.toString();
         const wId = fam.wife_id.toString();
-        const wifeInfo: SpouseInfo = {
-          id: wId,
-          name: fam.wife.full_name,
-          gender: fam.wife.gender,
-          family_id: fam.id.toString(),
-          marriage_date: fam.marriage_date ?? null,
-          end_date: fam.end_date ?? null,
-          marriage_order: fam.marriage_order ?? 1,
-          is_current: fam.is_current ?? true,
-          end_reason: fam.end_reason ?? null,
-          note: fam.note ?? null,
-        };
-        const husbandInfo: SpouseInfo = {
-          id: hId,
-          name: fam.husband.full_name,
-          gender: fam.husband.gender,
-          family_id: fam.id.toString(),
-          marriage_date: fam.marriage_date ?? null,
-          end_date: fam.end_date ?? null,
-          marriage_order: fam.marriage_order ?? 1,
-          is_current: fam.is_current ?? true,
-          end_reason: fam.end_reason ?? null,
-          note: fam.note ?? null,
-        };
+        const wifeInfo = this.toSpouseInfo(fam.wife, fam);
+        const husbandInfo = this.toSpouseInfo(fam.husband, fam);
         if (!spouseMap.has(hId)) spouseMap.set(hId, []);
         if (!spouseMap.has(wId)) spouseMap.set(wId, []);
         spouseMap.get(hId)!.push(wifeInfo);
@@ -949,6 +1257,7 @@ export class TreeService {
     if (!rootNode) {
       throw new NotFoundException(`Root person ${rootPersonId} not found`);
     }
+    await this.stampCardFacts(rootNode, clanId);
     return rootNode;
   }
 
@@ -1230,8 +1539,27 @@ export class TreeService {
     return parentAncestry?.ancestor_id ?? null;
   }
 
+  /** 人物表上的头像优先于媒体关联查询。大族只预取了前 30 条媒体头像，列上的地址不能丢。 */
+  private mergeAvatar(
+    person: { avatar_url?: string | null; thumbnail_url?: string | null },
+    fromMedia?: { avatar_url?: string; thumbnail_url?: string; has_photo: boolean },
+  ): { avatar_url?: string; thumbnail_url?: string; has_photo: boolean } {
+    const avatar_url = person.avatar_url || fromMedia?.avatar_url || undefined;
+    const thumbnail_url = person.thumbnail_url || fromMedia?.thumbnail_url || avatar_url;
+    return {
+      avatar_url,
+      thumbnail_url,
+      has_photo: !!(avatar_url || thumbnail_url || fromMedia?.has_photo),
+    };
+  }
+
   private toTreeNode(
-    person: Pick<Person, 'id' | 'full_name' | 'gender' | 'birth_date' | 'death_date' | 'is_living'>,
+    person: Pick<Person, 'id' | 'full_name' | 'gender' | 'birth_date' | 'death_date' | 'is_living'> & {
+      avatar_url?: string | null;
+      thumbnail_url?: string | null;
+      birth_place?: string | null;
+      migration_branch?: string | null;
+    },
     avatarInfo: { avatar_url?: string; thumbnail_url?: string; has_photo: boolean } = { has_photo: false },
   ): TreeNode {
     return {
@@ -1241,11 +1569,145 @@ export class TreeService {
       birth_date: person.birth_date,
       death_date: person.death_date,
       is_living: person.is_living,
+      birth_place: person.birth_place ?? null,
+      migration_branch: person.migration_branch ?? null,
       children: [],
       avatar_url: avatarInfo.avatar_url,
       thumbnail_url: avatarInfo.thumbnail_url,
       has_photo: avatarInfo.has_photo,
     };
+  }
+
+  /** 配偶卡片要全名、生卒和籍贯。查询没选到的字段留空，前端按「仅姓氏」处理。 */
+  private toSpouseInfo(
+    person: {
+      id: bigint | number;
+      full_name: string;
+      gender: string;
+      birth_date?: Date | string | null;
+      death_date?: Date | string | null;
+      is_living?: boolean;
+      birth_place?: string | null;
+    },
+    fam: {
+      id: bigint | number;
+      marriage_date?: Date | string | null;
+      end_date?: Date | string | null;
+      divorce_date?: Date | string | null;
+      marriage_order?: number | null;
+      is_current?: boolean | null;
+      end_reason?: string | null;
+      note?: string | null;
+      union_type?: string | null;
+    },
+  ): SpouseInfo {
+    return {
+      id: person.id.toString(),
+      name: person.full_name,
+      full_name: person.full_name,
+      gender: person.gender,
+      family_id: fam.id.toString(),
+      marriage_date: fam.marriage_date ?? null,
+      end_date: fam.end_date ?? fam.divorce_date ?? null,
+      marriage_order: fam.marriage_order ?? 1,
+      is_current: fam.is_current ?? true,
+      end_reason: fam.end_reason ?? null,
+      note: fam.note ?? null,
+      union_type: fam.union_type ?? null,
+      birth_date: person.birth_date ?? null,
+      death_date: person.death_date ?? null,
+      is_living: person.is_living ?? !person.death_date,
+      birth_place: person.birth_place ?? null,
+    };
+  }
+
+  /**
+   * 给已经挂好 children / spouses 的树补卡片字段：
+   * 字辈、排行、过继、早夭、迁徙、始迁祖、入赘、配偶籍贯。
+   * 三次批量查询，不按人循环打数据库。
+   */
+  private async stampCardFacts(root: TreeNode, clanId: bigint): Promise<void> {
+    const nodes: TreeNode[] = [];
+    const walk = (node?: TreeNode) => {
+      if (!node) return;
+      nodes.push(node);
+      node.children?.forEach(walk);
+    };
+    walk(root);
+    if (nodes.length === 0) return;
+
+    const idSet = new Set<string>();
+    for (const node of nodes) {
+      idSet.add(node.id);
+      for (const spouse of node.spouses || []) idSet.add(String(spouse.id));
+    }
+    const ids = [...idSet].filter((id) => /^\d+$/.test(id)).map((id) => BigInt(id));
+    if (ids.length === 0) return;
+
+    const [bios, xipaiRows, moves] = await Promise.all([
+      this.prisma.personBio.findMany({
+        where: { person_id: { in: ids } },
+        select: { person_id: true, premature: true, native_place: true },
+      }),
+      this.prisma.xipai.findMany({
+        where: { clan_id: clanId },
+        select: { generation: true, character: true },
+        orderBy: { generation: 'asc' },
+      }),
+      this.prisma.migrationEvent.findMany({
+        where: { person_id: { in: ids } },
+        select: { person_id: true, to_location: true },
+        orderBy: { event_year: 'asc' },
+      }),
+    ]);
+
+    const bioById = new Map(bios.map((row) => [row.person_id.toString(), row]));
+    const wordByGen = new Map<number, string>();
+    for (const row of xipaiRows) {
+      if (row.character && !wordByGen.has(row.generation)) wordByGen.set(row.generation, row.character);
+    }
+    const moveTo = new Map<string, string>();
+    for (const row of moves) {
+      if (!row.person_id || !row.to_location) continue;
+      const key = row.person_id.toString();
+      if (!moveTo.has(key)) moveTo.set(key, row.to_location);
+    }
+
+    const copyChildFacts = (node: TreeNode) => {
+      for (const link of node.child_links || []) {
+        const child = node.children?.find((item) => item.id === link.child_id);
+        if (!child) continue;
+        if (link.birth_order != null) child.birth_order = link.birth_order;
+        if (link.child_type) child.child_type = link.child_type;
+      }
+      node.children?.forEach(copyChildFacts);
+    };
+    copyChildFacts(root);
+
+    const assign = (node: TreeNode, depth: number, parent?: TreeNode) => {
+      const bio = bioById.get(node.id);
+      if (bio?.premature) node.premature = true;
+      if (bio?.native_place) node.native_place = bio.native_place;
+      const word = wordByGen.get(depth + 1);
+      if (word) node.generation_word = word;
+      const moved = moveTo.get(node.id);
+      if (moved) node.migration_to = moved;
+      const branch = node.migration_branch || '';
+      const parentBranch = parent?.migration_branch || '';
+      const parentMoved = parent ? moveTo.has(parent.id) : false;
+      if ((branch && branch !== parentBranch) || (!!moved && !parentMoved)) {
+        node.is_founding_ancestor = true;
+      }
+      if (node.gender === 'male' && (node.spouses || []).some((spouse) => spouse.union_type === 'uxorilocal')) {
+        node.uxorilocal = true;
+      }
+      for (const spouse of node.spouses || []) {
+        const spouseBio = bioById.get(String(spouse.id));
+        if (spouseBio?.native_place && !spouse.native_place) spouse.native_place = spouseBio.native_place;
+      }
+      node.children?.forEach((child) => assign(child, depth + 1, node));
+    };
+    assign(root, 0);
   }
 
   /**
@@ -1440,26 +1902,99 @@ export class TreeService {
     updates: {
       full_name?: string;
       gender?: Gender;
-      birth_date?: Date | null;
-      death_date?: Date | null;
+      birth_date?: Date | string | null;
+      death_date?: Date | string | null;
       is_living?: boolean;
       birth_place?: string | null;
       death_place?: string | null;
       migration_branch?: string | null;
+      bio?: Record<string, unknown> | null;
+      events?: { event_year?: number | null; content: string; sort_order?: number }[];
+      child_types?: { child_id: string; child_type: string }[];
+      unions?: { family_id: string; union_type: string }[];
     },
   ): Promise<Person> {
-    return await this.prisma.person.update({
-      where: { id: personId },
-      data: {
-        ...(updates.full_name !== undefined && { full_name: updates.full_name }),
-        ...(updates.gender !== undefined && { gender: updates.gender }),
-        ...(updates.birth_date !== undefined && { birth_date: updates.birth_date }),
-        ...(updates.death_date !== undefined && { death_date: updates.death_date }),
-        ...(updates.is_living !== undefined && { is_living: updates.is_living }),
-        ...(updates.birth_place !== undefined && { birth_place: updates.birth_place }),
-        ...(updates.death_place !== undefined && { death_place: updates.death_place }),
-        ...(updates.migration_branch !== undefined && { migration_branch: updates.migration_branch }),
-      },
+    return await this.prisma.$transaction(async (tx) => {
+      const person = await tx.person.update({
+        where: { id: personId },
+        data: {
+          ...(updates.full_name !== undefined && { full_name: updates.full_name }),
+          ...(updates.gender !== undefined && { gender: updates.gender }),
+          ...(updates.birth_date !== undefined && { birth_date: toDateOrNull(updates.birth_date) }),
+          ...(updates.death_date !== undefined && { death_date: toDateOrNull(updates.death_date) }),
+          ...(updates.is_living !== undefined && { is_living: updates.is_living }),
+          ...(updates.birth_place !== undefined && { birth_place: updates.birth_place }),
+          ...(updates.death_place !== undefined && { death_place: updates.death_place }),
+          ...(updates.migration_branch !== undefined && { migration_branch: updates.migration_branch }),
+        },
+      });
+
+      if (updates.bio) {
+        const data: Record<string, string | boolean | null> = {};
+        for (const key of BIO_TEXT_FIELDS) {
+          if (updates.bio[key] !== undefined) data[key] = blankToNull(updates.bio[key]);
+        }
+        if (updates.bio.premature !== undefined) {
+          data.premature = updates.bio.premature == null ? null : !!updates.bio.premature;
+        }
+        await tx.personBio.upsert({
+          where: { person_id: personId },
+          create: { person_id: personId, ...data },
+          update: data,
+        });
+      }
+
+      if (updates.events) {
+        await tx.personEvent.deleteMany({ where: { person_id: personId } });
+        const rows = updates.events
+          .map((event, index) => ({
+            person_id: personId,
+            event_year: event.event_year == null || Number.isNaN(Number(event.event_year))
+              ? null
+              : Number(event.event_year),
+            content: String(event.content || '').trim(),
+            sort_order: event.sort_order ?? index,
+          }))
+          .filter(event => event.content);
+        if (rows.length > 0) {
+          await tx.personEvent.createMany({ data: rows });
+        }
+      }
+
+      if (updates.child_types) {
+        for (const item of updates.child_types) {
+          if (!CHILD_TYPES.has(item.child_type)) {
+            throw new BadRequestException('子女关系类型不正确');
+          }
+          await tx.familyChild.updateMany({
+            where: {
+              child_id: BigInt(item.child_id),
+              family: { OR: [{ husband_id: personId }, { wife_id: personId }] },
+            },
+            data: { child_type: item.child_type as any },
+          });
+        }
+      }
+
+      if (updates.unions) {
+        for (const item of updates.unions) {
+          if (!UNION_TYPES.has(item.union_type)) {
+            throw new BadRequestException('婚姻类型只能是原配/继配、侧室或入赘');
+          }
+          const family = await tx.familyUnit.findUnique({
+            where: { id: BigInt(item.family_id) },
+            select: { id: true, husband_id: true, wife_id: true, union_type: true },
+          });
+          if (!family || family.union_type === 'merger') continue;
+          if (family.husband_id !== personId && family.wife_id !== personId) continue;
+          await tx.familyUnit.update({
+            where: { id: family.id },
+            data: { union_type: item.union_type },
+          });
+        }
+      }
+
+      return person;
     });
   }
 
@@ -1557,20 +2092,90 @@ export class TreeService {
    * 获取单个人物详情（含父母、子女、配偶）
    * 用于 PersonEditDrawer 顶部信息卡 + 关系列表
    */
-  async getPersonDetail(personId: bigint): Promise<{
+  async getPersonDetail(personId: bigint, viewerUserId?: string | null): Promise<{
     person: Person;
+    profile: {
+      courtesy_name: string | null;
+      native_place: string | null;
+      burial_place: string | null;
+      achievements: string | null;
+      anecdotes: string | null;
+      biography: string | null;
+      marital_notes: string | null;
+      adoption_note: string | null;
+      premature: boolean | null;
+      taboo_name: string | null;
+      art_name: string | null;
+      posthumous_name: string | null;
+      infant_name: string | null;
+      alias_name: string | null;
+      former_name: string | null;
+      nickname: string | null;
+      ethnicity: string | null;
+      education: string | null;
+      occupation: string | null;
+      job_title: string | null;
+      alma_mater: string | null;
+      employer: string | null;
+      lunar_birth: string | null;
+      lunar_death: string | null;
+      religion: string | null;
+      blood_type: string | null;
+      epitaph: string | null;
+      source_note: string | null;
+      generation: number;
+      generation_word: string | null;
+      birth_order: number | null;
+      age_at_death: number | null;
+    };
+    father: { id: string; full_name: string; gender: string } | null;
+    mother: { id: string; full_name: string; gender: string } | null;
     parents: { id: string; full_name: string; gender: string }[];
     spouses: SpouseInfo[];
-    children: { id: string; full_name: string; gender: string; birth_year?: number }[];
+    children: {
+      id: string;
+      full_name: string;
+      gender: string;
+      birth_year?: number;
+      birth_order?: number;
+      child_type?: string;
+      premature?: boolean;
+    }[];
+    siblings: {
+      id: string;
+      full_name: string;
+      gender: string;
+      birth_year?: number;
+      birth_order?: number;
+    }[];
+    migrations: {
+      id: string;
+      from_location: string;
+      to_location: string;
+      event_year: number;
+      reason: string | null;
+      description: string | null;
+    }[];
+    media: {
+      id: string;
+      url: string;
+      thumb_url: string | null;
+      description: string | null;
+      category: string | null;
+      media_type: string;
+    }[];
+    events: { id: string; event_year: number | null; content: string; sort_order: number }[];
+    contact: { phone: string; email: string | null } | null;
   }> {
-    const person = await this.prisma.person.findUnique({ where: { id: personId } });
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+      include: { bio: true },
+    });
     if (!person) throw new NotFoundException(`Person ${personId} not found`);
-    // 如果当前人物本身被软删，提示友好
     if (person.deleted_at) {
       throw new NotFoundException(`Person ${personId} has been deleted`);
     }
 
-    // 父母：depth=1 的祖先（过滤软删除）
     const parentRows = await this.prisma.personAncestry.findMany({
       where: {
         descendant_id: personId,
@@ -1586,40 +2191,130 @@ export class TreeService {
       full_name: r.ancestor.full_name,
       gender: r.ancestor.gender,
     }));
+    const father = parents.find(p => p.gender === 'male') ?? null;
+    const mother = parents.find(p => p.gender === 'female') ?? null;
 
-    // 子女：person 当 ancestor 时 depth=1 的后代（过滤软删除）
-    const childRows = await this.prisma.personAncestry.findMany({
+    const childLinks = await this.prisma.familyChild.findMany({
       where: {
-        ancestor_id: personId,
-        depth: 1,
-        descendant: { deleted_at: null },
+        family: { OR: [{ husband_id: personId }, { wife_id: personId }] },
+        child: { deleted_at: null },
       },
       select: {
-        descendant: {
-          select: {
-            id: true, full_name: true, gender: true, birth_date: true,
-          },
-        },
+        birth_order: true,
+        child_type: true,
+        child: { select: { id: true, full_name: true, gender: true, birth_date: true } },
       },
+      orderBy: { birth_order: 'asc' },
     });
-    const children = childRows.map(r => ({
-      id: r.descendant.id.toString(),
-      full_name: r.descendant.full_name,
-      gender: r.descendant.gender,
-      birth_year: r.descendant.birth_date ? new Date(r.descendant.birth_date).getFullYear() : undefined,
-    }));
+    const children = new Map<string, {
+      id: string;
+      full_name: string;
+      gender: string;
+      birth_year?: number;
+      birth_order?: number;
+      child_type?: string;
+      premature?: boolean;
+    }>();
+    for (const link of childLinks) {
+      const id = link.child.id.toString();
+      const prev = children.get(id);
+      if (prev && prev.child_type === 'BIOLOGICAL') continue;
+      children.set(id, {
+        id,
+        full_name: link.child.full_name,
+        gender: link.child.gender,
+        birth_year: link.child.birth_date ? new Date(link.child.birth_date).getFullYear() : undefined,
+        birth_order: link.birth_order,
+        child_type: link.child_type,
+      });
+    }
+    if (children.size === 0) {
+      const childRows = await this.prisma.personAncestry.findMany({
+        where: {
+          ancestor_id: personId,
+          depth: 1,
+          descendant: { deleted_at: null },
+        },
+        select: {
+          descendant: { select: { id: true, full_name: true, gender: true, birth_date: true } },
+        },
+      });
+      for (const row of childRows) {
+        children.set(row.descendant.id.toString(), {
+          id: row.descendant.id.toString(),
+          full_name: row.descendant.full_name,
+          gender: row.descendant.gender,
+          birth_year: row.descendant.birth_date
+            ? new Date(row.descendant.birth_date).getFullYear()
+            : undefined,
+        });
+      }
+    }
 
-    // 配偶：复用 getSubTree 中的逻辑
+    if (children.size > 0) {
+      const flags = await this.prisma.personBio.findMany({
+        where: {
+          person_id: { in: [...children.keys()].map(id => BigInt(id)) },
+          premature: true,
+        },
+        select: { person_id: true },
+      });
+      for (const flag of flags) {
+        const item = children.get(flag.person_id.toString());
+        if (item) item.premature = true;
+      }
+    }
+
+    const parentIds = parentRows.map(r => r.ancestor.id);
+    const siblingMap = new Map<string, { id: string; full_name: string; gender: string; birth_year?: number; birth_order?: number }>();
+    if (parentIds.length > 0) {
+      const siblingRows = await this.prisma.personAncestry.findMany({
+        where: {
+          ancestor_id: { in: parentIds },
+          depth: 1,
+          descendant_id: { not: personId },
+          descendant: { deleted_at: null },
+        },
+        select: {
+          descendant: { select: { id: true, full_name: true, gender: true, birth_date: true } },
+        },
+      });
+      for (const row of siblingRows) {
+        const id = row.descendant.id.toString();
+        if (!siblingMap.has(id)) {
+          siblingMap.set(id, {
+            id,
+            full_name: row.descendant.full_name,
+            gender: row.descendant.gender,
+            birth_year: row.descendant.birth_date
+              ? new Date(row.descendant.birth_date).getFullYear()
+              : undefined,
+          });
+        }
+      }
+      if (siblingMap.size > 0) {
+        const orders = await this.prisma.familyChild.findMany({
+          where: { child_id: { in: [...siblingMap.keys()].map(id => BigInt(id)) } },
+          select: { child_id: true, birth_order: true, child_type: true },
+        });
+        for (const order of orders) {
+          const item = siblingMap.get(order.child_id.toString());
+          if (!item) continue;
+          if (item.birth_order == null || order.child_type === 'BIOLOGICAL') {
+            item.birth_order = order.birth_order;
+          }
+        }
+      }
+    }
+
     const familyUnits = (await this.prisma.familyUnit.findMany({
-      where: {
-        OR: [{ husband_id: personId }, { wife_id: personId }],
-      },
+      where: { OR: [{ husband_id: personId }, { wife_id: personId }] },
       include: {
-        husband: { select: { id: true, full_name: true, gender: true } },
-        wife: { select: { id: true, full_name: true, gender: true } },
+        husband: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
+        wife: { select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true, birth_place: true } },
       },
+      orderBy: { marriage_order: 'asc' },
     })) as any[];
-
     const spouses: SpouseInfo[] = [];
     for (const fam of familyUnits) {
       const isHusband = fam.husband_id === personId;
@@ -1631,20 +2326,163 @@ export class TreeService {
         gender: other.gender,
         family_id: fam.id.toString(),
         marriage_date: fam.marriage_date ?? null,
-        end_date: fam.end_date ?? null,
+        end_date: fam.divorce_date ?? null,
         marriage_order: fam.marriage_order ?? 1,
         is_current: fam.is_current ?? true,
         end_reason: fam.end_reason ?? null,
         note: fam.note ?? null,
+        union_type: fam.union_type ?? null,
       });
     }
 
+    const deepest = await this.prisma.personAncestry.findFirst({
+      where: { descendant_id: personId },
+      orderBy: { depth: 'desc' },
+      select: { depth: true },
+    });
+    const generation = (deepest?.depth ?? 0) + 1;
+    const xipai = await this.prisma.xipai.findFirst({
+      where: { clan_id: person.clan_id, generation },
+      select: { character: true },
+    });
+    const ownRanks = await this.prisma.familyChild.findMany({
+      where: { child_id: personId },
+      select: { birth_order: true, child_type: true },
+    });
+    const ownRank = ownRanks.find(row => row.child_type === 'BIOLOGICAL') ?? ownRanks[0];
+    const age = ageAtDeath(person.birth_date, person.is_living ? null : person.death_date);
+
+    const migrationRows = await this.prisma.migrationEvent.findMany({
+      where: { person_id: personId },
+      orderBy: { event_year: 'asc' },
+      select: {
+        id: true,
+        from_location: true,
+        to_location: true,
+        event_year: true,
+        reason: true,
+        description: true,
+      },
+    });
+    const mediaRows = await this.prisma.mediaPersonLink.findMany({
+      where: { person_id: personId, media: { deleted_at: null } },
+      select: {
+        media: {
+          select: {
+            id: true,
+            file_url: true,
+            display_url: true,
+            thumb_url: true,
+            description: true,
+            category: true,
+            media_type: true,
+          },
+        },
+      },
+    });
+
+    const eventRows = await this.prisma.personEvent.findMany({
+      where: { person_id: personId },
+      orderBy: [{ sort_order: 'asc' }, { event_year: 'asc' }],
+      select: { id: true, event_year: true, content: true, sort_order: true },
+    });
+    const contact = await this.contactForViewer(person, viewerUserId);
+
+    const { bio, ...personRow } = person;
     return {
-      person,
+      person: personRow,
+      profile: {
+        courtesy_name: bio?.courtesy_name ?? null,
+        native_place: bio?.native_place ?? null,
+        burial_place: bio?.burial_place ?? null,
+        achievements: bio?.achievements ?? null,
+        anecdotes: bio?.anecdotes ?? null,
+        biography: bio?.biography ?? null,
+        marital_notes: bio?.marital_notes ?? null,
+        adoption_note: bio?.adoption_note ?? null,
+        premature: bio?.premature ?? null,
+        taboo_name: bio?.taboo_name ?? null,
+        art_name: bio?.art_name ?? null,
+        posthumous_name: bio?.posthumous_name ?? null,
+        infant_name: bio?.infant_name ?? null,
+        alias_name: bio?.alias_name ?? null,
+        former_name: bio?.former_name ?? null,
+        nickname: bio?.nickname ?? null,
+        ethnicity: bio?.ethnicity ?? null,
+        education: bio?.education ?? null,
+        occupation: bio?.occupation ?? null,
+        job_title: bio?.job_title ?? null,
+        alma_mater: bio?.alma_mater ?? null,
+        employer: bio?.employer ?? null,
+        lunar_birth: bio?.lunar_birth ?? null,
+        lunar_death: bio?.lunar_death ?? null,
+        religion: bio?.religion ?? null,
+        blood_type: bio?.blood_type ?? null,
+        epitaph: bio?.epitaph ?? null,
+        source_note: bio?.source_note ?? null,
+        generation,
+        generation_word: xipai?.character ?? null,
+        birth_order: ownRank?.birth_order ?? null,
+        age_at_death: age,
+      },
+      father,
+      mother,
       parents,
       spouses,
-      children,
+      children: [...children.values()].sort((a, b) => (a.birth_order ?? 999) - (b.birth_order ?? 999)),
+      siblings: [...siblingMap.values()].sort((a, b) => (a.birth_order ?? 999) - (b.birth_order ?? 999)),
+      migrations: migrationRows.map(row => ({
+        id: row.id.toString(),
+        from_location: row.from_location,
+        to_location: row.to_location,
+        event_year: row.event_year,
+        reason: row.reason,
+        description: row.description,
+      })),
+      media: mediaRows.map(row => ({
+        id: row.media.id.toString(),
+        url: row.media.display_url || row.media.file_url,
+        thumb_url: row.media.thumb_url,
+        description: row.media.description,
+        category: row.media.category,
+        media_type: row.media.media_type,
+      })),
+      events: eventRows.map(row => ({
+        id: row.id.toString(),
+        event_year: row.event_year,
+        content: row.content,
+        sort_order: row.sort_order,
+      })),
+      contact,
     };
+  }
+
+  /**
+   * 在世人物的电话、邮箱只给本人和本族管理员。号码来自已绑定的用户，不写在人物上。
+   */
+  private async contactForViewer(
+    person: { id: bigint; clan_id: bigint; is_living: boolean },
+    viewerUserId?: string | null,
+  ): Promise<{ phone: string; email: string | null } | null> {
+    if (!person.is_living || !viewerUserId) return null;
+    const [selfLink, membership] = await Promise.all([
+      this.prisma.personUserLink.findFirst({
+        where: { user_id: viewerUserId, person_id: person.id, relation_role: 'self' },
+        select: { id: true },
+      }),
+      this.prisma.clanMember.findUnique({
+        where: { clan_id_user_id: { clan_id: person.clan_id, user_id: viewerUserId } },
+        select: { role: true },
+      }),
+    ]);
+    const isAdmin = membership?.role === 'OWNER' || membership?.role === 'ADMIN';
+    if (!selfLink && !isAdmin) return null;
+    const bound = await this.prisma.personUserLink.findFirst({
+      where: { person_id: person.id, relation_role: 'self' },
+      select: { user: { select: { phone: true, email: true } } },
+    });
+    if (!bound?.user?.phone) return null;
+    return { phone: bound.user.phone, email: bound.user.email ?? null };
   }
 
   /**

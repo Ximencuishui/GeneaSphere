@@ -82,7 +82,7 @@ export function useGenealogyTransform(genealogyStore: {
    *   - data.original 保留原节点引用，供节点 style 回调读取
    *   - data.generation 写入世代深度（供 TreePage 世代浮窗按 y 投影）
    *   - child_links 透出 birth_order / child_type / mother_id 到子节点 data
-   *   - 主脉子节点居中：先找到 main_idx，splice 到中点位置
+   *   - children 按 birth_order 升序，长子在左，他的子树占左边
    *
    * 参数：
    *   - node 当前节点
@@ -132,6 +132,19 @@ export function useGenealogyTransform(genealogyStore: {
         has_photo: (node as any).has_photo,
         thumbnail_url: (node as any).thumbnail_url || (node as any).avatar_url,
         avatar_url: (node as any).avatar_url,
+        photo_url: (node as any).photo_url,
+        generation_word: (node as any).generation_word,
+        birth_order: (node as any).birth_order,
+        child_type: (node as any).child_type,
+        premature: (node as any).premature || undefined,
+        native_place: (node as any).native_place,
+        birth_place: (node as any).birth_place,
+        migration_branch: (node as any).migration_branch,
+        migration_to: (node as any).migration_to,
+        is_founding_ancestor: (node as any).is_founding_ancestor || undefined,
+        uxorilocal: (node as any).uxorilocal || undefined,
+        biography: (node as any).biography,
+        events: (node as any).events,
         is_main_lineage: isMainLineage,
         title: node.title,
         identity_label: identityLabel,
@@ -149,8 +162,8 @@ export function useGenealogyTransform(genealogyStore: {
         const g = transformToG6Data(child, generationMap, gen + 1, node);
         const link = linkByChild.get(String(child.id));
         if (link) {
-          g.data.child_type = link.child_type;
-          g.data.birth_order = link.birth_order;
+          g.data.child_type = link.child_type || g.data.child_type;
+          g.data.birth_order = link.birth_order ?? g.data.birth_order;
           // [2026-08-28 P4 一妻多妾优化] 透出 mother_id 供 layoutEdges / 边样式读取
           // - layoutEdges：按母亲归属决定父子边牵引线起点 X
           // - 边样式：isConcubineChild + palette 区分妾之子
@@ -162,13 +175,18 @@ export function useGenealogyTransform(genealogyStore: {
         }
         return g;
       });
-      // 主脉子节点放中间，旁系对称分布两侧 → 布局时主脉自然居中
-      const mainIdx = transformed.findIndex((c) => c.data?.is_main_lineage);
-      if (mainIdx > 0) {
-        const [mainChild] = transformed.splice(mainIdx, 1);
-        const mid = Math.floor(transformed.length / 2);
-        transformed.splice(mid, 0, mainChild);
-      }
+      // 长幼从左到右。未写排行的子女保持原顺序，排在有排行的兄弟之后。
+      // 主脉不再插到兄弟中间，否则长子子树会被拆开。
+      transformed.sort((a, b) => {
+        const oa = a.data?.birth_order;
+        const ob = b.data?.birth_order;
+        const aMissing = oa == null || oa === '';
+        const bMissing = ob == null || ob === '';
+        if (aMissing && bMissing) return 0;
+        if (aMissing) return 1;
+        if (bMissing) return -1;
+        return Number(oa) - Number(ob);
+      });
       result.children = transformed;
     }
 

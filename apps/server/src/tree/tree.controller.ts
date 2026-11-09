@@ -9,13 +9,14 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { TreeService, TreeNode, ClanTreeResponse, ClanNextBatchResponse } from './tree.service';
+import { TreeService, TreeNode, ClanTreeResponse, ClanNextBatchResponse, FocusTreeResponse } from './tree.service';
 import { CreatePersonDto } from './dto/create-person.dto';
 import { MoveSubTreeDto } from './dto/move-subtree.dto';
 import { UpdatePersonDto } from './dto/update-person.dto';
 import { CreateMarriageDto } from './dto/create-marriage.dto';
 import { CheckKinshipDto } from './dto/check-kinship.dto';
 import { Person } from '@prisma/client';
+import { JwtService } from '@nestjs/jwt';
 import { Public } from '../auth/public.decorator';
 import { ClanResolverService } from '../common/clan-resolver.service';
 import { AdminService } from '../admin/admin.service';
@@ -37,11 +38,27 @@ import { serializeBigInt } from '../common/bigint-serializer';
  */
 @Controller('api/tree')
 export class TreeController {
+  private readonly jwtService = new JwtService({
+    secret: process.env.JWT_SECRET || 'geneasphere-jwt-secret-key-2026',
+  });
+
   constructor(
     private readonly treeService: TreeService,
     private readonly clanResolver: ClanResolverService,
     private readonly adminService: AdminService,
   ) {}
+
+  /** 公开详情接口：有合法 token 就认出本人，没有或过期也不拦截。 */
+  private optionalUserId(req: any): string | undefined {
+    const auth = req?.headers?.authorization;
+    if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return undefined;
+    try {
+      const payload = this.jwtService.verify(auth.slice(7)) as { sub?: string };
+      return payload?.sub || undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   /**
    * 通用权限校验：要求 userId 是 person / family 所属 clan 的管理员
@@ -96,6 +113,7 @@ export class TreeController {
         birth_date: dto.birth_date,
         death_date: dto.death_date,
         is_living: dto.is_living,
+        child_type: dto.child_type,
       },
       dto.parent_id,
     );
@@ -105,7 +123,10 @@ export class TreeController {
       'tree.person.create',
       'person',
       result.id.toString(),
-      JSON.stringify({ parent_id: dto.parent_id?.toString() ?? null }),
+      JSON.stringify({
+        parent_id: dto.parent_id?.toString() ?? null,
+        child_type: dto.child_type ?? 'BIOLOGICAL',
+      }),
     );
     return serializeBigInt(result);
   }
@@ -292,6 +313,10 @@ export class TreeController {
       birth_place: dto.birth_place,
       death_place: dto.death_place,
       migration_branch: dto.migration_branch,
+      bio: dto.bio as any,
+      events: dto.events,
+      child_types: dto.child_types,
+      unions: dto.unions,
     });
     this.logTreeAction(
       clanId,
@@ -304,13 +329,46 @@ export class TreeController {
   }
 
   /**
+   * 聚焦树：上 up 代父系祖先 + 本人 + 下 down 代子孙，配偶挂在 spouses。
+   * 根节点是窗口里最上面的祖先。up、down 缺省为 3，范围 0–12。
+   */
+  @Public()
+  @Get('person/:personId/focus')
+  async getFocusTree(
+    @Param('personId') personId: string,
+    @Query('up') up?: string,
+    @Query('down') down?: string,
+  ): Promise<FocusTreeResponse> {
+    if (!/^\d+$/.test(personId)) {
+      throw new BadRequestException('personId must be a positive integer');
+    }
+    const upN = this.parseFocusDepth(up, 'up');
+    const downN = this.parseFocusDepth(down, 'down');
+    return serializeBigInt(
+      await this.treeService.getFocusTree(BigInt(personId), upN, downN),
+    );
+  }
+
+  private parseFocusDepth(raw: string | undefined, name: string): number {
+    if (raw == null || raw === '') return 3;
+    if (!/^\d+$/.test(raw)) {
+      throw new BadRequestException(`${name} must be an integer between 0 and 12`);
+    }
+    const value = parseInt(raw, 10);
+    if (value > 12) {
+      throw new BadRequestException(`${name} must be an integer between 0 and 12`);
+    }
+    return value;
+  }
+
+  /**
    * 获取单个人物详情（父母/配偶/子女）—— 侧栏抽屉打开时调用
    */
   @Public()
   @Get('person/:personId/detail')
-  async getPersonDetail(@Param('personId') personId: string) {
+  async getPersonDetail(@Param('personId') personId: string, @Req() req: any) {
     return serializeBigInt(
-      await this.treeService.getPersonDetail(BigInt(personId)),
+      await this.treeService.getPersonDetail(BigInt(personId), this.optionalUserId(req)),
     );
   }
 

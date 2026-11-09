@@ -5,7 +5,7 @@
  *   相关纯函数，让原 806 行单体拆为三模块。
  *
  * 本模块负责（纯函数 + 闭包递归辅助）：
- * - 同一 Y 层各子树外接矩形扫描线推开（resolveSubtreeOverlap）
+ * - 节点 AABB 碰撞避让（同代夫妻组间距 + 跨代相交，resolveSubtreeOverlap）
  * - 整体子树平移（含子女、配偶、继子女）（shiftSubtree）
  *
  * 不在本模块范围：
@@ -18,23 +18,34 @@
 import type {
   LayoutNode,
   NodePosition,
-  BoundingBox,
   CoupleUnit,
 } from '@/types/layout';
 
 // ==================== 子树外接矩形扫描线推开 ====================
 
+interface HouseBox {
+  id: string;
+  y: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
 /**
- * 子树外接矩形扫描线推开
+ * 节点 AABB 避让。
  *
- * 在 alignMainLineage 之后调用，检测同一 Y 层各子树外接矩形是否重叠，
- * 若重叠则将右侧子树整体右推，同步推开其配偶与继子女子树。
+ * 工作坐标里兄弟沿 X、代际沿 Y。LR 屏幕坐标由流水线转置进来，这里仍只沿 X 推开，
+ * 转置回屏幕后就是沿 Y 上下推开。配偶在工作坐标里排在主节点右侧，户宽已经含配偶；
+ * 转置后这户宽变成 LR 里夫妻上下堆叠的总高度。
  *
- * [2026-08-28 A5] 以 CoupleUnit 为绑定单位计算边界 + 平移。
+ * 每一代从左到右只排一次。碰撞时只把这一户（主节点 + 配偶 + 其子孙）向右推到
+ * 上一户的右缘之外，不再爬到共同祖先去推整支。共同祖先那一推在百人树上会
+ * 互相制造新的碰撞，把兄弟轴拉到一万像素以上，停步时卡片仍然叠着。
  *
- * [W2 2026-09-01] 新增 nodeMapForVirtualCheck 参数：
- *   - computeBounds 跳过虚拟节点的 child（避免真实配偶作为独立节点被加入 nodesByY）
- *   - shiftSubtree 跳过虚拟节点子树（已在 coupleUnit.spouseIds 路径处理）
+ * - 同一水平带（|Δy| ≤ 1.5）户与户之间留 nodeSep。
+ * - 垂直区间相交的跨代卡片留 2px，避免两代卡片贴死。
+ * - 已经分开的空隙保持原样，不把 dagre 的正常间距再压紧。
  */
 export function resolveSubtreeOverlap(
   nodePositions: Map<string, NodePosition>,
@@ -45,83 +56,98 @@ export function resolveSubtreeOverlap(
   nodeSep: number,
   nodeMapForVirtualCheck?: Map<string, LayoutNode>,
 ) {
-  const subtreeBounds = new Map<string, BoundingBox>();
-
-  const computeBounds = (nodeId: string): BoundingBox => {
-    const cached = subtreeBounds.get(nodeId);
-    if (cached) return cached;
-
-    const pos = nodePositions.get(nodeId);
-    if (!pos) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-
-    const coupleUnit = coupleUnitByMain.get(nodeId);
-    let minX = pos.x - pos.width / 2;
-    let maxX = coupleUnit ? coupleUnit.unitRightX : pos.x + pos.width / 2;
-    let minY = pos.y - pos.height / 2;
-    let maxY = pos.y + pos.height / 2;
-
-    const children = childrenByParent.get(nodeId) || [];
-    for (const childId of children) {
-      // [W2 2026-09-01] 跳过虚拟节点的 child（真实配偶）：
-      //   当 mainId 有 coupleUnit 时，配偶位置已包含在 unitRightX 内（[minX, maxX] = 自身 + 配偶链）。
-      //   若再递归虚拟节点，配偶 bounds 会作为独立节点被加入 nodesByY，导致 overlap 检测误判。
-      //   此时也不需要把配偶视为独立子树——配偶与主节点是绑定单元。
-      const childNode = nodeMap.get(childId);
-      if (childNode?.virtualSpouse) continue;
-      const childBounds = computeBounds(childId);
-      minX = Math.min(minX, childBounds.minX);
-      maxX = Math.max(maxX, childBounds.maxX);
-      minY = Math.min(minY, childBounds.minY);
-      maxY = Math.max(maxY, childBounds.maxY);
+  const nodeMapForShift = nodeMapForVirtualCheck ?? nodeMap;
+  const mainOfSpouse = new Map<string, string>();
+  for (const [mainId, unit] of coupleUnitByMain) {
+    for (const spouseId of unit.spouseIds) mainOfSpouse.set(spouseId, mainId);
+  }
+  for (const [mainId, edges] of spouseByMain) {
+    for (const edge of edges) {
+      const spouseId = edge.source === mainId ? edge.target : edge.source;
+      if (!mainOfSpouse.has(spouseId)) mainOfSpouse.set(spouseId, mainId);
     }
+  }
 
-    if (!coupleUnit) {
-      const spouseEdges = spouseByMain.get(nodeId) || [];
-      for (const edge of spouseEdges) {
-        const spouseId = edge.source === nodeId ? edge.target : edge.source;
-        const spouseBounds = computeBounds(spouseId);
-        minX = Math.min(minX, spouseBounds.minX);
-        maxX = Math.max(maxX, spouseBounds.maxX);
-        minY = Math.min(minY, spouseBounds.minY);
-        maxY = Math.max(maxY, spouseBounds.maxY);
-      }
-    }
-
-    const bounds: BoundingBox = { minX, minY, maxX, maxY };
-    subtreeBounds.set(nodeId, bounds);
-    return bounds;
+  const membersOf = (mainId: string): string[] => {
+    const fromUnit = coupleUnitByMain.get(mainId)?.spouseIds;
+    if (fromUnit && fromUnit.length > 0) return [mainId, ...fromUnit];
+    const edges = spouseByMain.get(mainId) || [];
+    const spouses = edges.map((edge) => (edge.source === mainId ? edge.target : edge.source));
+    return [mainId, ...spouses];
   };
 
-  for (const [id, node] of nodeMap) {
-    if ((node.generation ?? 0) < 0) continue;
-    computeBounds(id);
+  const houseBox = (mainId: string): HouseBox | null => {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let y = 0;
+    let found = false;
+    for (const member of membersOf(mainId)) {
+      const pos = nodePositions.get(member);
+      if (!pos || !(pos.width > 0) || !(pos.height > 0)) continue;
+      if (member === mainId) y = pos.y;
+      minX = Math.min(minX, pos.x - pos.width / 2);
+      maxX = Math.max(maxX, pos.x + pos.width / 2);
+      minY = Math.min(minY, pos.y - pos.height / 2);
+      maxY = Math.max(maxY, pos.y + pos.height / 2);
+      found = true;
+    }
+    if (!found) return null;
+    const main = nodePositions.get(mainId);
+    return { id: mainId, y: main?.y ?? y, minX, maxX, minY, maxY };
+  };
+
+  const yHits = (a: HouseBox, b: HouseBox) =>
+    a.minY < b.maxY - 0.5 && b.minY < a.maxY - 0.5;
+
+  const mains: { id: string; y: number }[] = [];
+  for (const [id, pos] of nodePositions) {
+    if (nodeMap.get(id)?.virtualSpouse) continue;
+    if (!(pos.width > 0) || !(pos.height > 0)) continue;
+    if (mainOfSpouse.has(id)) continue;
+    mains.push({ id, y: pos.y });
+  }
+  mains.sort((a, b) => a.y - b.y || a.id.localeCompare(b.id));
+
+  const bands: string[][] = [];
+  for (const main of mains) {
+    const band = bands[bands.length - 1];
+    const anchor = band ? nodePositions.get(band[0]) : undefined;
+    if (!band || !anchor || Math.abs(main.y - anchor.y) > 1.5) bands.push([main.id]);
+    else band.push(main.id);
   }
 
-  const nodesByY = new Map<number, { id: string; bounds: BoundingBox }[]>();
-  for (const [id, bounds] of subtreeBounds) {
-    // [W2 2026-09-01] 跳过虚拟节点（virtualSpouse=true）：
-    //   虚拟节点被 computeBounds 递归时加入 subtreeBounds（其 child 是真实配偶），
-    //   但虚拟节点本身不参与子树重叠检测——它的位置会在 collapse 时被过滤掉。
-    const n = nodeMap.get(id);
-    if (n?.virtualSpouse) continue;
-    const pos = nodePositions.get(id);
-    if (!pos) continue;
-    const y = pos.y;
-    if (!nodesByY.has(y)) nodesByY.set(y, []);
-    nodesByY.get(y)!.push({ id, bounds });
-  }
-
-  for (const [, items] of nodesByY) {
-    items.sort((a, b) => a.bounds.minX - b.bounds.minX);
-    let prevMaxX = -Infinity;
-    for (const item of items) {
-      if (item.bounds.minX < prevMaxX + nodeSep) {
-        const dx = prevMaxX + nodeSep - item.bounds.minX;
-        shiftSubtree(item.id, dx, nodePositions, childrenByParent, spouseByMain, coupleUnitByMain, undefined, nodeMapForVirtualCheck ?? nodeMap);
-        item.bounds.minX += dx;
-        item.bounds.maxX += dx;
+  const placed: HouseBox[] = [];
+  const crossGap = 2;
+  for (const band of bands) {
+    const houses = band
+      .map((id) => houseBox(id))
+      .filter((box): box is HouseBox => box !== null)
+      .sort((a, b) => a.minX - b.minX || a.y - b.y);
+    for (const house of houses) {
+      let box = houseBox(house.id) ?? house;
+      let need = -Infinity;
+      for (const prev of placed) {
+        if (!yHits(prev, box)) continue;
+        const sameBand = Math.abs(prev.y - box.y) <= 1.5;
+        need = Math.max(need, prev.maxX + (sameBand ? nodeSep : crossGap));
       }
-      prevMaxX = item.bounds.maxX;
+      const dx = need - box.minX;
+      if (dx > 0.5) {
+        shiftSubtree(
+          box.id,
+          dx,
+          nodePositions,
+          childrenByParent,
+          spouseByMain,
+          coupleUnitByMain,
+          undefined,
+          nodeMapForShift,
+        );
+        box = houseBox(box.id) ?? box;
+      }
+      placed.push(box);
     }
   }
 }

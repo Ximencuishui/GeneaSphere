@@ -51,28 +51,31 @@ export const VIEW_MODE_SETTINGS: Record<string, ViewModeSettings> = {
     nodeSep: 16,           // 52 × 0.31
     rankSep: 26,           // 36 × 0.72（卡片上下紧凑，留给导览线空间）
   },
-  // 详细模式：传统横排卡片，84×100 使宽高比 ≈ 0.84 更接近正方形
+  // 详细模式：左侧 40px 头像 + 姓名，132×100
   detailed: {
-    nodeWidth: 84,
+    nodeWidth: 132,
     nodeHeight: 100,
     avatarSize: 0,
     nameFontSize: 13,
     sublabelFontSize: 0,  // 由 drawTraditionalContent 自渲染生卒年，不走 sublabel
-    nodeSep: 28,           // 84 × 0.33（同代宽松 间距，避免多兄弟重叠）
+    nodeSep: 28,
     rankSep: 70,           // 100 × 0.7（紧凑代际，上下代卡片边缘间距 20px）
   },
+  // 肖像：竖卡 100×140。头像由 drawPortraitContent 自绘。
+  // avatarSize 必须为 0，否则 G6 iconSrc 会再叠一张缩略图。
+  // 布局引擎必须原样使用这里的宽高，不能再被横排加宽改掉。
   portrait: {
-    nodeWidth: 94,
-    nodeHeight: 100,
-    avatarSize: 22,
-    nameFontSize: 13,
+    nodeWidth: 100,
+    nodeHeight: 140,
+    avatarSize: 0,
+    nameFontSize: 14,
     sublabelFontSize: 0,
-    nodeSep: 30,           // 94 × 0.32
-    rankSep: 70,           // 100 × 0.7
+    nodeSep: 28,
+    rankSep: 70,
   },
-  // 吊线图传统世系：84×90，宽高比 ≈ 0.93，与 detailed 统一宽度
+  // 吊线图传统世系：与 detailed 同宽，左侧留头像
   xianshi: {
-    nodeWidth: 84,
+    nodeWidth: 132,
     nodeHeight: 90,
     avatarSize: 0,
     nameFontSize: 12,
@@ -82,7 +85,7 @@ export const VIEW_MODE_SETTINGS: Record<string, ViewModeSettings> = {
   },
   // 苏式：传统横排，与 detailed/xianshi 同宽
   su: {
-    nodeWidth: 84,
+    nodeWidth: 132,
     nodeHeight: 100,
     avatarSize: 0,
     nameFontSize: 13,
@@ -100,6 +103,24 @@ export const VIEW_MODE_SETTINGS: Record<string, ViewModeSettings> = {
     nodeSep: 36,           // 120 × 0.3
     rankSep: 40,           // 56 × 0.71
   },
+};
+
+/**
+ * 垂丝图（古谱）的列宽和代距。
+ *
+ * 没有卡片外框，一列只容一个字，所以宽度收到 22。
+ * 高度要放下排行、姓名和「配某氏」。60 装不下三截竖排，
+ * 120 能容纳大约三个大字加一截配偶，再长的名字由绘制时缩小字距。
+ * 兄弟距和代距收紧，横担落在两代之间那一条窄缝里。
+ */
+export const TRADITIONAL_TREE_SETTINGS: ViewModeSettings = {
+  nodeWidth: 22,
+  nodeHeight: 120,
+  avatarSize: 0,
+  nameFontSize: 16,
+  sublabelFontSize: 11,
+  nodeSep: 8,
+  rankSep: 32,
 };
 
 /**

@@ -31,7 +31,33 @@ import type {
   NodePosition,
   LayoutConfig,
 } from '@/types/layout';
-import { reorderSiblingsByBirthOrder } from '@/utils/tree-layout';
+import { reorderSiblingsByBirthOrder } from '@/utils/tree-positioning';
+
+/**
+ * 送给 dagre / elkjs 的血缘边。
+ *
+ * 配偶虚拟链（main → virt → spouse）如果和真子女一起进分层算法，
+ * 零宽虚拟节点会占一个兄弟槽，配偶卡片还会掉到孙辈那一层，
+ * 把长子的子孙挤到次子下面。配偶卡片在引擎之后由 positionSpouseNodes 贴到本人身边。
+ * 妻子名下的真子女边（吊线图）保留，那些边不是虚拟链。
+ */
+export function edgesForEngine(edges: LayoutEdge[]): LayoutEdge[] {
+  return edges
+    .filter((edge) => {
+      if (edge.kind !== 'parent-child' || edge.fromVirtualSpouse) return false;
+      if (edge.source.startsWith('__virt_') || edge.target.startsWith('__virt_')) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (a.source !== b.source) return 0;
+      const oa = a.birthOrder;
+      const ob = b.birthOrder;
+      if (oa == null && ob == null) return 0;
+      if (oa == null) return 1;
+      if (ob == null) return -1;
+      return oa - ob;
+    });
+}
 
 /**
  * dagre 布局统一入口
@@ -52,7 +78,7 @@ export function layoutWithDagre(
   //   dagre 的图配置使用 snake_case 命名（ranksep/nodesep），与 LayoutConfig
   //   的 camelCase（rankSep/nodeSep）不同。
   g.setGraph({
-    rankdir: 'TB',
+    rankdir: config.layoutDirection === 'LR' ? 'LR' : 'TB',
     nodesep: typeof config.nodeSep === 'number' ? config.nodeSep : 24,
     ranksep: typeof config.rankSep === 'number' ? config.rankSep : 48,
     ranker: 'tight-tree',
@@ -80,18 +106,8 @@ export function layoutWithDagre(
   // [W3 2026-09-01 修复] dagre tight-tree ranker **反转**边输入顺序！
   //   实测：原顺序 [S1, S2, S3] → 输出 [S3, S2, S1]（X 坐标从左到右）。
   //   因此在传给 dagre 前需要 .reverse() 一次，让 dagre 再反转回原顺序。
-  const sortedEdges = [...virtualEdges]
-    .filter((e) => e.kind === 'parent-child')
-    .sort((a, b) => {
-      if (a.source !== b.source) return 0;
-      const oa = a.birthOrder;
-      const ob = b.birthOrder;
-      if (oa == null && ob == null) return 0;
-      if (oa == null) return 1;
-      if (ob == null) return -1;
-      return oa - ob;
-    })
-    .reverse();
+  // 配偶虚拟链不进这张图，避免配偶卡片占孙辈的横向槽位。
+  const sortedEdges = edgesForEngine(virtualEdges).reverse();
 
   for (const edge of sortedEdges) {
     g.setEdge(edge.source, edge.target, { id: edge.id });
@@ -114,12 +130,15 @@ export function layoutWithDagre(
     });
   }
 
-  // [P3 2026-08-28 后处理] 兜底再排序：dagre tight-tree 不保证兄弟 X 与插入顺序一致
-  //   （受子树宽度影响）。对指定了 birthOrder 的兄弟组，按排行强制重排 X：
-  //   - 计算组内最左 X = minX
-  //   - 每个兄弟按 birthOrder 升序分配等距 X（间距 = 原最大兄弟间距）
-  //   - 不指定的兄弟保持在原 X 不动（向后兼容 P3.2）
-  reorderSiblingsByBirthOrder(positions, sortedEdges, config);
+  // 第一次 reorderSiblingsByBirthOrder：紧接 dagre 输出。
+  // tight-tree 不保证兄弟 X 与 birthOrder 一致（子树宽度会打乱左右顺序）。
+  // 这一次早于配偶贴附、主脉对齐、子树避让。那三步还会再挪 X，
+  // 所以流水线在 shiftToCenter 之后还有第二次；两次都保留。
+  // LR 的屏幕坐标里兄弟在 Y 轴。这里按 X 重排会把代际打乱，
+  // 流水线转置到工作坐标后再排一次。
+  if (config.layoutDirection !== 'LR') {
+    reorderSiblingsByBirthOrder(positions, sortedEdges, config);
+  }
 
   return positions;
 }

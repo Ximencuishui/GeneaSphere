@@ -28,7 +28,7 @@ import type { Ref, ComputedRef, ShallowRef } from 'vue';
 import type { GenealogyNode } from '@/types';
 import { LayoutEngine } from '@/utils/layout-engine';
 import type { ViewportConfig } from '@/types/layout';
-import type { ViewMode } from '@/stores/genealogy';
+import type { CardDensity, TreeStyle, ViewMode } from '@/stores/genealogy';
 import {
   collectPendingSpouses,
   remountChildrenToWifeNodes,
@@ -37,8 +37,12 @@ import {
   applyOrthogonalPathsToGraphData,
 } from '@/utils/pending-spouse';
 import { paletteShadow } from '@/utils/spouse-palette';
+import { cardSizeForDensity } from '@/utils/genealogy-card';
+import { TRADITIONAL_TREE_SETTINGS } from '@/utils/view-mode-config';
+import { attachViewportCull, type ViewportCullHandle } from '@/utils/viewport-cull';
 import { loadG6Runtime } from './useG6Runtime';
 import type { G6Runtime } from './useG6Runtime';
+import { probeLayoutAlignment } from '@/utils/tree-align-debug';
 
 // ==================== 类型：composable 依赖 ====================
 
@@ -91,9 +95,13 @@ export interface G6GraphInitDeps {
   layoutEngineRef: ShallowRef<LayoutEngine | null>;
   genealogyStore: {
     viewMode: ViewMode;
+    cardDensity?: CardDensity;
+    treeStyle?: TreeStyle;
     treeData: GenealogyNode | null;
     mainLineage: Array<string | number>;
     selectedNode: GenealogyNode | null;
+    viewType?: 'global' | 'focus';
+    focusCenterId?: string | null;
   };
   viewModeConfig: ComputedRef<Record<ViewMode, any>>;
   transformToG6Data: (data: GenealogyNode, genMap: Map<string, number>) => any;
@@ -119,9 +127,21 @@ export interface G6GraphInitDeps {
   }>;
 }
 
+export interface InitGraphOptions {
+  /** 密度切换等重排时保持缩放，并把视口中心锁在原来对着的那个人物上。 */
+  preserveViewport?: boolean;
+}
+
+interface ViewportAnchor {
+  zoom: number;
+  nodeId: string;
+  dx: number;
+  dy: number;
+}
+
 export interface G6GraphInitReturn {
-  initGraph: (data: GenealogyNode) => Promise<void>;
-  debouncedInitGraph: (data: GenealogyNode) => void;
+  initGraph: (data: GenealogyNode, options?: InitGraphOptions) => Promise<void>;
+  debouncedInitGraph: (data: GenealogyNode, options?: InitGraphOptions) => void;
   /** 组件卸载时清理 ResizeObserver + 防抖 timer */
   teardown: () => void;
 }
@@ -162,17 +182,65 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
   function setupGraphResize(g: any) {
     teardownGraphResize();
     if (!deps.container.value) return;
+    let sizedW = 0;
+    let sizedH = 0;
     graphResizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
-      if (width > 0 && height > 0 && g && typeof g.setSize === 'function') {
-        g.setSize(width, height);
-      }
+      if (!(width > 0 && height > 0) || !g || typeof g.setSize !== 'function') return;
+      // 滚动条闪一下也会触发。尺寸没变就不要 setSize，否则等于整图重绘。
+      if (Math.abs(width - sizedW) < 1 && Math.abs(height - sizedH) < 1) return;
+      sizedW = width;
+      sizedH = height;
+      g.setSize(width, height);
     });
     graphResizeObserver.observe(deps.container.value);
   }
 
+  /**
+   * 记下视口中心对着谁。重排后节点坐标会变，不能把旧画布坐标直接挪回来。
+   * 用「中心人物 + 相对偏移」在新布局里还原同一块画面。
+   */
+  function captureViewportAnchor(graph: any): ViewportAnchor | null {
+    if (!graph || typeof graph.getZoom !== 'function' || typeof graph.getCanvasByViewport !== 'function') {
+      return null;
+    }
+    const zoom = graph.getZoom();
+    if (!(typeof zoom === 'number' && zoom > 0) || typeof graph.getSize !== 'function') return null;
+    const [width, height] = graph.getSize() as [number, number];
+    if (!(width > 0 && height > 0)) return null;
+    let center: number[];
+    try {
+      center = graph.getCanvasByViewport([width / 2, height / 2]);
+    } catch {
+      return null;
+    }
+    const cx = Number(center?.[0]);
+    const cy = Number(center?.[1]);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+    const nodes = graph.getNodeData?.() || [];
+    let best: any = null;
+    let bestDist = Infinity;
+    for (const node of nodes) {
+      const x = Number(node?.style?.x);
+      const y = Number(node?.style?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const dist = (x - cx) ** 2 + (y - cy) ** 2;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = node;
+      }
+    }
+    if (!best) return null;
+    return {
+      zoom,
+      nodeId: String(best.id),
+      dx: cx - Number(best.style.x),
+      dy: cy - Number(best.style.y),
+    };
+  }
+
   // ==================== initGraph + runInitGraphBody ====================
-  const initGraph = async (data: GenealogyNode) => {
+  const initGraph = async (data: GenealogyNode, options?: InitGraphOptions) => {
     if (!deps.container.value) return;
 
     // [传统过滤 2026-08-17] 入口处先做过滤拷贝（PRD §2.4：隐藏妻子/女儿/女婿，纯渲染）
@@ -219,7 +287,10 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
     });
 
     try {
-      await Promise.race([runInitGraphBody(data), timeoutPromise]);
+      const viewportAnchor = options?.preserveViewport
+        ? captureViewportAnchor(deps.graph.value)
+        : null;
+      await Promise.race([runInitGraphBody(data, viewportAnchor), timeoutPromise]);
     } catch (e: any) {
       if (timedOut) {
         // [2026-09-02 P0] 超时兜底：强制 finishLoading + 错误占位
@@ -257,7 +328,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
    *   - renderBreakdown 计时
    *   - 超时取消清理（在 finally 中统一处理 timer）
    */
-  const runInitGraphBody = async (data: GenealogyNode) => {
+  const runInitGraphBody = async (data: GenealogyNode, viewportAnchor: ViewportAnchor | null = null) => {
     // ---- 子阶段 1：loadG6 (88→92%) ----
     const tLoadG6Start = performance.now();
     const { Graph, treeToGraphData } = await loadG6();
@@ -272,11 +343,27 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
     //   3) 原 maxRounds=25 × 200ms 的兜底在最坏情况下会浪费 5s。
     // 函数 waitForContainerSize 本身保留，供 handleResize / 未来可能的复用。
 
+    viewportCull?.destroy();
+    viewportCull = null;
     if (deps.graph.value) {
       deps.graph.value.destroy();
     }
 
-    const config = deps.viewModeConfig.value[deps.genealogyStore.viewMode];
+    const traditional = (deps.genealogyStore.treeStyle ?? 'modern') === 'traditional';
+    const config = traditional
+      ? TRADITIONAL_TREE_SETTINGS
+      : deps.viewModeConfig.value[deps.genealogyStore.viewMode];
+    // 垂丝图固定自上而下。横向布局会把竖排文字拧到代际轴上。
+    const layoutDirection = traditional
+      ? 'TB'
+      : (deps.layoutDirection.value === 'LR' ? 'LR' : 'TB');
+    // 渲染尺寸和布局尺寸用同一套。详情密度在传统横排上加高（LR 160×80 → 160×100）。
+    // 肖像卡固定 100×140，横排加宽和详情加高都会让卡片叠到一起。
+    const density = deps.genealogyStore.cardDensity === 'detailed' ? 'detailed' : 'simple';
+    const portrait = !traditional && deps.genealogyStore.viewMode === 'portrait';
+    const card = traditional || portrait
+      ? { nodeWidth: config.nodeWidth, nodeHeight: config.nodeHeight }
+      : cardSizeForDensity(config, layoutDirection, density);
 
     // ---- 子阶段 2：transformToG6Data + treeToGraphData (92→96%) ----
     const tTransformStart = performance.now();
@@ -299,15 +386,18 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
     // [2026-09-03 s7-5] 收集 spouse 节点/边：委托给 @/utils/pending-spouse.ts
     //   collectPendingSpouses 会把外部配偶挂在 existingNodeMap 里（外部配偶 id=sid）
     //   或为族内配偶生成副本节点（避免多源共享），并按 seenSpousePairs 去重。
+    // 古谱把配偶写在本人名下（配某氏），不再单独占一列卡片。
     const {
       nodes: pendingSpouseNodes,
       edges: pendingSpouseEdges,
-    } = collectPendingSpouses(data, existingNodeMap);
+    } = traditional
+      ? { nodes: [], edges: [] }
+      : collectPendingSpouses(data, existingNodeMap);
 
     // ==================== [吊线图 2026-08-17] 子女重挂载到妻子节点 ====================
     // [2026-09-03 s7-5] remountChildrenToWifeNodes 委托给 @/utils/pending-spouse.ts。
     //   仅 xianshi 模式启用：把"父 → 子"边替换为"妻子节点 → 子"边，引擎自动把子女子树排到妻子下方。
-    if (deps.genealogyStore.viewMode === 'xianshi') {
+    if (!traditional && deps.genealogyStore.viewMode === 'xianshi') {
       const { removeEdges, addedEdges } = remountChildrenToWifeNodes(
         data,
         graphData,
@@ -341,9 +431,11 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       pendingSpouseNodes,
       pendingSpouseEdges,
       {
-        config: { nodeWidth: config.nodeWidth, nodeHeight: config.nodeHeight },
+        config: { nodeWidth: card.nodeWidth, nodeHeight: card.nodeHeight },
         generationMap,
         treeData,
+        traditional,
+        lockOuterSize: portrait,
       },
     );
 
@@ -356,23 +448,26 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
     const layoutEngine = new LayoutEngine({
       canvasSize: { width: _canvasWidth, height: _canvasHeight },
       config: {
-        nodeWidth: config.nodeWidth,
-        nodeHeight: config.nodeHeight,
+        nodeWidth: card.nodeWidth,
+        nodeHeight: card.nodeHeight,
         nodeSep: config.nodeSep,
         rankSep: config.rankSep,
+        layoutDirection,
+        edgeRouting: traditional ? 'traditional' : 'modern',
         // [2026-08-31 修复] 卡片堆叠重叠：spouseGap 从 32 上调到 48
         //   多配偶场景下，配偶卡片中心距 = 节点宽 + 48，确保边缘间距 ≥ 48px，
-        //   避免多妻妾堆叠在一起。
-        spouseGap: 48,
+        //   避免多妻妾堆叠在一起。古谱不排配偶卡片，间距归零。
+        spouseGap: traditional ? 0 : 48,
+        ...(traditional ? { edgeHorizontalSeparation: 0 } : {}),
         mainLineageCenter: true,
         spouseOptimization: true,
         generationAlign: true,
         autoFit: {
           enabled: true,
-          padding: 40,
+          padding: traditional ? 72 : 40,
           maxZoom: 2,
           minZoom: 0.25,
-          preferDirection: deps.layoutDirection.value as 'TB' | 'LR',
+          preferDirection: traditional ? 'TB' : deps.layoutDirection.value as 'TB' | 'LR',
         },
         performance: {
           maxNodesForFullLayout: 2000,
@@ -500,16 +595,22 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
     // 创建节点位置映射
     // 缓存当前 layout 的视口配置，供工具栏「重置缩放」按钮复用
     lastViewportConfig = viewportConfig;
-    const nodePositionMap = new Map<string, { x: number; y: number }>();
+    const nodePositionMap = new Map<string, { x: number; y: number; width: number; height: number }>();
     for (const pos of layoutResult.nodes) {
-      nodePositionMap.set(pos.id, { x: pos.x, y: pos.y });
+      nodePositionMap.set(pos.id, { x: pos.x, y: pos.y, width: pos.width, height: pos.height });
     }
 
-    // 更新 G6 节点数据，设置初始位置
+    // 更新 G6 节点数据。size 用布局结果的宽高，和 dagre/elkjs 看到的节点盒子一致。
     for (const node of graphData.nodes || []) {
       const pos = nodePositionMap.get(String(node.id));
       if (pos) {
-        node.style = { ...node.style, x: pos.x, y: pos.y };
+        node.style = {
+          ...node.style,
+          x: pos.x,
+          y: pos.y,
+          size: [pos.width, pos.height],
+          zIndex: 10,
+        };
       }
     }
 
@@ -531,6 +632,16 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
         totalNodes: graphData.nodes?.length || 0,
         spouseNodes: pendingSpouseNodes.length,
       });
+    }
+    probeLayoutAlignment(layoutResult, graphData);
+
+    // treeToGraphData 不给边写 id。没有 id 时裁剪无法把边送进 setElementVisibility，
+    // 平移时 1000 条横担线会全部参与绘制。
+    let edgeSeq = 0;
+    for (const edge of graphData.edges || []) {
+      if (edge.id == null || edge.id === '') {
+        edge.id = `pc-${edge.source}-${edge.target}-${edgeSeq++}`;
+      }
     }
 
     const g6Graph = new Graph({
@@ -558,7 +669,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       behaviors: [
         'drag-canvas',
         'zoom-canvas',
-        'drag-element',
+        // 卡片位置由布局引擎决定。拖节点会拆开正交连线和世代对齐，所以不挂 drag-element。
         'pinch-zoom', // [移动端 H5 2026-08-17] 双指缩放（触摸）
       ],
       // 不再使用 G6 布局，使用自定义布局引擎
@@ -566,9 +677,12 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       node: {
         type: 'rect',
         style: {
-          size: [config.nodeWidth, config.nodeHeight],
-          radius: 8,
+          size: [card.nodeWidth, card.nodeHeight],
+          // 节点盖住边。主题默认节点 2、边 1，自定义样式覆盖后显式拉开。
+          zIndex: 10,
+          radius: traditional ? 0 : 8,
           fill: (d: any) => {
+            if (traditional) return 'rgba(246, 241, 231, 0.01)';
             if (!deps.filter.getFilterMatch(d).search || !deps.filter.getFilterMatch(d).gender || !deps.filter.getFilterMatch(d).photo) {
               return '#EDE7DD';
             }
@@ -585,6 +699,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             return isLiving ? '#FCE4EC' : '#F8BBD0';
           },
           stroke: (d: any) => {
+            if (traditional) return 'transparent';
             const isSelected = deps.genealogyStore.selectedNode?.id === Number(d.id);
             if (isSelected) return '#C9A96E';
 
@@ -600,6 +715,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             return gender === 'male' ? '#1976D2' : '#C2185B';
           },
           lineWidth: (d: any) => {
+            if (traditional) return 0;
             const isSelected = deps.genealogyStore.selectedNode?.id === Number(d.id);
             if (isSelected) return 4;
             if (!d.data?.is_living) return 3;
@@ -612,6 +728,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             return 'transparent';
           },
           shadowBlur: (d: any) => {
+            if (traditional) return 0;
             if (deps.genealogyStore.selectedNode?.id === Number(d.id)) return 16;
             if (d.data?.is_main_lineage) return 8;
             return 0;
@@ -628,15 +745,16 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
 
           // Thumbnail image (small square icon at top-left inside the node)
           iconSrc: (d: any) => {
-            if (config.avatarSize === 0) return undefined;
+            // 肖像头像只走 drawPortraitContent。这里再给一张，就会和圆头像叠在一起。
+            if (traditional || config.avatarSize === 0 || deps.genealogyStore.viewMode === 'portrait') return undefined;
             if (d.data?.thumbnail_url) return d.data.thumbnail_url;
             return undefined;
           },
           iconWidth: config.avatarSize,
           iconHeight: config.avatarSize,
           iconOffset: (_d: any) => {
-            const halfW = config.nodeWidth / 2;
-            const halfH = config.nodeHeight / 2;
+            const halfW = card.nodeWidth / 2;
+            const halfH = card.nodeHeight / 2;
             const pad = 4;
             // [树谱卡片 2026-08-26] portrait 模式头像放右上角，避免遮挡身份标签
             if (deps.genealogyStore.viewMode === 'portrait') {
@@ -655,6 +773,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
           //     在 wordWrap=true 路径下 outputText.split 抛 "is not a function"，导致 4 种视图模式白屏。
           // compact（height < 70）+ zhe 仍走 G6 默认 label 路径。
           label: (d: any) => {
+            if (traditional) return false;
             if (['detailed', 'portrait', 'xianshi', 'su'].includes(deps.genealogyStore.viewMode)) {
               return false;
             }
@@ -686,6 +805,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
           //   detailed/portrait/xianshi/su 的 sublabelFontSize === 0 已经返回 ''，text 内容
           //   始终是字符串，不会触发 wordWrap.split 崩溃；这里只走默认 G6 sublabel 路径。
           sublabelText: (d: any) => {
+            if (traditional) return '';
             if (deps.genealogyStore.viewMode === 'compact' || config.sublabelFontSize === 0) {
               return '';
             }
@@ -726,7 +846,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             },
             iconWidth: 12,
             iconHeight: 12,
-            iconOffset: [-(config.nodeWidth / 2 - 14), 0],
+            iconOffset: [-(card.nodeWidth / 2 - 14), 0],
           }),
         },
       },
@@ -737,7 +857,9 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
           return 'orth';
         },
         style: {
+          zIndex: 0,
           stroke: (d: any) => {
+            if (traditional) return '#2A241C';
             // [吊线图调色板 2026-08-19] 妻子 → 子女边按 data.palette 上色
             // （xianshi 模式专属；其余 5 种视图 mode 不会写入此字段，
             //   自动 fallthrough 到下方原有主枝/普通父子边逻辑，零改动）
@@ -754,9 +876,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             const targetMatched = targetMatch.search && targetMatch.gender && targetMatch.photo;
             // 配偶边：一夫多妻场景按妻子 palette 上色；无 palette 时现任=粉红实线，历史=灰色虚线
             if (d.data?.kind === 'spouse') {
-              const palette = d.target?.data?.palette || d.source?.data?.palette;
-              if (palette) return palette;
-              return d.data?.is_current ? '#E91E63' : '#9E9E9E';
+              return d.data?.is_current === false ? '#B0A59A' : '#8D6E63';
             }
             // 主枝条父子边：纯金黄色（源或目标属于主枝条时高亮）
             const sourceOnMain = d.source?.data?.is_main_lineage;
@@ -764,23 +884,20 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             if (sourceOnMain && targetOnMain) {
               return '#C9A96E';
             }
-            // 普通父子边：搜索+筛选命中保留中性灰，未命中淡灰
-            return (sourceMatched && targetMatched) ? '#B0BEC5' : '#E8E0D8';
+            // 普通父子边：主脉以外一律用淡灰，交叉处不再堆成深色死结
+            return (sourceMatched && targetMatched) ? '#d9d9d9' : '#ececec';
           },
           lineWidth: (d: any) => {
-            if (d.data?.kind === 'spouse') {
-              return d.data?.is_current ? 3 : 2.5;
-            }
-            // [吊线图调色板 2026-08-19] 妻子 → 子女边略加粗，强化分支视觉
-            if (d.data?.palette) return 2.5;
-            const sourceOnMain = d.source?.data?.is_main_lineage;
+            if (traditional) return 1;
+            if (d.data?.kind === 'spouse') return 1.5;
             const targetOnMain = d.target?.data?.is_main_lineage;
-            if (sourceOnMain && targetOnMain) return 3;
-            return 2;
+            if (targetOnMain) return 2;
+            return 1;
           },
           lineDash: (d: any) => {
-            // 历史配偶边用虚线
-            if (d.data?.kind === 'spouse' && !d.data?.is_current) return [6, 4];
+            if (traditional) return undefined;
+            // 配偶总线统一用虚线，不再按妻子分色。
+            if (d.data?.kind === 'spouse') return [7, 4];
             // [2026-08-28 P4 一妻多妾优化] 妾之子用点线（区别于过继的 [5,4] 虚线），
             // 传统苏式谱牒"另枝"语义。与 palette 叠加：颜色变母亲色，样式点线。
             // 优先级：is_concubine_child 优先于 childType（非 BIOLOGICAL）。
@@ -794,166 +911,49 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             return undefined;
           },
           endArrow: false,
+          ...(traditional ? { cornerRadius: 0 } : {}),
           shadowColor: (d: any) => {
+            if (traditional) return 'transparent';
             if (d.data?.kind === 'spouse') return 'rgba(233, 30, 99, 0.08)';
             // [吊线图调色板 2026-08-19] 妻子 → 子女边用同色低透明度阴影，与背景融合
             if (d.data?.palette) return paletteShadow(d.data.palette, 0.22);
             const sourceOnMain = d.source?.data?.is_main_lineage;
             const targetOnMain = d.target?.data?.is_main_lineage;
             if (sourceOnMain && targetOnMain) return 'rgba(201, 169, 110, 0.25)';
-            return 'rgba(0, 0, 0, 0.05)';
+            return 'transparent';
           },
           shadowBlur: (d: any) => {
+            if (traditional) return 0;
             if (d.data?.kind === 'spouse') return 3;
             // [吊线图调色板 2026-08-19] 妻子 → 子女边阴影略大，让分支更"浮起"
             if (d.data?.palette) return 4;
             const sourceOnMain = d.source?.data?.is_main_lineage;
             const targetOnMain = d.target?.data?.is_main_lineage;
             if (sourceOnMain && targetOnMain) return 6;
-            return 2;
+            return 0;
           },
         },
       },
     });
 
-    // ==================== Viewport Culling (1000+ 节点性能优化) ====================
-    /**
-     * G6 v5 默认会画图上所有节点；1000+ 节点的族谱会导致首屏卡顿。
-     * 本节实现按视口裁剪 + zoom LOD：
-     *
-     * - viewport culling：离视口 200px 以外的节点设 visibility=hidden，
-     *   进入视口附近才重新显示（避免节点突然出现/消失造成跳变）
-     * - zoom LOD：
-     *   - 缩放 < 0.5：隐藏头像 + 出生年（仅姓名）
-     *   - 0.5 ≤ 缩放 < 0.85：显示头像 + 名字（不显示出生年）
-     *   - 缩放 ≥ 0.85：全细节
-     *
-     * 性能指标（参考 P1 压测）：
-     * - 1000 节点首屏渲染：从 ~3.2s → ~0.9s（viewport culling 减少 60%+ 可见元素）
-     * - 拖拽帧率：从 12 FPS → 55+ FPS（隐藏节点不参与位置/事件计算）
-     *
-     * API：
-     * - graph.getSize(): [w, h]             视口尺寸
-     * - graph.getViewportCenter(): [x, y]   视口中心（画布坐标）
-     * - graph.getElementPosition(id)        元素画布坐标
-     * - graph.getZoom()                     当前缩放
-     * - graph.setElementVisibility(id, v)   批量设置可见性
-     */
-    const VIEWPORT_MARGIN = 200;
-
-    // [2026-09-03 审计] 原 force 参数从未在函数体内消费，调用处都传 true/false，
-    //   但逻辑上 culling 必然扫描并按 viewport 矩形裁剪，无需强制分支。
-    //   简化为无参；外层调用点相应去掉冗余参数。
-    function performViewportCulling(g: any) {
-      if (!g || typeof g.getSize !== 'function') return;
-      if (cullingRafId) cancelAnimationFrame(cullingRafId);
-      cullingRafId = requestAnimationFrame(() => {
-        const [vw, vh] = g.getSize() as [number, number];
-        // [2026-09-03 审计] 原代码用 g.getViewportCenter() 但其返回值在 G6 v5 不可靠
-        // （记忆 3af7ad86：zoomTo + translateBy 后返回 [-30821] 等异常值），
-        // 后续改用 g.getCanvasByViewport([0,0]) + g.getCanvasByViewport([vw,vh]) 算视口矩形，
-        // 故 center 变量未被消费，移除以免误导未来读者。
-        let x1 = -Infinity, y1 = -Infinity, x2 = Infinity, y2 = Infinity;
-        if (typeof g.getCanvasByViewport === 'function') {
-          const tl = g.getCanvasByViewport([0, 0]);
-          const br = g.getCanvasByViewport([vw, vh]);
-          if (tl && br) {
-            x1 = Math.min(tl[0], br[0]);
-            x2 = Math.max(tl[0], br[0]);
-            y1 = Math.min(tl[1], br[1]);
-            y2 = Math.max(tl[1], br[1]);
-          }
-        }
-        // 留 200px 边距避免路径重叠
-        const marginPx = VIEWPORT_MARGIN;
-        const zoom = g.getZoom?.() || 1;
-        const marginWorld = marginPx / zoom;
-        x1 -= marginWorld;
-        y1 -= marginWorld;
-        x2 += marginWorld;
-        y2 += marginWorld;
-
-        const nodes = g.getNodeData?.() || [];
-        const edges = g.getEdgeData?.() || [];
-        const visibilityMap: Record<string, 'visible' | 'hidden'> = {};
-        const visibleNodeIds = new Set<string>();
-
-        // 节点 viewport culling
-        for (const node of nodes) {
-          const id = String(node.id);
-          const pos = g.getElementPosition(id);
-          if (!pos) {
-            visibilityMap[id] = 'visible';
-            visibleNodeIds.add(id);
-            continue;
-          }
-          const [px, py] = pos;
-          const inViewport = px >= x1 && px <= x2 && py >= y1 && py <= y2;
-          visibilityMap[id] = inViewport ? 'visible' : 'hidden';
-          if (inViewport) visibleNodeIds.add(id);
-        }
-
-        // 边 viewport culling：边两端节点都在视口外时隐藏
-        for (const edge of edges) {
-          const id = String(edge.id);
-          const s = String(edge.source);
-          const t = String(edge.target);
-          const inView = visibleNodeIds.has(s) || visibleNodeIds.has(t);
-          visibilityMap[id] = inView ? 'visible' : 'hidden';
-        }
-
-        if (typeof g.setElementVisibility === 'function') {
-          g.setElementVisibility(visibilityMap, false);
-        }
-      });
-    }
-
-    /**
-     * Zoom LOD：根据当前缩放调整节点显示密度
-     * - 通过修改 data.is_lod_full / data.is_lod_compact 让节点 style 函数响应
-     */
-    function applyZoomLOD(g: any) {
-      if (!g || typeof g.getZoom !== 'function') return;
-      let zoom: number;
-      try {
-        zoom = g.getZoom();
-      } catch {
-        return;
-      }
-      const lodLevel: 'minimal' | 'medium' | 'full' =
-        zoom < 0.5 ? 'minimal' : zoom < 0.85 ? 'medium' : 'full';
-      // 不每次都触发 style 重算；改为更新 element attributes 让节点渲染时读取
-      const nodes = g.getNodeData?.() || [];
-      for (const node of nodes) {
-        try {
-          const el = g.getElement?.(String(node.id));
-          if (el && el.style) {
-            (el.style as any).lodLevel = lodLevel;
-          }
-        } catch {
-          /* element may be off-canvas */
-        }
-      }
-    }
-
-    // 监听 G6 生命周期事件，触发裁剪与 LOD
-    // 关闭动画以避免 culling 与 animate transform 冲突
-    // 注意：布局引擎已在 setData 前计算好所有节点位置，无需后处理
-    g6Graph.on('afterlayout', () => {
-      performViewportCulling(g6Graph);
-      applyZoomLOD(g6Graph);
-    });
+    // 2000px 网格裁剪。平移不跨格子时不改可见性；缩放跨过 0.4 才重绘视口内卡片。
+    // 必须在 render 之前挂上，卡片才不会各自监听 aftertransform。
+    viewportCull?.destroy();
+    viewportCull = attachViewportCull(
+      g6Graph,
+      (graphData.nodes || []).map((node: any) => ({
+        id: String(node.id),
+        x: Number(node.style?.x ?? 0),
+        y: Number(node.style?.y ?? 0),
+      })),
+      (graphData.edges || []).map((edge: any) => ({
+        id: String(edge.id),
+        source: String(edge.source),
+        target: String(edge.target),
+      })),
+    );
     g6Graph.on('afterrender', () => {
-      performViewportCulling(g6Graph);
       deps.graphChangeVersion.value++;
-    });
-    g6Graph.on('aftertransform', () => {
-      performViewportCulling(g6Graph);
-      applyZoomLOD(g6Graph);
-      deps.graphChangeVersion.value++;
-    });
-    g6Graph.on('aftersizechange', () => {
-      performViewportCulling(g6Graph);
     });
 
     // ==================== 拖拽节点时更新关联边 ====================
@@ -1084,10 +1084,10 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
           const targetX = targetData.style?.x ?? 0;
           const targetY = targetData.style?.y ?? 0;
 
-          const sourceW = sourceData.style?.size?.[0] ?? config.nodeWidth;
-          const sourceH = sourceData.style?.size?.[1] ?? config.nodeHeight;
-          const targetW = targetData.style?.size?.[0] ?? config.nodeWidth;
-          const targetH = targetData.style?.size?.[1] ?? config.nodeHeight;
+          const sourceW = sourceData.style?.size?.[0] ?? card.nodeWidth;
+          const sourceH = sourceData.style?.size?.[1] ?? card.nodeHeight;
+          const targetW = targetData.style?.size?.[0] ?? card.nodeWidth;
+          const targetH = targetData.style?.size?.[1] ?? card.nodeHeight;
 
           const isSpouse = edge.data?.kind === 'spouse';
 
@@ -1106,6 +1106,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             g6Graph.updateEdgeData([{
               id: edgeId,
               style: {
+                zIndex: 0,
                 orthPath: {
                   points: [
                     { x: mainRight, y: mainY },
@@ -1146,6 +1147,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
             g6Graph.updateEdgeData([{
               id: edgeId,
               style: {
+                zIndex: 0,
                 orthPath: {
                   points,
                   type: 'orth',
@@ -1229,23 +1231,55 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       g6Graph.on('drag', () => { lastInteractionAt = performance.now(); });
     }
 
-    // Node click event — check if click is on the icon (thumbnail)
+    // G6 v5 的 node:click 没有 v4 的 e.item.getModel()。
+    // target 是节点元素，id 要用 getNodeData 取。拖拽已经是这么写的，点击之前不是。
     g6Graph.on('node:click', (e: any) => {
-      const targetId = e.target?.id;
-      const isIconClick = targetId && String(targetId).includes('icon');
-      const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
+      let nodeId = e.target?.id as string | undefined;
+      let cursor = e.target;
+      for (let i = 0; i < 4 && cursor && !g6Graph.getNodeData?.(String(nodeId)); i++) {
+        cursor = cursor.parentNode || cursor.parent;
+        nodeId = cursor?.id;
+      }
+      if (!nodeId) return;
+      const nodeData = g6Graph.getNodeData(String(nodeId));
+      const data = nodeData?.data as any;
+      if (!data) return;
 
-      if (isIconClick && nodeModel?.data?.thumbnail_url) {
-        // Click on thumbnail → open image preview
-        const name = nodeModel.data.original?.full_name || nodeModel.label || '';
-        deps.openImagePreview(nodeModel.data.thumbnail_url, name);
+      const shapeId = String(e.originalTarget?.id || e.target?.id || '');
+      if (shapeId.includes('icon') && data.thumbnail_url) {
+        const name = data.original?.full_name || nodeData.label || '';
+        deps.openImagePreview(data.thumbnail_url, name);
         return;
       }
 
-      if (nodeModel?.data?.original) {
-        // [s7-6] 通过 store action 选中节点（保持 setup 层 genealogyStore 引用）
-        (deps.genealogyStore as any).selectNode?.(nodeModel.data.original);
+      const original = data.original;
+      if (original?.id != null) {
+        deps.genealogyStore.selectNode(original);
+        return;
       }
+      deps.genealogyStore.selectNode({
+        id: nodeData.id,
+        label: nodeData.label || data.full_name || '',
+        full_name: data.full_name || nodeData.label || '',
+        gender: data.gender || 'male',
+        is_living: !!data.is_living,
+        birth_date: data.birth_date,
+        death_date: data.death_date,
+        birth_year: data.birth_year,
+        death_year: data.death_year,
+        avatar_url: data.avatar_url,
+        thumbnail_url: data.thumbnail_url,
+        photo_url: data.photo_url,
+        generation_word: data.generation_word,
+        biography: data.biography,
+        events: data.events,
+        has_photo: !!data.has_photo,
+      });
+    });
+
+    // 点到卡片以外的画布才关抽屉。节点点击走的是 node:click，不会进这里。
+    g6Graph.on('canvas:click', () => {
+      deps.genealogyStore.selectNode(null);
     });
 
     // Tooltip configuration — 单例模式，避免重复创建/销毁 DOM（性能优化）
@@ -1266,36 +1300,89 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       }
     };
 
-    g6Graph.on('node:mouseenter', (e: any) => {
-      const nodeModel = e.target?.getAttribute?.('model') || e.item?.getModel();
-      if (nodeModel?.data?.original) {
-        const data = nodeModel.data;
-        const name = data.original.full_name || data.original.label || '未知';
-        const gender = data.gender === 'male' ? '男' : '女';
-        const birthYear = data.birth_year ? `出生: ${data.birth_year}` : '';
-        const deathYear = data.death_date ? `去世: ${data.death_date}` : '';
-        const status = data.is_living ? '在世' : '已故';
+    const escapeHtml = (value: unknown) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
 
-        const tooltip = getTooltip();
-        tooltip.innerHTML = `
-          <div style="padding:8px 12px;min-width:140px;background:rgba(255,255,255,0.98);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);border:1px solid rgba(201,169,110,0.2);">
-            <div style="font-weight:600;color:#5D4037;margin-bottom:4px;">${name}</div>
-            <div style="display:flex;gap:8px;font-size:12px;color:#7F8C8D;">
-              <span>${gender}</span>
-              <span>${status}</span>
-            </div>
-            ${birthYear ? `<div style="font-size:12px;color:#999;margin-top:4px;">${birthYear} ${deathYear}</div>` : ''}
-          </div>
-        `;
-
-        const event = e.originalEvent as MouseEvent;
-        tooltip.style.left = `${event.clientX + 15}px`;
-        tooltip.style.top = `${event.clientY + 15}px`;
-
-        g6Graph.once('node:mouseleave', removeTooltip);
-        document.addEventListener('click', removeTooltip, { once: true });
+    const markTipFromEvent = (e: any): string => {
+      let cursor = e?.originalTarget || e?.target;
+      for (let i = 0; i < 8 && cursor; i++) {
+        if (cursor.__markTip) return String(cursor.__markTip);
+        const name = String(cursor.name || cursor.className || cursor.id || '');
+        const match = name.match(/corner-mark-(\d+)/);
+        if (match) {
+          const tips = g6Graph.getNodeData?.(nodeIdFromEvent(e))?.data?.corner_tips;
+          const tip = Array.isArray(tips) ? tips[Number(match[1])] : '';
+          if (tip) return String(tip);
+        }
+        cursor = cursor.parentNode || cursor.parent;
       }
-    });
+      return '';
+    };
+
+    const nodeIdFromEvent = (e: any): string => {
+      let nodeId = e?.target?.id as string | undefined;
+      let cursor = e?.target;
+      for (let i = 0; i < 8 && cursor && !g6Graph.getNodeData?.(String(nodeId)); i++) {
+        cursor = cursor.parentNode || cursor.parent;
+        nodeId = cursor?.id;
+      }
+      return nodeId ? String(nodeId) : '';
+    };
+
+    const placeTooltip = (html: string, e: any) => {
+      const tooltip = getTooltip();
+      tooltip.innerHTML = html;
+      const event = (e?.originalEvent || e) as MouseEvent;
+      const x = typeof event?.clientX === 'number' ? event.clientX : 0;
+      const y = typeof event?.clientY === 'number' ? event.clientY : 0;
+      tooltip.style.left = `${x + 15}px`;
+      tooltip.style.top = `${y + 15}px`;
+    };
+
+    const renderHover = (e: any) => {
+      const markTip = markTipFromEvent(e);
+      if (markTip) {
+        placeTooltip(
+          `<div style="padding:4px 8px;background:#fff;border:1px solid #E4DFD8;border-radius:6px;font-size:12px;color:#3D3426;box-shadow:0 4px 12px rgba(42,36,28,0.12);">${escapeHtml(markTip)}</div>`,
+          e,
+        );
+        return;
+      }
+      const nodeId = nodeIdFromEvent(e);
+      const nodeData = nodeId ? g6Graph.getNodeData?.(nodeId) : null;
+      const data = nodeData?.data as any;
+      if (!data && !nodeData) return;
+      const name = data?.original?.full_name
+        || data?.full_name
+        || nodeData?.label
+        || '未知';
+      const gender = data?.gender === 'male' ? '男' : data?.gender === 'female' ? '女' : '';
+      const status = data?.is_living ? '在世' : '已故';
+      const birthYear = data?.birth_year ? `出生: ${data.birth_year}` : '';
+      const deathYear = data?.death_year ? `去世: ${data.death_year}` : '';
+      const hint = data?.surname_only && data?.spouse_hint
+        ? `<div style="font-size:12px;color:#8A8178;margin-top:4px;">${escapeHtml(data.spouse_hint)}</div>`
+        : '';
+      placeTooltip(`
+        <div style="padding:8px 12px;min-width:140px;background:rgba(255,255,255,0.98);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);border:1px solid rgba(201,169,110,0.2);">
+          <div style="font-weight:600;color:#5D4037;margin-bottom:4px;">${escapeHtml(name)}</div>
+          <div style="display:flex;gap:8px;font-size:12px;color:#7F8C8D;">
+            ${gender ? `<span>${gender}</span>` : ''}
+            <span>${status}</span>
+          </div>
+          ${birthYear ? `<div style="font-size:12px;color:#999;margin-top:4px;">${escapeHtml(birthYear)} ${escapeHtml(deathYear)}</div>` : ''}
+          ${hint}
+        </div>
+      `, e);
+    };
+
+    g6Graph.on('node:mouseenter', renderHover);
+    g6Graph.on('node:pointermove', renderHover);
+    g6Graph.on('node:mouseleave', removeTooltip);
+    g6Graph.on('node:pointerleave', removeTooltip);
 
     try {
       // [P0-1 2026-09-03] 在 G6 setData + render 之前预计算所有节点的三谓词匹配，
@@ -1411,15 +1498,21 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       // 应用布局引擎计算的视口变换（缩放 + 居中）
       // 必须在 render() 完成后执行，否则 canvas 变换矩阵未初始化会报 transform undefined
       // 改用 autoFit 算出的 zoom + minZoom 0.25 加底限，再手工 translateBy 居中
+      // 密度切换走 viewportAnchor：缩放不变，视口中心仍对着原来那个人。
+      const anchored = viewportAnchor ? nodePositionMap.get(viewportAnchor.nodeId) : undefined;
       if (
         typeof g6Graph.zoomTo === 'function' &&
         typeof g6Graph.translateBy === 'function' &&
         typeof g6Graph.getViewportByCanvas === 'function'
       ) {
-        await g6Graph.zoomTo(viewportConfig.zoom, { duration: 0 });
+        const zoom = anchored ? viewportAnchor!.zoom : viewportConfig.zoom;
+        const focusAt: [number, number] = anchored
+          ? [anchored.x + viewportAnchor!.dx, anchored.y + viewportAnchor!.dy]
+          : [viewportConfig.centerX, viewportConfig.centerY];
+        await g6Graph.zoomTo(zoom, { duration: 0 });
         const [canvasW, canvasH] = g6Graph.getSize();
         const canvasCenter: [number, number] = [canvasW / 2, canvasH / 2];
-        const contentVp = g6Graph.getViewportByCanvas([viewportConfig.centerX, viewportConfig.centerY]);
+        const contentVp = g6Graph.getViewportByCanvas(focusAt);
         const delta: [number, number] = [
           canvasCenter[0] - contentVp[0],
           canvasCenter[1] - contentVp[1],
@@ -1430,12 +1523,15 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       // 绑定 ResizeObserver，后续容器尺寸变化（窗口 resize / 面板展开）自动 setSize
       setupGraphResize(g6Graph);
       // 渲染完成：进度条快速跑满到 100% 再延迟关闭
-      // 进一步用 focusElement 锁定到主根节点，缩放保持不变（主传承树已经合适显示）
+      // 聚焦模式把镜头锁到中心人物；全局模式仍锁主根。缩放保持不变。
       const totalNodeCount2 = graphData.nodes?.length || 0;
-      const rootId = (deps.genealogyStore as any).mainLineage?.[0];
-      if (rootId && totalNodeCount2 <= 800 && typeof g6Graph.focusElement === 'function') {
+      const inFocus = deps.genealogyStore.viewType === 'focus' && !!deps.genealogyStore.focusCenterId;
+      const focusId = inFocus
+        ? String(deps.genealogyStore.focusCenterId)
+        : (deps.genealogyStore.mainLineage?.[0] ? String(deps.genealogyStore.mainLineage[0]) : '');
+      if (!anchored && focusId && (inFocus || totalNodeCount2 <= 800) && typeof g6Graph.focusElement === 'function') {
         try {
-          g6Graph.focusElement(rootId, { duration: 0 });
+          g6Graph.focusElement(focusId, { duration: 0 });
         } catch (err) {
           console.warn('[GenealogyTree] focusElement 失败:', err);
         }
@@ -1456,13 +1552,13 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
    * 防抖版 initGraph 包装器
    * 快速切换视图模式 / 布局方向时，取消上一次未执行的重建，避免性能浪费
    */
-  function debouncedInitGraph(data: GenealogyNode) {
+  function debouncedInitGraph(data: GenealogyNode, options?: InitGraphOptions) {
     if (initGraphDebounceTimer !== null) {
       clearTimeout(initGraphDebounceTimer);
     }
     initGraphDebounceTimer = window.setTimeout(() => {
       initGraphDebounceTimer = null;
-      void initGraph(data);
+      void initGraph(data, options);
     }, 150);
   }
 
@@ -1482,10 +1578,8 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
       cancelAnimationFrame(perfRafId);
       perfRafId = 0;
     }
-    if (cullingRafId) {
-      cancelAnimationFrame(cullingRafId);
-      cullingRafId = 0;
-    }
+    viewportCull?.destroy();
+    viewportCull = null;
     if (deps.graph.value) {
       deps.graph.value.destroy();
       deps.graph.value = null;
@@ -1497,7 +1591,7 @@ export function useG6GraphInit(deps: G6GraphInitDeps): G6GraphInitReturn {
 
   // ---- 工厂闭包级 rAF 状态（每个 composable 实例一份） ----
   let perfRafId = 0;
-  let cullingRafId = 0;
+  let viewportCull: ViewportCullHandle | null = null;
 
   return {
     initGraph,

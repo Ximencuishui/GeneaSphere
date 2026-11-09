@@ -12,6 +12,8 @@
  *   - 父-多妻妾组共享 drop line（虚拟起点 = 父 + 最右妻妾 中点）
  * - resolveEdgeHorizontalOverlaps：同层水平边段按 edgeHorizontalSeparation 错开
  *   - 共享总线（同一 junctionGroup）豁免，整组一起平移
+ * - 竖线若穿过别的卡片，或和别组竖线重合，会在 X 上让开
+ * - markOrthogonalBridges：仍然交叉的位置记在 path.bridges，渲染时拱桥
  * - shiftEdgePathsX：节点整体平移后同步平移所有边路径（响应居中）
  *
  * 不在本模块范围：
@@ -29,18 +31,16 @@ import type {
   NodePosition,
   LayoutConfig,
   CoupleUnit,
+  Point,
 } from '@/types/layout';
 
 // ==================== 模块常量 ====================
 
 /**
- * 端点内缩常量：让牵引线末端落在卡片可见区域内
- *
- * 背景：G6 矩形节点带 border-radius（默认 8px），几何边缘与可见边缘存在偏差。
- * 线段如果刚好停在几何边缘上，渲染时会因为圆角看起来"没接上"卡片。
- * 这里统一把「父边起点」「子边终点」从几何边缘向内缩 EDGE_INSET px。
+ * 锚点停在卡片外缘，不向内缩。
+ * 向内缩会让线段穿进圆角卡片。调用方传入的 edgeInset 只用来在父子之间留出总线空隙。
  */
-const EDGE_INSET = 4;
+const EDGE_INSET = 0;
 
 // ==================== 父子边正交路径 ====================
 
@@ -50,6 +50,10 @@ const EDGE_INSET = 4;
  * 核心规则：
  * 1. 单 child：起点 → 垂线 → 水平 → 子女顶中点（3 点）或退化为 2 点直线
  * 2. 多 child：起点 → 垂线到 busY → 水平到各 child 顶 X → 各 child 顶中点（4 点 T 形）
+ *
+ * 工作坐标是 TB：父节点底部出，向下折，接入子节点顶部。
+ * LR 由流水线转置坐标：屏幕上变成父节点右侧出，向右折，接入子节点左侧。
+ * resolveEdgeHorizontalOverlaps 错开的是工作坐标里的水平段，转置后就是垂直段错开。
  *
  * 起点 X 的解析规则（v6.0.8 走线解耦母亲归属）：
  *   a) 父在 CoupleUnit 内（有 ≥1 妻妾）→ coupleUnitMidX = (父.x + 最右配偶.x) / 2
@@ -76,137 +80,532 @@ const EDGE_INSET = 4;
  *   「父边起点」「子边终点」从几何边缘向内缩 edgeInset = 4px，
  *   确保末端点落在卡片可见区域内部。
  */
+function dedupePoints(points: { x: number; y: number }[]) {
+  const out: { x: number; y: number }[] = [];
+  for (const point of points) {
+    const prev = out[out.length - 1];
+    if (prev && Math.abs(prev.x - point.x) < 0.5 && Math.abs(prev.y - point.y) < 0.5) continue;
+    out.push(point);
+  }
+  return out;
+}
+
+export interface OrthogonalPathOptions {
+  /**
+   * modern：同代分车道、躲开卡片、稍后可以拱桥。
+   * traditional：每户一条居中横担，交叉留着，不避让。
+   */
+  mode?: 'modern' | 'traditional';
+}
+
 export function computeOrthogonalEdgePaths(
   nodePositions: Map<string, NodePosition>,
   edges: LayoutEdge[],
   coupleUnitByMain: Map<string, CoupleUnit>,
   /**
-   * [v6.x X 系列] 端点向节点内缩距离（默认 edgeInset = 4）
-   * 由调用方从 LayoutConfig.edgeInset 读取后传入。
+   * 父子之间留给分发总线的最小空隙。端点本身停在卡片外缘，不再向卡片内部缩。
    */
   edgeInset: number = EDGE_INSET,
+  options: OrthogonalPathOptions = {},
 ) {
-  // 按 source 分组父子边
-  const childrenByParent = new Map<string, LayoutEdge[]>();
+  // 妻子名下的子女改挂到丈夫。数据里 parent-child 的 source 可以仍是妻子，
+  // 画出来的线必须从父亲底部（工作坐标）出发。
+  const spouseToMain = new Map<string, string>();
+  for (const [mainId, unit] of coupleUnitByMain) {
+    for (const spouseId of unit.spouseIds) spouseToMain.set(spouseId, mainId);
+  }
   for (const edge of edges) {
-    if (edge.kind === 'spouse') continue;
-    // [W2 2026-09-01] 跳过 spouse 边展开而来的虚拟边：它们的 path 由 spouse-renderer 接管。
-    if (edge.fromVirtualSpouse) continue;
-    if (!childrenByParent.has(edge.source)) childrenByParent.set(edge.source, []);
-    childrenByParent.get(edge.source)!.push(edge);
+    if (edge.kind !== 'spouse' || edge.fromVirtualSpouse) continue;
+    if (!spouseToMain.has(edge.target)) spouseToMain.set(edge.target, edge.source);
   }
 
-  for (const [parentId, childEdges] of childrenByParent) {
-    const parentPos = nodePositions.get(parentId);
-    if (!parentPos || childEdges.length === 0) continue;
+  const childrenByFather = new Map<string, LayoutEdge[]>();
+  for (const edge of edges) {
+    if (edge.kind === 'spouse' || edge.fromVirtualSpouse) continue;
+    const fatherId = spouseToMain.get(edge.source) ?? edge.source;
+    if (!childrenByFather.has(fatherId)) childrenByFather.set(fatherId, []);
+    childrenByFather.get(fatherId)!.push(edge);
+  }
 
-    const parentBottomY = parentPos.y + parentPos.height / 2 - edgeInset;
+  const traditional = options.mode === 'traditional';
+  const gap = Math.max(8, edgeInset);
+  /** 车道间距低于这个值就不再错开，避免总线被挤出父子之间的空隙。 */
+  const MIN_LANE_GAP = 2;
 
-    // [v6.0.8 2026-09-02] 走线解耦：所有兄弟共享 drop line，不再按 motherId 分流。
-    //   coupleUnitMidX = (父.x + 最右配偶.x) / 2
-    //   无配偶时退化为父节点中心 X（保持原行为）。
-    const coupleUnit = coupleUnitByMain.get(parentId);
-    let coupleUnitMidX: number | null = null;
-    if (coupleUnit && coupleUnit.spouseIds.length > 0) {
-      let rightmostSpouseX = parentPos.x;
-      for (const sid of coupleUnit.spouseIds) {
-        const spos = nodePositions.get(sid);
-        if (spos && spos.x > rightmostSpouseX) rightmostSpouseX = spos.x;
-      }
-      coupleUnitMidX = (parentPos.x + rightmostSpouseX) / 2;
+  interface ChildAnchor {
+    edge: LayoutEdge;
+    x: number;
+    y: number;
+  }
+  interface BusPlan {
+    fatherId: string;
+    startX: number;
+    startY: number;
+    minX: number;
+    maxX: number;
+    limitY: number;
+    anchors: ChildAnchor[];
+    lane: number;
+    busY: number;
+    collapsed: boolean;
+  }
+
+  const plans: BusPlan[] = [];
+  for (const [fatherId, childEdges] of childrenByFather) {
+    const father = nodePositions.get(fatherId);
+    if (!father || childEdges.length === 0) continue;
+    const anchors = childEdges
+      .map((edge) => {
+        const pos = nodePositions.get(edge.target);
+        return pos && pos.height > 0
+          ? { edge, x: pos.x, y: pos.y - pos.height / 2 }
+          : null;
+      })
+      .filter((item): item is ChildAnchor => !!item);
+    if (anchors.length === 0) continue;
+    const xs = [father.x, ...anchors.map((anchor) => anchor.x)];
+    plans.push({
+      fatherId,
+      startX: father.x,
+      startY: father.y + father.height / 2,
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      limitY: Math.min(...anchors.map((anchor) => anchor.y)),
+      anchors,
+      lane: 0,
+      busY: 0,
+      collapsed: false,
+    });
+  }
+
+  // 古谱：父节点底边中点垂直下行，到子女组正中画一条横担，再垂直落入每个子女顶边中点。
+  // 不分车道、不躲卡片，交叉保持垂丝图原来的样子。
+  if (traditional) {
+    for (const plan of plans) {
+      const mid = (plan.startY + plan.limitY) / 2;
+      const top = plan.startY + 4;
+      const bottom = plan.limitY - 4;
+      plan.lane = 0;
+      plan.collapsed = true;
+      plan.busY = bottom > top ? Math.min(bottom, Math.max(top, mid)) : mid;
     }
+  }
 
-    /**
-     * [v6.0.8] 起点 X 解析：
-     *   - 有 coupleUnit（父-多妻妾组）→ coupleUnitMidX（共享 drop line）
-     *   - 无 coupleUnit → 父节点中心 X
-     *
-     * 不再读取 edge.motherId，v6.0.7 的 per-edge motherId 分流已废弃。
-     */
-    const resolveStartX = (_edge: LayoutEdge): number => {
-      return coupleUnitMidX ?? parentPos.x;
-    };
-
-    const childPositions = childEdges
-      .map(e => ({ edge: e, pos: nodePositions.get(e.target) }))
-      .filter(({ pos }) => pos !== undefined)
-      .map(({ edge, pos }) => ({ edge, pos: pos! }));
-
-    if (childPositions.length === 0) continue;
-
-    if (childPositions.length === 1) {
-      const childPos = childPositions[0].pos;
-      const childTopX = childPos.x;
-      // 子边终点向子节点内缩 edgeInset px（向下移动 Y+4），
-      // 确保终点落在卡片可见区内，避免 border-radius=8 导致终点看起来「悬空」。
-      const childTopY = childPos.y - childPos.height / 2 + edgeInset;
-      const startX = resolveStartX(childPositions[0].edge);
-
-      if (startX === childTopX) {
-        childPositions[0].edge.path = {
-          points: [
-            { x: startX, y: parentBottomY },
-            { x: childTopX, y: childTopY },
-          ],
-          type: 'orthogonal',
-        };
-      } else {
-        childPositions[0].edge.path = {
-          points: [
-            { x: startX, y: parentBottomY },
-            { x: startX, y: childTopY },
-            { x: childTopX, y: childTopY },
-          ],
-          type: 'orthogonal',
-        };
+  // 同一代的父亲底部几乎在同一条 Y 上。若每家总线都取间隙的 45%，
+  // 水平总线会叠成一条，别家的垂直下落正好从这条线上穿过去。
+  // 水平跨度有重叠的家庭分到不同车道，车道在父子间隙里均匀错开。
+  const boxes = collectBoxes(nodePositions);
+  if (!traditional) {
+  plans.sort((a, b) => a.startY - b.startY || a.minX - b.minX);
+  const bands: BusPlan[][] = [];
+  for (const plan of plans) {
+    const band = bands.find((group) => Math.abs(group[0].startY - plan.startY) < 30);
+    if (band) band.push(plan);
+    else bands.push([plan]);
+  }
+  for (const [depth, band] of bands.entries()) {
+    band.sort((a, b) => a.minX - b.minX);
+    const laneEnds: number[] = [];
+    for (const plan of band) {
+      let lane = 0;
+      while (lane < laneEnds.length && plan.minX < laneEnds[lane] + gap) lane += 1;
+      if (lane === laneEnds.length) laneEnds.push(plan.maxX);
+      else laneEnds[lane] = Math.max(laneEnds[lane], plan.maxX);
+      plan.lane = lane;
+    }
+    const lanesNeeded = laneEnds.length;
+    const maxLane = Math.max(0, lanesNeeded - 1);
+    const room = Math.min(
+      ...band.map((plan) => {
+        const top = plan.startY + gap;
+        const bottom = Math.max(top, plan.limitY - gap);
+        return bottom - top;
+      }),
+    );
+    const step = maxLane === 0 ? 0 : room / maxLane;
+    const collapsed = maxLane > 0 && step < MIN_LANE_GAP;
+    if (collapsed) {
+      for (const plan of band) {
+        const top = plan.startY + gap;
+        const bottom = Math.max(top, plan.limitY - gap);
+        plan.lane = 0;
+        plan.collapsed = true;
+        plan.busY = top + (bottom - top) / 2;
       }
     } else {
-      // [v6.0.8 2026-09-02] 走线解耦母亲归属：
-      //   - 所有兄弟统一归入同一 'shared' 组（不再按 motherId 分组）
-      //   - 起点 X 统一 = coupleUnitMidX ?? parentPos.x
-      //   - 一组共享一条 T 形总线（junctionGroup 仍区分同父不同兄弟组）
-      type MotherGroup = {
-        groupKey: string;
-        startX: number;
-        children: { edge: LayoutEdge; pos: NodePosition }[];
-      };
-      const groups = new Map<string, MotherGroup>();
-      // [v6.0.8] 同父的所有兄弟归入同一 'shared' 组
-      const sharedStartX = coupleUnitMidX ?? parentPos.x;
-      const sharedGroup: MotherGroup = {
-        groupKey: 'shared',
-        startX: sharedStartX,
-        children: [],
-      };
-      groups.set('shared', sharedGroup);
-      for (const cp of childPositions) {
-        sharedGroup.children.push(cp);
+      const laneStep = maxLane === 0 ? 0 : Math.min(16, step);
+      for (const plan of band) {
+        const top = plan.startY + gap;
+        const bottom = Math.max(top, plan.limitY - gap);
+        plan.busY = Math.min(bottom, Math.max(top, top + plan.lane * laneStep));
       }
+    }
 
-      // [2026-09-01 修复] 共享总线组标识：同一 parentId 下的多条 child edges 在 busY 上的
-      //   水平段属于同一"父-多妻妾组 drop line"，应保持 Y 一致（重合）。
-      //   resolveEdgeHorizontalOverlaps 会跳过同 junctionGroup 的水平段。
-      for (const group of groups.values()) {
-        const firstChildTopY = Math.min(...group.children.map(c => c.pos.y - c.pos.height / 2 + edgeInset));
-        const branchY = parentBottomY + (firstChildTopY - parentBottomY) * 0.5;
-        const junctionGroup = `parent-${parentId}-${group.groupKey}`;
-
-        for (const { edge, pos } of group.children) {
-          const childTopX = pos.x;
-          const childTopY = pos.y - pos.height / 2 + edgeInset;
-
-          edge.path = {
-            points: [
-              { x: group.startX, y: parentBottomY },
-              { x: group.startX, y: branchY },
-              { x: childTopX, y: branchY },
-              { x: childTopX, y: childTopY },
-            ],
-            type: 'orthogonal',
-            junctionGroup,
-          };
-        }
+    if (import.meta.env?.DEV && import.meta.env?.MODE !== 'test') {
+      const laneCount = collapsed ? 1 : lanesNeeded;
+      const busYs: number[] = [];
+      for (let lane = 0; lane < laneCount; lane++) {
+        const sample = band.find((plan) => plan.lane === lane);
+        if (sample) busYs.push(Math.round(sample.busY * 10) / 10);
       }
+      console.log('[edge-router] 总线车道', {
+        depth,
+        familyCount: band.length,
+        laneCount,
+        busYs,
+      });
+    }
+  }
+
+  // 总线若横穿别的卡片，在父子空隙里换一条 Y。换不开就保持原车道。
+  for (const plan of plans) {
+    const ignore = new Set<string>([plan.fatherId, ...plan.anchors.map((anchor) => anchor.edge.target)]);
+    if (!segmentHitsBox(plan.minX, plan.busY, plan.maxX, plan.busY, boxes, ignore)) continue;
+    const top = plan.startY + gap;
+    const bottom = Math.max(top, plan.limitY - gap);
+    for (const delta of [8, -8, 16, -16, 24, -24]) {
+      const y = plan.busY + delta;
+      if (y < top - 0.5 || y > bottom + 0.5) continue;
+      const crowded = plans.some((other) => other !== plan
+        && Math.abs(other.startY - plan.startY) < 30
+        && Math.abs(other.busY - y) < MIN_LANE_GAP
+        && rangesOverlap(plan.minX, plan.maxX, other.minX, other.maxX, 0));
+      if (crowded) continue;
+      if (segmentHitsBox(plan.minX, y, plan.maxX, y, boxes, ignore)) continue;
+      plan.busY = y;
+      break;
+    }
+  }
+  }
+
+  for (const plan of plans) {
+    const junctionGroup = `parent-${plan.fatherId}-shared`;
+    const spread = plan.anchors.some((anchor) => Math.abs(anchor.x - plan.startX) > 0.5);
+    for (const child of plan.anchors) {
+      const points = [{ x: plan.startX, y: plan.startY }];
+      if (spread) {
+        points.push({ x: plan.startX, y: plan.busY });
+        points.push({ x: child.x, y: plan.busY });
+      }
+      points.push({ x: child.x, y: child.y });
+      child.edge.path = {
+        points: dedupePoints(points),
+        type: 'orthogonal',
+        junctionGroup,
+        laneCollapsed: plan.collapsed || undefined,
+        classic: traditional || undefined,
+      };
+    }
+  }
+
+  if (!traditional) dodgeBlockedVerticals(edges, boxes);
+}
+
+// ==================== 交叉避让与桥接 ====================
+
+interface Box {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+interface AxisSeg {
+  edge: LayoutEdge;
+  group: string;
+  index: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+const DODGE_STEPS = [10, -10, 18, -18, 28, -28, 40, -40];
+const DODGE_STUB = 8;
+
+function collectBoxes(nodePositions: Map<string, NodePosition>): Box[] {
+  const boxes: Box[] = [];
+  for (const [id, pos] of nodePositions) {
+    if (!(pos.width > 0) || !(pos.height > 0)) continue;
+    boxes.push({
+      id,
+      x1: pos.x - pos.width / 2,
+      y1: pos.y - pos.height / 2,
+      x2: pos.x + pos.width / 2,
+      y2: pos.y + pos.height / 2,
+    });
+  }
+  return boxes;
+}
+
+function rangesOverlap(a1: number, a2: number, b1: number, b2: number, pad: number) {
+  const lo = Math.max(Math.min(a1, a2), Math.min(b1, b2));
+  const hi = Math.min(Math.max(a1, a2), Math.max(b1, b2));
+  return hi - lo > pad;
+}
+
+function segmentHitsBox(
+  x1: number, y1: number, x2: number, y2: number,
+  boxes: Box[],
+  ignore: Set<string>,
+) {
+  const vertical = Math.abs(x1 - x2) < 0.5;
+  const horizontal = Math.abs(y1 - y2) < 0.5;
+  if (!vertical && !horizontal) return false;
+  for (const box of boxes) {
+    if (ignore.has(box.id)) continue;
+    if (vertical) {
+      const x = x1;
+      if (x <= box.x1 + 0.5 || x >= box.x2 - 0.5) continue;
+      if (rangesOverlap(y1, y2, box.y1, box.y2, 1)) return true;
+    } else {
+      const y = y1;
+      if (y <= box.y1 + 0.5 || y >= box.y2 - 0.5) continue;
+      if (rangesOverlap(x1, x2, box.x1, box.x2, 1)) return true;
+    }
+  }
+  return false;
+}
+
+function listAxisSegments(edges: LayoutEdge[]): AxisSeg[] {
+  const segs: AxisSeg[] = [];
+  for (const edge of edges) {
+    const pts = edge.path?.points;
+    if (!pts || pts.length < 2 || edge.kind === 'spouse') continue;
+    const group = edge.path?.junctionGroup ?? edge.id;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const vertical = Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) > 0.5;
+      const horizontal = Math.abs(a.y - b.y) < 0.5 && Math.abs(a.x - b.x) > 0.5;
+      if (!vertical && !horizontal) continue;
+      segs.push({ edge, group, index: i, x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    }
+  }
+  return segs;
+}
+
+function strictCross(a: AxisSeg, b: AxisSeg): boolean {
+  const aH = Math.abs(a.y1 - a.y2) < 0.5;
+  const bH = Math.abs(b.y1 - b.y2) < 0.5;
+  if (aH === bH) return false;
+  const h = aH ? a : b;
+  const v = aH ? b : a;
+  const x = v.x1;
+  const y = h.y1;
+  const xMin = Math.min(h.x1, h.x2);
+  const xMax = Math.max(h.x1, h.x2);
+  const yMin = Math.min(v.y1, v.y2);
+  const yMax = Math.max(v.y1, v.y2);
+  return x > xMin + 0.5 && x < xMax - 0.5 && y > yMin + 0.5 && y < yMax - 0.5;
+}
+
+function sameSegment(a: AxisSeg, b: AxisSeg) {
+  return a.edge === b.edge && a.index === b.index;
+}
+
+/** 竖线穿过卡片、和别组竖线重合，或横穿别家总线时，把中段挪到旁边的 X。 */
+function dodgeBlockedVerticals(edges: LayoutEdge[], boxes: Box[]) {
+  for (const edge of edges) {
+    const pts = edge.path?.points;
+    if (!pts || edge.kind === 'spouse') continue;
+    const group = edge.path?.junctionGroup ?? edge.id;
+    for (let i = pts.length - 2; i >= 0; i--) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      if (Math.abs(a.x - b.x) > 0.5) continue;
+      const span = Math.abs(b.y - a.y);
+      if (span < DODGE_STUB * 2 + 8) continue;
+      const dx = pickDodgeX(edges, boxes, edge, group, i, a.x, a.y, b.y);
+      if (dx === 0) continue;
+      const dir = Math.sign(b.y - a.y) || 1;
+      const yA = a.y + dir * DODGE_STUB;
+      const yB = b.y - dir * DODGE_STUB;
+      pts.splice(i + 1, 0,
+        { x: a.x, y: yA },
+        { x: a.x + dx, y: yA },
+        { x: a.x + dx, y: yB },
+        { x: a.x, y: yB },
+      );
+    }
+  }
+}
+
+function pickDodgeX(
+  edges: LayoutEdge[],
+  boxes: Box[],
+  edge: LayoutEdge,
+  group: string,
+  index: number,
+  x: number,
+  yFrom: number,
+  yTo: number,
+) {
+  const base = scoreChannel(edges, boxes, edge, group, index, x, yFrom, yTo, 0);
+  if (base.nodeHits === 0 && base.coincidences === 0 && base.crosses === 0) return 0;
+  let bestDx = 0;
+  let bestScore = channelScore(base);
+  for (const dx of DODGE_STEPS) {
+    const next = scoreChannel(edges, boxes, edge, group, index, x, yFrom, yTo, dx);
+    if (next.nodeHits > 0) continue;
+    const score = channelScore(next);
+    if (score + 0.5 < bestScore) {
+      bestScore = score;
+      bestDx = dx;
+    }
+  }
+  return bestDx;
+}
+
+function channelScore(cost: { nodeHits: number; coincidences: number; crosses: number; travel: number }) {
+  return cost.nodeHits * 100 + cost.coincidences * 40 + cost.crosses * 5 + cost.travel;
+}
+
+function scoreChannel(
+  edges: LayoutEdge[],
+  boxes: Box[],
+  edge: LayoutEdge,
+  group: string,
+  index: number,
+  x: number,
+  yFrom: number,
+  yTo: number,
+  dx: number,
+) {
+  const dir = Math.sign(yTo - yFrom) || 1;
+  const yA = yFrom + dir * DODGE_STUB;
+  const yB = yTo - dir * DODGE_STUB;
+  const pieces: Array<[number, number, number, number]> = dx === 0
+    ? [[x, yFrom, x, yTo]]
+    : [
+        [x, yFrom, x, yA],
+        [x, yA, x + dx, yA],
+        [x + dx, yA, x + dx, yB],
+        [x + dx, yB, x, yB],
+        [x, yB, x, yTo],
+      ];
+  let nodeHits = 0;
+  for (const [x1, y1, x2, y2] of pieces) {
+    if (segmentHitsBox(x1, y1, x2, y2, boxes, new Set())) nodeHits += 1;
+  }
+  const segs = listAxisSegments(edges);
+  let crosses = 0;
+  let coincidences = 0;
+  for (const piece of pieces) {
+    const query: AxisSeg = {
+      edge, group, index: -1,
+      x1: piece[0], y1: piece[1], x2: piece[2], y2: piece[3],
+    };
+    const queryVertical = Math.abs(query.x1 - query.x2) < 0.5;
+    for (const seg of segs) {
+      if (seg.edge === edge && seg.index === index) continue;
+      if (strictCross(query, seg)) crosses += 1;
+      if (!queryVertical || Math.abs(seg.x1 - seg.x2) > 0.5) continue;
+      if (seg.group === group) continue;
+      if (Math.abs(seg.x1 - query.x1) >= 1.5) continue;
+      if (rangesOverlap(query.y1, query.y2, seg.y1, seg.y2, 12)) coincidences += 1;
+    }
+  }
+  return { nodeHits, coincidences, crosses, travel: Math.abs(dx) * 0.05 };
+}
+
+/**
+ * 把仍然穿过别组水平线的竖线交叉点记下来。
+ * 同一 junctionGroup 的 T 形接头不算交叉。
+ * 必须在水平段错开和居中平移之后调用，桥的 Y 才跟最终总线对齐。
+ */
+export function markOrthogonalBridges(edges: LayoutEdge[]) {
+  for (const edge of edges) {
+    if (edge.path?.bridges) edge.path.bridges = undefined;
+  }
+  const segs = listAxisSegments(edges);
+  const byEdge = new Map<LayoutEdge, Point[]>();
+  for (const vertical of segs) {
+    if (Math.abs(vertical.x1 - vertical.x2) > 0.5) continue;
+    const x = vertical.x1;
+    const yTop = Math.min(vertical.y1, vertical.y2);
+    const yBot = Math.max(vertical.y1, vertical.y2);
+    for (const horizontal of segs) {
+      if (Math.abs(horizontal.y1 - horizontal.y2) > 0.5) continue;
+      if (horizontal.group === vertical.group) continue;
+      if (sameSegment(horizontal, vertical)) continue;
+      const y = horizontal.y1;
+      if (y <= yTop + 12 || y >= yBot - 12) continue;
+      const xMin = Math.min(horizontal.x1, horizontal.x2);
+      const xMax = Math.max(horizontal.x1, horizontal.x2);
+      if (x <= xMin + 0.5 || x >= xMax - 0.5) continue;
+      const list = byEdge.get(vertical.edge) ?? [];
+      if (!list.some((point) => Math.abs(point.x - x) < 0.5 && Math.abs(point.y - y) < 0.5)) {
+        list.push({ x, y });
+      }
+      byEdge.set(vertical.edge, list);
+    }
+  }
+  for (const [edge, list] of byEdge) {
+    edge.path!.bridges = list;
+  }
+}
+
+// ==================== 总线钳制在卡片外侧 ====================
+
+/**
+ * 水平段的 Y 必须落在「父亲底边 + 间隙」和「子女顶边 - 间隙」之间。
+ * 同层错开会把总线向上推进父亲卡片，正交桥拱（半径 8）还会再往上拱，
+ * 生卒年就正好被线穿过。这里在错开之后把总线推回两代之间的空隙。
+ * 路径首尾是卡片边缘锚点，不动。
+ */
+export function clampOrthogonalPathsOutsideCards(
+  nodes: Array<Pick<NodePosition, 'id' | 'x' | 'y' | 'width' | 'height'>>,
+  edges: LayoutEdge[],
+  clearance = 14,
+): void {
+  const boxes = nodes
+    .filter((node) => node.width > 0 && node.height > 0)
+    .map((node) => ({
+      id: node.id,
+      x1: node.x - node.width / 2,
+      x2: node.x + node.width / 2,
+      y1: node.y - node.height / 2,
+      y2: node.y + node.height / 2,
+    }));
+  const hitsBox = (y: number, x1: number, x2: number) => boxes.some((box) => {
+    if (y <= box.y1 + 0.5 || y >= box.y2 - 0.5) return false;
+    return Math.min(x2, box.x2) - Math.max(x1, box.x1) > 2;
+  });
+
+  for (const edge of edges) {
+    const pts = edge.path?.points;
+    if (edge.kind === 'spouse' || edge.path?.doubleLine || !pts || pts.length < 4) continue;
+    const parentBottom = pts[0].y;
+    const childTop = pts[pts.length - 1].y;
+    if (!(childTop > parentBottom)) continue;
+    let safeTop = parentBottom + clearance;
+    let safeBottom = childTop - clearance;
+    if (safeTop > safeBottom) {
+      const tight = 6;
+      safeTop = parentBottom + tight;
+      safeBottom = childTop - tight;
+    }
+    if (safeTop > safeBottom) {
+      safeTop = (parentBottom + childTop) / 2;
+      safeBottom = safeTop;
+    }
+    for (let i = 1; i < pts.length - 2; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      if (Math.abs(a.y - b.y) > 0.5 || Math.abs(a.x - b.x) < 2) continue;
+      const x1 = Math.min(a.x, b.x);
+      const x2 = Math.max(a.x, b.x);
+      let next = Math.min(safeBottom, Math.max(safeTop, a.y));
+      if (hitsBox(next, x1, x2)) {
+        const candidates = [safeTop, safeBottom, (safeTop + safeBottom) / 2];
+        const free = candidates.find((y) => !hitsBox(y, x1, x2));
+        if (free !== undefined) next = free;
+      }
+      if (Math.abs(next - a.y) < 0.5) continue;
+      a.y = next;
+      b.y = next;
     }
   }
 }
@@ -245,6 +644,8 @@ export function resolveEdgeHorizontalOverlaps(
 
   const segments: Segment[] = [];
   for (const edge of edges) {
+    // 配偶总线必须贴着卡片中线，错开会把它推进卡片。
+    if (edge.kind === 'spouse' || edge.path?.doubleLine || edge.path?.laneCollapsed) continue;
     if (!edge.path?.points || edge.path.points.length < 2) continue;
     const pts = edge.path.points;
     const junctionGroup = edge.path.junctionGroup;
@@ -301,6 +702,9 @@ export function resolveEdgeHorizontalOverlaps(
       compounds.push({ segs, y: segs[0].y, x1, x2, junctionGroup: key });
     }
 
+    // 只有一组总线时不平移。单独上移会把总线推进父亲卡片。
+    if (compounds.length < 2) continue;
+
     // 按 X 起点排序复合段，在复合段之间错开
     compounds.sort((a, b) => a.x1 - b.x1);
 
@@ -329,18 +733,10 @@ export function resolveEdgeHorizontalOverlaps(
       //   这样共享总线的多条边始终保持同一 Y（重合）。
       for (const seg of compound.segs) {
         const pts = seg.edge.path!.points;
-        const a = pts[seg.index];
-        const b = pts[seg.index + 1];
-        a.y += delta;
-        b.y += delta;
-
-        // 联动调整相邻垂直段端点 Y，保证正交连接不被破坏
-        if (seg.index - 1 >= 0) {
-          pts[seg.index - 1].y += delta;
-        }
-        if (seg.index + 2 < pts.length) {
-          pts[seg.index + 2].y += delta;
-        }
+        // 只移动这条水平段本身。两端的竖线会变长或变短，
+        // 路径首尾是卡片边缘锚点，不能跟着平移，否则线会穿进卡片。
+        pts[seg.index].y += delta;
+        pts[seg.index + 1].y += delta;
       }
 
       if (useUpper) {
@@ -370,6 +766,9 @@ export function shiftEdgePathsX(edges: LayoutEdge[], dx: number) {
     }
     if (edge.path.junction) {
       edge.path.junction.x += dx;
+    }
+    if (edge.path.bridges) {
+      for (const point of edge.path.bridges) point.x += dx;
     }
   }
 }

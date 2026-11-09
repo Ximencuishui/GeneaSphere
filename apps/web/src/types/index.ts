@@ -88,6 +88,10 @@ export interface GenealogyNode {
   is_living: boolean;
   birth_date?: string;
   death_date?: string;
+  birth_place?: string | null;
+  death_place?: string | null;
+  migration_branch?: string | null;
+  updated_at?: string;
   birth_year?: number;
   death_year?: number;
   /** [树谱卡片 2026-08-26] 称谓/身份注释，如“皇后”“肃王/辽王” */
@@ -95,6 +99,27 @@ export interface GenealogyNode {
   children?: GenealogyNode[];
   avatar_url?: string;
   thumbnail_url?: string;
+  /** 抽屉里的高清照片。卡片上不画。 */
+  photo_url?: string;
+  /** 字辈 */
+  generation_word?: string;
+  /** 排行。子女节点上由父节点 child_links 写入，根节点通常没有。 */
+  birth_order?: number;
+  /** 过继 / 收养 / 出继。BIOLOGICAL 不画角标。 */
+  child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER' | 'ADOPTED_OUT' | string;
+  /** 早夭 */
+  premature?: boolean;
+  native_place?: string | null;
+  /** 迁入地，卡片上写成「迁某地」。 */
+  migration_to?: string | null;
+  /** 这一支的始迁祖 */
+  is_founding_ancestor?: boolean;
+  /** 入赘 */
+  uxorilocal?: boolean;
+  /** 简介。只在详情抽屉展示。 */
+  biography?: string;
+  /** 生平事迹 */
+  events?: { year?: string; text: string }[];
   has_photo: boolean;
   /** 当前 + 历史配偶（从后端 FamilyUnit 推导），前端用于画 spouse 边 */
   spouses?: SpouseInfo[];
@@ -114,7 +139,7 @@ export interface GenealogyNode {
 export interface ChildLink {
   child_id: string;
   birth_order?: number;
-  child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER';
+  child_type?: 'BIOLOGICAL' | 'ADOPTED' | 'STEP' | 'FOSTER' | 'ADOPTED_OUT';
   family_id?: string;
   father_id?: string;
   mother_id?: string;
@@ -127,6 +152,8 @@ export interface ChildLink {
 export interface SpouseInfo {
   id: string;
   name: string;
+  /** 与 name 相同的全名。卡片优先读它，避免只拿到姓氏时无法区分。 */
+  full_name?: string;
   gender: string;
   family_id: string;
   marriage_date?: string | null;
@@ -135,6 +162,12 @@ export interface SpouseInfo {
   is_current: boolean;
   end_reason?: string | null;
   note?: string | null;
+  union_type?: string | null;
+  birth_date?: string | null;
+  death_date?: string | null;
+  is_living?: boolean;
+  birth_place?: string | null;
+  native_place?: string | null;
 }
 
 /** 历史婚姻条目（含结婚/结束日期） */
@@ -152,11 +185,92 @@ export interface MarriageHistoryEntry {
 /**
  * 人物详情（侧栏编辑用）
  */
+export interface PersonRef {
+  id: string;
+  full_name: string;
+  gender: string;
+}
+
+export interface PersonKin extends PersonRef {
+  birth_year?: number;
+  birth_order?: number;
+  child_type?: string;
+  premature?: boolean;
+}
+
+export interface PersonProfile {
+  courtesy_name: string | null;
+  native_place: string | null;
+  burial_place: string | null;
+  achievements: string | null;
+  anecdotes: string | null;
+  biography: string | null;
+  marital_notes: string | null;
+  adoption_note: string | null;
+  premature: boolean | null;
+  taboo_name: string | null;
+  art_name: string | null;
+  posthumous_name: string | null;
+  infant_name: string | null;
+  alias_name: string | null;
+  former_name: string | null;
+  nickname: string | null;
+  ethnicity: string | null;
+  education: string | null;
+  occupation: string | null;
+  job_title: string | null;
+  alma_mater: string | null;
+  employer: string | null;
+  lunar_birth: string | null;
+  lunar_death: string | null;
+  religion: string | null;
+  blood_type: string | null;
+  epitaph: string | null;
+  source_note: string | null;
+  generation: number;
+  generation_word: string | null;
+  birth_order: number | null;
+  age_at_death: number | null;
+}
+
+export interface PersonLifeEvent {
+  id?: string;
+  event_year: number | null;
+  content: string;
+  sort_order?: number;
+}
+
+export interface PersonMigration {
+  id: string;
+  from_location: string;
+  to_location: string;
+  event_year: number;
+  reason: string | null;
+  description: string | null;
+}
+
+export interface PersonMedia {
+  id: string;
+  url: string;
+  thumb_url: string | null;
+  description: string | null;
+  category: string | null;
+  media_type: string;
+}
+
 export interface PersonDetail {
   person: GenealogyNode;
-  parents: { id: string; full_name: string; gender: string }[];
+  profile?: PersonProfile;
+  father?: PersonRef | null;
+  mother?: PersonRef | null;
+  parents: PersonRef[];
   spouses: SpouseInfo[];
-  children: { id: string; full_name: string; gender: string; birth_year?: number }[];
+  children: PersonKin[];
+  siblings?: PersonKin[];
+  migrations?: PersonMigration[];
+  media?: PersonMedia[];
+  events?: PersonLifeEvent[];
+  contact?: { phone: string; email: string | null } | null;
 }
 
 export interface TreeResponse {

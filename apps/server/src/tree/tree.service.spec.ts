@@ -21,13 +21,20 @@ describe('TreeService', () => {
       },
       familyUnit: {
         findFirst: jest.fn(),
+        findMany: jest.fn(),
         create: jest.fn(),
       },
       familyChild: {
         findFirst: jest.fn(),
+        findMany: jest.fn(),
         create: jest.fn(),
         aggregate: jest.fn(),
       },
+      xipai: { findFirst: jest.fn() },
+      migrationEvent: { findMany: jest.fn() },
+      mediaPersonLink: { findMany: jest.fn() },
+      personBio: { findMany: jest.fn().mockResolvedValue([]) },
+      personEvent: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
       $transaction: jest.fn().mockImplementation((callback: any) => callback(prisma)),
     };
 
@@ -275,6 +282,95 @@ describe('TreeService', () => {
       });
 
       expect(prisma.personAncestry.createMany).toHaveBeenCalled();
+    });
+  });
+
+  describe('getPersonDetail', () => {
+    it('reads bio, ranked children, parents, siblings, generation word and age', async () => {
+      prisma.person.findUnique.mockResolvedValue({
+        id: BigInt(2),
+        clan_id: BigInt(1),
+        full_name: '朱熹',
+        gender: Gender.male,
+        birth_date: new Date('1130-02-12'),
+        death_date: new Date('1200-03-26'),
+        is_living: false,
+        birth_place: '尤溪',
+        death_place: null,
+        migration_branch: null,
+        deleted_at: null,
+        bio: {
+          courtesy_name: '元晦、仲晦',
+          native_place: '婺源',
+          burial_place: null,
+          achievements: null,
+          anecdotes: null,
+          biography: '紫阳',
+          marital_notes: null,
+          adoption_note: null,
+          premature: null,
+        },
+      });
+      prisma.personAncestry.findMany
+        .mockResolvedValueOnce([
+          { ancestor: { id: BigInt(1), full_name: '朱松', gender: Gender.male } },
+          { ancestor: { id: BigInt(9), full_name: '祝氏', gender: Gender.female } },
+        ])
+        .mockResolvedValueOnce([
+          { descendant: { id: BigInt(3), full_name: '朱塾', gender: Gender.male, birth_date: new Date('1150-01-01') } },
+        ]);
+      prisma.familyChild.findMany
+        .mockResolvedValueOnce([
+          {
+            birth_order: 1,
+            child_type: 'BIOLOGICAL',
+            child: { id: BigInt(4), full_name: '朱塾', gender: Gender.male, birth_date: new Date('1153-01-01') },
+          },
+        ])
+        .mockResolvedValueOnce([
+          { child_id: BigInt(3), birth_order: 2, child_type: 'BIOLOGICAL' },
+        ])
+        .mockResolvedValueOnce([
+          { birth_order: 3, child_type: 'BIOLOGICAL' },
+        ]);
+      prisma.familyUnit.findMany.mockResolvedValue([
+        {
+          id: BigInt(8),
+          husband_id: BigInt(2),
+          wife_id: BigInt(7),
+          marriage_order: 1,
+          is_current: true,
+          divorce_date: null,
+          end_reason: null,
+          note: null,
+          union_type: 'normal',
+          husband: { id: BigInt(2), full_name: '朱熹', gender: Gender.male },
+          wife: { id: BigInt(7), full_name: '刘氏', gender: Gender.female },
+        },
+      ]);
+      prisma.personAncestry.findFirst.mockResolvedValue({ depth: 4 });
+      prisma.xipai.findFirst.mockResolvedValue({ character: '熹' });
+      prisma.migrationEvent.findMany.mockResolvedValue([]);
+      prisma.mediaPersonLink.findMany.mockResolvedValue([]);
+
+      const result = await service.getPersonDetail(BigInt(2));
+
+      expect(result.profile.courtesy_name).toBe('元晦、仲晦');
+      expect(result.profile.biography).toBe('紫阳');
+      expect(result.profile.generation).toBe(5);
+      expect(result.profile.generation_word).toBe('熹');
+      expect(result.profile.birth_order).toBe(3);
+      expect(result.profile.age_at_death).toBe(70);
+      expect(result.father?.full_name).toBe('朱松');
+      expect(result.mother?.full_name).toBe('祝氏');
+      expect(result.children[0]).toMatchObject({ full_name: '朱塾', birth_order: 1, child_type: 'BIOLOGICAL' });
+      expect(result.siblings[0]).toMatchObject({ full_name: '朱塾', birth_order: 2 });
+      expect(result.spouses[0]).toMatchObject({ name: '刘氏', union_type: 'normal' });
+      expect(result.person).not.toHaveProperty('bio');
+      expect(prisma.xipai.findFirst).toHaveBeenCalledWith({
+        where: { clan_id: BigInt(1), generation: 5 },
+        select: { character: true },
+      });
     });
   });
 });

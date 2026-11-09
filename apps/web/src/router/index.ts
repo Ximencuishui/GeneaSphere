@@ -59,6 +59,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false },
   },
   {
+    path: '/demo/render-stress',
+    name: 'demo-render-stress',
+    component: () => import('@/views/RenderStressPage.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/cepu/:clanId',
     name: 'cepu',
     component: () => import('@/views/CepuPage.vue'),

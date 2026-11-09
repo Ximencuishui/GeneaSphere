@@ -233,6 +233,7 @@ model Person {
   custody_as_child     ChildCustodyRecord[]   @relation("CustodyChild")
   custody_as_parent    ChildCustodyRecord[]   @relation("CustodyParent")
   bio                  PersonBio?
+  events               PersonEvent[]
 
   @@index([clan_id])
   @@index([clan_id, migration_branch])
@@ -274,6 +275,7 @@ enum ChildRelationType {
   ADOPTED // 收养
   STEP // 继子女（再婚带来的）
   FOSTER // 寄养/过继
+  ADOPTED_OUT // 出继
 }
 
 model FamilyChild {
@@ -395,10 +397,42 @@ model PersonBio {
   marital_notes String?  @map("marital_notes") @db.Text // 配偶家世/岳家
   adoption_note String?  @map("adoption_note") @db.Text // 出继/兼祧标注
   premature     Boolean? @map("premature") // 早夭覆盖标记
+  taboo_name       String? @map("taboo_name")
+  art_name         String? @map("art_name")
+  posthumous_name  String? @map("posthumous_name")
+  infant_name      String? @map("infant_name")
+  alias_name       String? @map("alias_name")
+  former_name      String? @map("former_name")
+  nickname         String? @map("nickname")
+  ethnicity        String? @map("ethnicity")
+  education        String? @map("education")
+  occupation       String? @map("occupation")
+  job_title        String? @map("job_title")
+  alma_mater       String? @map("alma_mater")
+  employer         String? @map("employer")
+  lunar_birth      String? @map("lunar_birth")
+  lunar_death      String? @map("lunar_death")
+  religion         String? @map("religion")
+  blood_type       String? @map("blood_type")
+  epitaph          String? @map("epitaph") @db.Text
+  source_note      String? @map("source_note") @db.Text
   updated_at    DateTime @updatedAt @map("updated_at")
   person        Person   @relation(fields: [person_id], references: [id], onDelete: Cascade)
 
   @@map("person_bios")
+}
+
+// 人物重要事件。年份和正文分开存，不写进 biography。
+model PersonEvent {
+  id         BigInt  @id @default(autoincrement()) @map("id")
+  person_id  BigInt  @map("person_id")
+  event_year Int?    @map("event_year")
+  content    String  @map("content") @db.Text
+  sort_order Int     @default(0) @map("sort_order")
+  person     Person  @relation(fields: [person_id], references: [id], onDelete: Cascade)
+
+  @@index([person_id, sort_order])
+  @@map("person_events")
 }
 
 model MediaArchive {

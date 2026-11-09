@@ -127,6 +127,10 @@ export function computeLayoutHash(
         config.mainLineageCenter ? 1 : 0,
         config.resolveSubtreeOverlap ? 1 : 0,
         config.engine ?? 'auto',
+        config.layoutDirection === 'LR' ? 'LR' : 'TB',
+        config.edgeRouting === 'traditional' ? 'traditional' : 'modern',
+        config.nodeWidth ?? '',
+        config.nodeHeight ?? '',
       ].join('|')
     : '';
 

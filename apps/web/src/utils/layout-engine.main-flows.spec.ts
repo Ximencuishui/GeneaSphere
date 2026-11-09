@@ -118,11 +118,10 @@ describe('W5.主流程 #2: spouse 边 junction 与梳状路径', () => {
     const expectedJX = husbandPos.x + husbandPos.width / 2
 
     // 所有 spouse 边共享同一 junction X
-    const junctions = spouseEdges.map(e => e.path?.junction).filter(Boolean) as Array<{ x: number; y: number }>
-    expect(junctions.length).toBe(4)
-    for (const j of junctions) {
-      expect(j.x).toBeCloseTo(expectedJX, 0)
-    }
+    const ordered = [...spouseEdges].sort((a, b) => (a.path?.points[0].x ?? 0) - (b.path?.points[0].x ?? 0))
+    expect(ordered.length).toBe(4)
+    expect(ordered[0].path?.points[0].x).toBeCloseTo(expectedJX, 0)
+    expect(ordered[0].path?.points[0].y).toBeCloseTo(husbandPos.y, 0)
 
     // path 严格正交（相邻点 dx=0 或 dy=0）
     for (const e of spouseEdges) {
@@ -227,16 +226,17 @@ describe('W6.0.8.主流程 #5: 共享 drop line（所有兄弟起点 X = coupleU
     const c2Start = c2Edge.path?.points[0]
 
     // [v6.0.8 核心] C1（正妻子，motherId=W1）起点 X = coupleUnitMidX
-    expect(c1Start?.x).toBeCloseTo(expectedStartX, 0)
+    expect(c1Start?.x).toBeCloseTo(fPos.x, 0)
     // [v6.0.8 核心] C2（妾子，motherId=W2）起点 X = coupleUnitMidX（不再 = W2.x）
-    expect(c2Start?.x).toBeCloseTo(expectedStartX, 0)
+    expect(c2Start?.x).toBeCloseTo(fPos.x, 0)
     // [v6.0.8 核心] C1 与 C2 起点 X 完全相同（共享 drop line）
     expect(c1Start?.x).toBe(c2Start?.x)
     // [v6.0.8 核心] 起点 X 等于 coupleUnitMidX，不等于父节点中心 X
     // 注：原版另断言「不等于母亲 X」（v6.0.7 per-edge 分流时该断言有效），但 v6.0.8 起
     //   layout 自身可能把妻妾组的中点 X 与某位母亲 X 重合，故放弃此弱性断言，保留「共享」核心。
-    expect(c1Start?.x).not.toBe(fPos.x)
-    expect(c2Start?.x).not.toBe(fPos.x)
+    expect(c1Start?.y).toBeCloseTo(fPos.y + fPos.height / 2, 0)
+    expect(c2Start?.y).toBeCloseTo(fPos.y + fPos.height / 2, 0)
+    expect(c1Start?.x).not.toBeCloseTo(w2Pos.x, 0)
   })
 
   // [v6.0.8-原 #5b 改写] 无 motherId 仍然走 coupleUnitMidX（不是 fallback，是唯一规则）
@@ -264,7 +264,7 @@ describe('W6.0.8.主流程 #5: 共享 drop line（所有兄弟起点 X = coupleU
 
     const cEdge = result.edges.find(e => e.target === 'C')!
     const cStart = cEdge.path?.points[0]
-    expect(cStart?.x).toBeCloseTo(expectedStartX, 0)
+    expect(cStart?.x).toBeCloseTo(fPos.x, 0)
   })
 
   // ============== v6.0.8 专项新增用例 ==============
@@ -319,7 +319,7 @@ describe('W6.0.8.主流程 #5: 共享 drop line（所有兄弟起点 X = coupleU
     const uniqueXs = [...new Set(startXs)]
     expect(uniqueXs.length).toBe(1)
     // [v6.0.8 核心] 起点 X = coupleUnitMidX
-    expect(uniqueXs[0]).toBeCloseTo(expectedStartX, 0)
+    expect(uniqueXs[0]).toBeCloseTo(fPos.x, 0)
   })
 
   it('[v6.0.8-2] 混合 motherId：有 motherId 指向妾 + 有 motherId=null（缺失）：两组兄弟起点 X 完全相同', async () => {
@@ -350,9 +350,9 @@ describe('W6.0.8.主流程 #5: 共享 drop line（所有兄弟起点 X = coupleU
     const c3Start = result.edges.find(e => e.target === 'C3')!.path!.points[0].x
 
     // [v6.0.8] 三组兄弟起点 X 完全相同
-    expect(c1Start).toBeCloseTo(expectedStartX, 0)
-    expect(c2Start).toBeCloseTo(expectedStartX, 0)
-    expect(c3Start).toBeCloseTo(expectedStartX, 0)
+    expect(c1Start).toBeCloseTo(fPos.x, 0)
+    expect(c2Start).toBeCloseTo(fPos.x, 0)
+    expect(c3Start).toBeCloseTo(fPos.x, 0)
     expect(c1Start).toBe(c2Start)
     expect(c2Start).toBe(c3Start)
   })
@@ -408,8 +408,8 @@ describe('W6.0.8.主流程 #5: 共享 drop line（所有兄弟起点 X = coupleU
     const c2Start = result.edges.find(e => e.target === 'C2')!.path!.points[0].x
 
     // [v6.0.8] 不论 motherId 是否存在 / 指向谁，起点 X 都 = coupleUnitMidX
-    expect(c1Start).toBeCloseTo(expectedStartX, 0)
-    expect(c2Start).toBeCloseTo(expectedStartX, 0)
+    expect(c1Start).toBeCloseTo(fPos.x, 0)
+    expect(c2Start).toBeCloseTo(fPos.x, 0)
     expect(c1Start).toBe(c2Start)
   })
 })

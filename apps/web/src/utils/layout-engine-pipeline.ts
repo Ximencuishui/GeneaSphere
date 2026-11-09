@@ -18,12 +18,12 @@
  *   [6]  align         alignMainLineage（仅当 config.mainLineageCenter）
  *   [7]  subtreeOverlap resolveSubtreeOverlap（仅当 config.resolveSubtreeOverlap）
  *   [8]  center        shiftToCenter + shiftEdgePathsX
- *   [9]  edgePaths     computeOrthogonalEdgePaths
- *   [10] collapse      collapseVirtualNodes（W2 引入）
- *   [11] spouseEdgePaths computeSpouseEdgePaths + merge finalEdges
- *   [12] separation    resolveEdgeHorizontalOverlaps（仅当 config.edgeHorizontalSeparation > 0）
- *   [13] recenter      强制主脉 x=0（仅当 config.mainLineageCenter）
- *   [14] birthOrder    reorderSiblingsByBirthOrder（P2 修复）
+ *   [9]  birthOrder    reorderSiblingsByBirthOrder（必须在任何 edge.path 之前）
+ *   [10] edgePaths     computeOrthogonalEdgePaths
+ *   [11] collapse      collapseVirtualNodes（W2 引入）
+ *   [12] spouseEdgePaths computeSpouseEdgePaths + merge finalEdges
+ *   [13] separation    resolveEdgeHorizontalOverlaps（仅当 config.edgeHorizontalSeparation > 0）
+ *   [14] recenter      强制主脉 x=0（仅当 config.mainLineageCenter）
  *
  * 注意：cache 写入 + meta 填充 + 累计统计由 LayoutEngine.calculateLayout 统一处理。
  */
@@ -49,10 +49,13 @@ import {
   shiftToCenter,
   getBoundingBox,
   reorderSiblingsByBirthOrder,
+  packSubtreesByBirthOrder,
   buildSpouseMap,
 } from '@/utils/tree-layout';
 import {
   computeOrthogonalEdgePaths,
+  clampOrthogonalPathsOutsideCards,
+  markOrthogonalBridges,
   resolveEdgeHorizontalOverlaps,
   shiftEdgePathsX,
 } from '@/utils/edge-router';
@@ -60,6 +63,13 @@ import { computeSpouseEdgePaths } from '@/utils/spouse-renderer';
 import { collapseVirtualNodes } from '@/utils/spouse-virtualizer';
 import { selectLayoutEngine, runLayoutEngine } from '@/utils/layout-engine-adapter';
 import type { PreparedLayoutData } from '@/utils/layout-engine-prepare';
+import { assertParentChildEdgeEndpoints, logLayoutAlignment } from '@/utils/tree-align-debug';
+import {
+  normalizeLayoutDirection,
+  transposeEdgePaths,
+  transposeNodeSizes,
+  transposePositions,
+} from '@/utils/layout-direction';
 
 export interface PipelineOutput {
   result: LayoutResult;
@@ -102,13 +112,24 @@ export async function runLayoutPipeline(
 
   // ========== [2] spacing ==========
   const endSpacing = metrics ? beginPhase(metrics, 'spacing') : null;
+  const direction = normalizeLayoutDirection(config.layoutDirection);
   const maxGeneration = computeMaxGeneration(childrenByParent, roots);
+  // 兄弟轴上的卡片尺寸：TB 用宽，LR 用高。代际轴相反。
+  const siblingExtent = direction === 'LR' ? config.nodeHeight : config.nodeWidth;
+  const rankExtent = direction === 'LR' ? config.nodeWidth : config.nodeHeight;
   const nodeSep =
     config.nodeSep === 'auto'
-      ? computeAutoNodeSep(nodes.length, maxGeneration, config.nodeWidth, config.maxNodeSep ?? 80)
+      ? computeAutoNodeSep(nodes.length, maxGeneration, siblingExtent, config.maxNodeSep ?? 80)
       : config.nodeSep;
-  const rankSep = config.rankSep === 'auto' ? computeAutoRankSep(config.nodeHeight) : config.rankSep;
+  const rankSep = config.rankSep === 'auto' ? computeAutoRankSep(rankExtent) : config.rankSep;
   endPhase(ctx, 'spacing', endSpacing);
+
+  let nodeSizesSwapped = false;
+  const restoreNodeSizes = () => {
+    if (!nodeSizesSwapped) return;
+    transposeNodeSizes(nodeMap.values());
+    nodeSizesSwapped = false;
+  };
 
   // ========== [3] engine ==========
   const endEngine = metrics ? beginPhase(metrics, 'engine') : null;
@@ -118,6 +139,16 @@ export async function runLayoutPipeline(
   for (const [id, pos] of positionsFromEngine) nodePositions.set(id, pos);
   endPhase(ctx, 'engine', endEngine);
 
+  // LR 引擎输出已经是屏幕坐标（代际 X、兄弟 Y）。
+  // 后面的配偶贴附、避让、正交边都写在工作坐标里（代际 Y、兄弟 X），
+  // 所以先转置进去，整条流水线结束再转置回屏幕。
+  if (direction === 'LR') {
+    transposePositions(nodePositions.values());
+    transposeNodeSizes(nodeMap.values());
+    nodeSizesSwapped = true;
+  }
+
+  try {
   // ========== [4] spouseMap ==========
   const endSpouseMap = metrics ? beginPhase(metrics, 'spouseMap') : null;
   const spouseByMain = buildSpouseMap(edges, spouseNodeIds);
@@ -160,9 +191,50 @@ export async function runLayoutPipeline(
   shiftEdgePathsX(virtualEdges, offsetX);
   endPhase(ctx, 'center', endCenter);
 
+  // 第二次 reorderSiblingsByBirthOrder。shiftToCenter 是全体同一偏移，不改变兄弟相对间距，
+  // 不是这次调用的理由。第一次在 layoutWithDagre 末尾，早于配偶贴附、主脉对齐、子树避让；
+  // 这三步会再次挪动 X。正交边紧跟本次调用，必须读到最终出生序，所以居中后这一次保留。
+  const endBirthOrder = metrics ? beginPhase(metrics, 'birthOrder') : null;
+  reorderSiblingsByBirthOrder(nodePositions, virtualEdges, config);
+  endPhase(ctx, 'birthOrder', endBirthOrder);
+
+  // 出生序重排只保证同父兄弟的中心距，不管跨代卡片是否相交。
+  // 正交边要读最终坐标，所以避让放在走线之前再做一遍。
+  if (config.resolveSubtreeOverlap) {
+    resolveSubtreeOverlap(
+      nodePositions, nodeMap, childrenByParent, spouseByMain,
+      coupleUnitByMain, nodeSep, nodeMap,
+    );
+  }
+
+  // 避让可能把子孙单独推开。走线前再按排行收拢子树，并把父节点拉到子女中心。
+  // 收拢之后同代卡片可能重新贴上（比如继子女子树比妻子槽更宽），再推开一次。
+  // 这次推的是整户，父亲和子女一起动，正上正下的关系还在。
+  packSubtreesByBirthOrder(
+    nodePositions,
+    virtualEdges,
+    nodeMap,
+    spouseByMain,
+    coupleUnitByMain,
+    childrenByParent,
+    nodeSep,
+  );
+  if (config.resolveSubtreeOverlap) {
+    resolveSubtreeOverlap(
+      nodePositions, nodeMap, childrenByParent, spouseByMain,
+      coupleUnitByMain, nodeSep, nodeMap,
+    );
+  }
+
   // ========== [9] edgePaths ==========
   const endEdge = metrics ? beginPhase(metrics, 'edgePaths') : null;
-  computeOrthogonalEdgePaths(nodePositions, virtualEdges, coupleUnitByMain, config.edgeInset);
+  computeOrthogonalEdgePaths(
+    nodePositions,
+    virtualEdges,
+    coupleUnitByMain,
+    config.edgeInset,
+    { mode: config.edgeRouting === 'traditional' ? 'traditional' : 'modern' },
+  );
   endPhase(ctx, 'edgePaths', endEdge);
 
   // ========== [10] collapse ==========
@@ -193,7 +265,7 @@ export async function runLayoutPipeline(
 
   // ========== [12] separation ==========
   const endSeparation = metrics ? beginPhase(metrics, 'separation') : null;
-  if (config.edgeHorizontalSeparation > 0) {
+  if (config.edgeRouting !== 'traditional' && config.edgeHorizontalSeparation > 0) {
     resolveEdgeHorizontalOverlaps(finalEdges, config);
   }
   endPhase(ctx, 'separation', endSeparation);
@@ -218,10 +290,23 @@ export async function runLayoutPipeline(
   }
   endPhase(ctx, 'recenter', endRecenter);
 
-  // ========== [14] birthOrder ==========
-  const endBirthOrder = metrics ? beginPhase(metrics, 'birthOrder') : null;
-  reorderSiblingsByBirthOrder(realNodePositions, finalEdges, config);
-  endPhase(ctx, 'birthOrder', endBirthOrder);
+  // 古谱保留横担交叉，不钳线、不拱桥。现代模式才把线段推出卡片并标记桥接点。
+  if (config.edgeRouting !== 'traditional') {
+    clampOrthogonalPathsOutsideCards(collapsed.nodes, finalEdges);
+    markOrthogonalBridges(finalEdges);
+  }
+
+  logLayoutAlignment(realNodePositions, finalEdges, nodeMap, coupleUnitByMain);
+  assertParentChildEdgeEndpoints(realNodePositions, finalEdges);
+
+  // 工作坐标转回屏幕：配偶的 X+ 变成 Y+，避让的 X 推移变成 Y 推移，
+  // 向下的父子边变成从右侧向右接入左侧。
+  if (direction === 'LR') {
+    transposePositions(collapsed.nodes);
+    transposeEdgePaths(finalEdges);
+  }
+
+  logLayoutExtents(direction, collapsed.nodes);
 
   // ========== 组装 result ==========
   const finalBounds = getBoundingBox(collapsed.nodes);
@@ -238,4 +323,37 @@ export async function runLayoutPipeline(
     engineUsed: engineType,
     wideTree: false, // 由 autoFit 阶段回写到 metrics；此处不强制
   };
+  } finally {
+    restoreNodeSizes();
+  }
+}
+
+/** 开发时打印节点坐标极值，用来确认 LR 兄弟轴没有再被拉爆。测试里不打。 */
+function logLayoutExtents(direction: 'TB' | 'LR', nodes: NodePosition[]) {
+  let dev = false;
+  try {
+    const env = import.meta.env;
+    dev = Boolean(env?.DEV) && env?.MODE !== 'test' && !env?.VITEST;
+  } catch {
+    dev = false;
+  }
+  if (!dev) return;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let count = 0;
+  for (const node of nodes) {
+    if (!(node.width > 0) || !(node.height > 0)) continue;
+    count += 1;
+    minX = Math.min(minX, node.x - node.width / 2);
+    maxX = Math.max(maxX, node.x + node.width / 2);
+    minY = Math.min(minY, node.y - node.height / 2);
+    maxY = Math.max(maxY, node.y + node.height / 2);
+  }
+  if (!count) return;
+  console.log(
+    `[layout:${direction}] nodes=${count} spanX=${Math.round(maxX - minX)} spanY=${Math.round(maxY - minY)} ` +
+    `x=[${Math.round(minX)},${Math.round(maxX)}] y=[${Math.round(minY)},${Math.round(maxY)}]`,
+  );
 }
