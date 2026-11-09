@@ -620,6 +620,16 @@ const generationSlots = computed<GenerationEntry[]>(() => {
   // 防御性：zoom 为 0 时按 1 处理（极端边缘情况）
   const safeZoom = zoom && Number.isFinite(zoom) ? zoom : 1;
   const viewportSpan = horizontal ? vw : vh;
+  // 世代轴在页面容器里，G6 画布因为导航栏内边距更靠下。
+  // 屏幕坐标要加上这块差值，缩放后标签才和该代节点的中心重合。
+  const canvasEl = document.querySelector('.genealogy-tree-canvas');
+  const railListEl = document.querySelector('.tree-gen-rail .rail__list');
+  let axisOrigin = 0;
+  if (canvasEl instanceof HTMLElement && railListEl instanceof HTMLElement) {
+    const canvasBox = canvasEl.getBoundingClientRect();
+    const railBox = railListEl.getBoundingClientRect();
+    axisOrigin = horizontal ? canvasBox.left - railBox.left : canvasBox.top - railBox.top;
+  }
 
   // TB 按画布 y 取每代最上节点；LR 按画布 x 取每代最左节点。
   const buckets = new Map<number, { count: number; minAlong: number; firstNodeId: string | null; words: Map<string, number> }>();
@@ -663,8 +673,9 @@ const generationSlots = computed<GenerationEntry[]>(() => {
     }
     // G6 v5：TB 用 y→screenY，LR 用 x→screenX
     const origin = horizontal ? cx : cy;
-    const screen = (b.minAlong - origin) * safeZoom + viewportSpan / 2;
-    const inViewport = screen > -RAIL_ITEM_HEIGHT && screen < viewportSpan + RAIL_ITEM_HEIGHT;
+    const screen = (b.minAlong - origin) * safeZoom + viewportSpan / 2 + axisOrigin;
+    const axisSpan = railListEl instanceof HTMLElement ? railListEl.clientHeight : viewportSpan;
+    const inViewport = screen > -RAIL_ITEM_HEIGHT && screen < axisSpan + RAIL_ITEM_HEIGHT;
     arr.push({
       gen: g,
       bei: classicGenerationBei(majorityGenerationWord(b.words)),
@@ -804,7 +815,7 @@ watch(
 // 监听 GenealogyTree 画布变更后驱动 Minimap 和 GenerationSlider 增量刷新
 // [世代浮窗跟随画布 2026-08-20] 修正 getter：必须读 .value。
 // 旧写法 `() => treeRef.value?.graphChangeVersion` 拿到的值是 ref 对象本身，
-// 引用不会变化，watch 实际不生效。改为读 ref.value 后才能响应 afterrender / aftertransform。
+// 引用不会变化，watch 实际不生效。缩放时 GenealogyTree 会在 aftertransform 里加这个版本号。
 watch(
   () => (treeRef.value as any)?.graphChangeVersion?.value,
   () => {
@@ -1381,10 +1392,7 @@ onUnmounted(() => {
   font-family: inherit;
   color: #5D4037;
   position: relative;
-  transition: background 0.15s ease, color 0.15s ease,
-    /* [世代浮窗跟随画布 2026-08-20] 画布平移/缩放时 item top 变化，加 0.18s 补间动画，
-     * 让世代标签轻微跟随画布动作，避免生硬跳跃 */
-    top 0.18s ease, opacity 0.2s ease;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.2s ease;
 }
 /* [世代浮窗跟随画布 2026-08-20] absolute 模式下：item 以 top 动态定位、垂直居中 */
 .tree-gen-rail.rail--absolute .rail__item {

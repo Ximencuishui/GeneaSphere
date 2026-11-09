@@ -1080,15 +1080,36 @@ function syncClassicRail() {
   }
 }
 
+let viewportRailRaf = 0;
+
+/**
+ * 古谱世代表头在 syncClassicRail 里直接跟 aftertransform 走。
+ * 现代视图的左侧世代轴只读 graphChangeVersion，而这个数原先只在 afterrender 时加一。
+ * 缩放和平移只发 aftertransform，不重绘，轴就停在上一次渲染的位置。
+ * 这里每一帧最多加一次，让现代轴用同一套视口公式跟上。
+ */
+function syncViewportRails() {
+  syncClassicRail();
+  if (viewportRailRaf) return;
+  viewportRailRaf = requestAnimationFrame(() => {
+    viewportRailRaf = 0;
+    graphChangeVersion.value++;
+  });
+}
+
 watch(graph, (next, prev) => {
   try {
-    prev?.off?.('aftertransform', syncClassicRail);
-    prev?.off?.('afterrender', syncClassicRail);
+    prev?.off?.('aftertransform', syncViewportRails);
+    prev?.off?.('afterrender', syncViewportRails);
   } catch {
     /* 旧图已经 destroy，监听会跟着画布一起丢掉 */
   }
-  next?.on?.('aftertransform', syncClassicRail);
-  next?.on?.('afterrender', syncClassicRail);
+  if (viewportRailRaf) {
+    cancelAnimationFrame(viewportRailRaf);
+    viewportRailRaf = 0;
+  }
+  next?.on?.('aftertransform', syncViewportRails);
+  next?.on?.('afterrender', syncViewportRails);
   syncClassicRail();
 });
 
@@ -1777,6 +1798,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (viewportRailRaf) cancelAnimationFrame(viewportRailRaf);
   // 清理进度定时器，避免组件卸载后定时器还在跑
   clearProgressTimer();
   clearHideTimer();
