@@ -19,6 +19,13 @@ import {
   Loading,
 } from '@element-plus/icons-vue';
 import { cepuApi, type BookVolume, type ShiluEntry, type PersonBio } from '@/api/cepu';
+import EuropeanChartView from '@/components/EuropeanChartView.vue';
+import BiographyBook from '@/components/BiographyBook.vue';
+import NameIndexBook from '@/components/NameIndexBook.vue';
+import BookCatalog from '@/components/BookCatalog.vue';
+import GenerationIndexBook from '@/components/GenerationIndexBook.vue';
+import { europeanChartsFromShilu } from '@/utils/european-chart-shilu';
+import { buildBookCatalog, findCatalogVolume, isLadiesVolume, type BookProfile, type CatalogEntry } from '@/utils/book-catalog';
 
 /**
  * 册谱页面（《册谱模块需求文档》一期核心闭环）
@@ -61,12 +68,15 @@ const volumeLoadingText = ref('正在加载卷宗内容…');
 const editMode = ref(false);
 
 // ---------- 临时样式切换（仅影响当前阅读，不保存） ----------
-const tempLayout = ref<'su' | 'ou' | 'shixi_table'>('su');
+const tempLayout = ref<'su' | 'ou' | 'ou_chart' | 'shixi_table' | 'biography'>('su');
+const bookScript = ref<'horizontal' | 'antique'>('horizontal');
+const titleVertical = ref(false);
+const chartPack = ref<'exclusive' | 'share'>('exclusive');
 
 function onLayoutChange(val: string | number | boolean | undefined) {
   // 临时切换样式，仅影响页面渲染，不修改卷宗配置
   if (volumeContent.value?.config && typeof val === 'string') {
-    volumeContent.value.config._tempLayout = val as 'su' | 'ou' | 'shixi_table';
+    volumeContent.value.config._tempLayout = val as 'su' | 'ou' | 'ou_chart' | 'shixi_table' | 'biography';
   }
 }
 
@@ -82,6 +92,24 @@ const effectiveLayout = computed(() => {
   if (volumeContent.value?.config?._tempLayout) return volumeContent.value.config._tempLayout;
   return volumeContent.value?.config?.layout || 'su';
 });
+
+/** 欧式不再是卡片墙。旧配置 ou 和新版式 ou_chart 都走五世一表。 */
+const isOuChart = computed(() => effectiveLayout.value === 'ou' || effectiveLayout.value === 'ou_chart');
+const isLadies = computed(() => {
+  const volume = volumeContent.value;
+  if (!volume) return false;
+  return volume.config?.gender_filter === 'female' || String(volume.title).includes('闺秀');
+});
+const isBiography = computed(() => volumeContent.value?.config?.layout === 'biography' && !isLadies.value);
+const bookProfile = ref<BookProfile>('compact');
+const viewingCatalog = ref(true);
+const viewingIndex = ref(false);
+const viewingGeneration = ref(false);
+const placeholderEntry = ref<CatalogEntry | null>(null);
+const generationRows = ref<{ generation: number; character: string; note?: string | null }[]>([]);
+const indexEntries = ref<ShiluEntry[]>([]);
+const catalog = computed(() => buildBookCatalog(volumes.value, bookProfile.value));
+const ouChartModel = computed(() => europeanChartsFromShilu(volumeContent.value?.entries || []));
 
 const focusedEntryId = ref<string | null>(null);
 const focusPersonId = computed(() => (route.query.person ? String(route.query.person) : null));
@@ -187,10 +215,14 @@ async function loadVolumes() {
   loading.value = true;
   accessError.value = null;
   try {
-    const data: any = await cepuApi.getVolumes(clanId.value, shareToken.value);
+    const [data, profile] = await Promise.all([
+      cepuApi.getVolumes(clanId.value, shareToken.value),
+      cepuApi.getBookProfile(clanId.value, shareToken.value).catch(() => ({ profile: 'compact' as const })),
+    ]);
     volumes.value = (data || []) as BookVolume[];
-    if (volumes.value.length > 0 && !activeVolumeId.value) {
-      await selectVolume(volumes.value[0].id);
+    bookProfile.value = profile?.profile === 'standard' ? 'standard' : 'compact';
+    if (!activeVolumeId.value && !viewingIndex.value && !viewingGeneration.value) {
+      openCatalog();
     }
   } catch (err: any) {
     const status = err?.status || err?.response?.status;
@@ -208,7 +240,74 @@ async function loadVolumes() {
 // 卷宗切换请求序号：丢弃过期响应，避免旧请求复位共享加载态或覆盖新卷内容（审计 2026-08-28）
 let volumeReqSeq = 0;
 
+function clearBookView() {
+  viewingCatalog.value = false;
+  viewingIndex.value = false;
+  viewingGeneration.value = false;
+  placeholderEntry.value = null;
+}
+
+function openCatalog() {
+  clearBookView();
+  viewingCatalog.value = true;
+  activeVolumeId.value = null;
+  volumeContent.value = null;
+}
+
+function catalogActive(entry: CatalogEntry) {
+  if (entry.kind === 'index') return viewingIndex.value;
+  if (entry.kind === 'generation') return viewingGeneration.value;
+  if (entry.kind === 'placeholder') return placeholderEntry.value?.key === entry.key;
+  return Boolean(entry.volumeId) && activeVolumeId.value === entry.volumeId && !viewingCatalog.value && !viewingIndex.value && !viewingGeneration.value;
+}
+
+async function saveBookProfile(value: string | number | boolean | undefined) {
+  const next: BookProfile = value === 'standard' ? 'standard' : 'compact';
+  bookProfile.value = next;
+  if (next === 'compact' && (viewingGeneration.value || placeholderEntry.value)) openCatalog();
+  if (!isAdmin.value) return;
+  try {
+    await cepuApi.setBookProfile(clanId.value, next);
+  } catch {
+    ElMessage.error('谱书复杂度没有保存');
+  }
+}
+
+async function openFromCatalog(entry: CatalogEntry) {
+  if (entry.kind === 'group') return;
+  if (entry.kind === 'index') return openNameIndex();
+  if (entry.kind === 'generation') return openGeneration();
+  if (entry.kind === 'placeholder' || !entry.volumeId) {
+    clearBookView();
+    placeholderEntry.value = entry;
+    activeVolumeId.value = null;
+    volumeContent.value = null;
+    return;
+  }
+  await selectVolume(entry.volumeId);
+}
+
+async function openGeneration() {
+  clearBookView();
+  viewingGeneration.value = true;
+  activeVolumeId.value = null;
+  volumeContent.value = null;
+  volumeLoadingText.value = '正在整理字辈索引…';
+  const reqSeq = ++volumeReqSeq;
+  volumeLoading.value = true;
+  try {
+    const rows: any = await cepuApi.getGenerationIndex(clanId.value, shareToken.value);
+    if (reqSeq !== volumeReqSeq || !viewingGeneration.value) return;
+    generationRows.value = rows || [];
+  } catch {
+    if (reqSeq === volumeReqSeq) generationRows.value = [];
+  } finally {
+    if (reqSeq === volumeReqSeq) volumeLoading.value = false;
+  }
+}
+
 async function selectVolume(id: string) {
+  clearBookView();
   activeVolumeId.value = id;
   volumeContent.value = null;
   searchOpen.value = false;
@@ -226,12 +325,21 @@ async function selectVolume(id: string) {
     if (reqSeq !== volumeReqSeq) return; // 已切换到其他卷，丢弃过期响应
     volumeContent.value = data;
     // 同步临时样式为卷宗配置的布局
-    if (data?.config?.layout) {
+    if (data?.config?.layout === 'ou' || data?.config?.layout === 'ou_chart') {
+      tempLayout.value = 'ou_chart';
+    } else if (data?.config?.layout) {
       tempLayout.value = data.config.layout;
     } else {
       tempLayout.value = 'su';
     }
     if (hasLogin.value) loadAnnotations(id);
+    if (isLadiesVolume({ id, title: data?.title || '', type: data?.type || '', config: data?.config }) && !indexEntries.value.length) {
+      const lineage = findCatalogVolume(volumes.value, 'lineage');
+      if (lineage) {
+        const lineageData: any = await cepuApi.getVolume(clanId.value, lineage.id, shareToken.value);
+        if (reqSeq === volumeReqSeq) indexEntries.value = lineageData?.entries || [];
+      }
+    }
     nextTick(() => applyFocus());
   } catch {
     /* 拦截器已提示 */
@@ -300,6 +408,66 @@ async function openPerson(personId: string, fullName: string, entry?: ShiluEntry
   }
 }
 
+function openChartPerson(personId: string) {
+  const entry = volumeContent.value?.entries?.find((item) => String(item.person_id) === personId);
+  openPerson(personId, entry?.full_name || personId, entry);
+}
+
+function scrollToId(id: string, left = 12) {
+  const node = document.getElementById(id);
+  if (node) {
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  if (left > 0) requestAnimationFrame(() => scrollToId(id, left - 1));
+}
+
+async function openNameIndex() {
+  clearBookView();
+  viewingIndex.value = true;
+  activeVolumeId.value = null;
+  volumeContent.value = null;
+  searchOpen.value = false;
+  const lineage = findCatalogVolume(volumes.value, 'lineage');
+  if (!lineage) {
+    indexEntries.value = [];
+    return;
+  }
+  volumeLoadingText.value = '正在生成人名索引：对照世系图号与人物传，请稍候…';
+  const reqSeq = ++volumeReqSeq;
+  volumeLoading.value = true;
+  try {
+    const data: any = await cepuApi.getVolume(clanId.value, lineage.id, shareToken.value);
+    if (reqSeq !== volumeReqSeq || !viewingIndex.value) return;
+    indexEntries.value = data?.entries || [];
+  } catch {
+    if (reqSeq === volumeReqSeq) indexEntries.value = [];
+  } finally {
+    if (reqSeq === volumeReqSeq) volumeLoading.value = false;
+  }
+}
+
+async function openBiographyFromChart(payload: { name: string; chartNo: number; citeBook?: string }) {
+  const volume = findCatalogVolume(volumes.value, payload.citeBook === '闺秀录' ? 'ladies' : 'biography')
+    ?? findCatalogVolume(volumes.value, 'biography');
+  if (!volume) return;
+  if (activeVolumeId.value !== volume.id) await selectVolume(volume.id);
+  await nextTick();
+  scrollToId(`bio-${payload.name}-${payload.chartNo}`);
+}
+
+async function openChartFromBiography(chartNo: number) {
+  const volume = findCatalogVolume(volumes.value, 'lineage');
+  if (!volume) return;
+  if (activeVolumeId.value !== volume.id) await selectVolume(volume.id);
+  if (volumeContent.value?.config) {
+    const layout = volumeContent.value.config.layout;
+    if (layout !== 'ou' && layout !== 'ou_chart') volumeContent.value.config._tempLayout = 'ou_chart';
+  }
+  await nextTick();
+  scrollToId(`tree-${chartNo}`);
+}
+
 function jumpToTree(personId: string) {
   router.push({ path: `/tree/${clanId.value}`, query: { focus: personId } });
 }
@@ -351,8 +519,19 @@ const exportOpts = ref({
   header: '',
   footer: '',
   withAnnotations: false,
-  layout: undefined as undefined | 'su' | 'ou' | 'shixi_table',
+  layout: undefined as undefined | 'su' | 'ou' | 'ou_chart' | 'shixi_table',
+  edition: 'electronic' as 'electronic' | 'print',
 });
+
+function openExportDialog() {
+  const layout = effectiveLayout.value;
+  exportOpts.value.layout = layout === 'ou' || layout === 'ou_chart'
+    ? 'ou_chart'
+    : layout === 'shixi_table' || layout === 'su'
+      ? layout
+      : undefined;
+  exportDialog.value = true;
+}
 
 async function doExportPdf() {
   exportingPdf.value = true;
@@ -364,6 +543,11 @@ async function doExportPdf() {
         footer: exportOpts.value.footer || undefined,
         withAnnotations: exportOpts.value.withAnnotations,
         layout: exportOpts.value.layout,
+        edition: exportOpts.value.edition,
+        script: bookScript.value,
+        titleVertical: bookScript.value === 'antique' && titleVertical.value,
+        pack: chartPack.value,
+        profile: bookProfile.value,
       },
       shareToken.value,
     );
@@ -390,6 +574,10 @@ async function doExportWord() {
         {
           withAnnotations: exportOpts.value.withAnnotations,
           layout: exportOpts.value.layout,
+          script: bookScript.value,
+          titleVertical: bookScript.value === 'antique' && titleVertical.value,
+          pack: chartPack.value,
+          profile: bookProfile.value,
         },
         shareToken.value,
       ),
@@ -719,7 +907,7 @@ onMounted(async () => {
         <template v-if="volumeContent?.type === 'shilu'">
           <el-radio-group v-model="tempLayout" size="small" @change="onLayoutChange">
             <el-radio-button value="su">苏式</el-radio-button>
-            <el-radio-button value="ou">欧式</el-radio-button>
+            <el-radio-button value="ou_chart">欧式</el-radio-button>
             <el-radio-button value="shixi_table">世系表</el-radio-button>
           </el-radio-group>
         </template>
@@ -773,8 +961,8 @@ onMounted(async () => {
           <el-button :icon="Download" size="small" :loading="exportingPdf || exportingWord">导出</el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item @click="exportDialog = true">导出 PDF…</el-dropdown-item>
-              <el-dropdown-item @click="exportDialog = true">导出 Word…</el-dropdown-item>
+              <el-dropdown-item @click="openExportDialog">导出 PDF…</el-dropdown-item>
+              <el-dropdown-item @click="openExportDialog">导出 Word…</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -794,35 +982,72 @@ onMounted(async () => {
       <!-- 左侧卷宗目录 -->
       <aside class="cepu-sidebar">
         <div class="sidebar-title">
-          卷宗目录
+          总目录
           <el-button v-if="isAdmin && editMode" :icon="Plus" size="small" text type="primary" @click="newVolumeDialog = true">新增卷</el-button>
         </div>
+        <div class="book-profile-bar">
+          <span class="book-profile-label">谱书复杂度</span>
+          <el-radio-group :model-value="bookProfile" size="small" :disabled="!isAdmin" @change="saveBookProfile">
+            <el-radio-button value="compact">精简谱</el-radio-button>
+            <el-radio-button value="standard">标准宗谱</el-radio-button>
+          </el-radio-group>
+        </div>
         <div v-loading="loading" class="sidebar-list">
-          <div
-            v-for="(v, idx) in volumes"
-            :key="v.id"
-            class="sidebar-item"
-            :class="{ active: activeVolumeId === v.id }"
-            @click="selectVolume(v.id)"
-          >
+          <div class="sidebar-item" :class="{ active: viewingCatalog }" @click="openCatalog">
             <div class="sidebar-item-main">
-              <el-tag size="small" :type="v.type === 'shilu' ? 'success' : 'info'" effect="plain">
-                {{ v.type === 'shilu' ? '世录' : '文档' }}
-              </el-tag>
-              <span class="sidebar-item-title">{{ v.title }}</span>
-            </div>
-            <div v-if="isAdmin && editMode" class="sidebar-item-actions" @click.stop>
-              <el-button :icon="Top" size="small" text :disabled="idx === 0" @click="moveVolume(idx, -1)" title="上移" />
-              <el-button :icon="Bottom" size="small" text :disabled="idx === volumes.length - 1" @click="moveVolume(idx, 1)" title="下移" />
-              <el-button :icon="Delete" size="small" text type="danger" @click="removeVolume(v)" title="删除" />
+              <el-tag size="small" effect="plain">目录</el-tag>
+              <span class="sidebar-item-title">总目录</span>
             </div>
           </div>
+          <div
+            v-for="entry in catalog"
+            :key="entry.key"
+            class="sidebar-item"
+            :class="{ active: catalogActive(entry), 'is-child': entry.depth > 0, 'is-group': entry.kind === 'group' }"
+            @click="openFromCatalog(entry)"
+          >
+            <div class="sidebar-item-main">
+              <el-tag v-if="entry.tag" size="small" :type="entry.tag === '传志' ? 'warning' : entry.tag === '世录' ? 'success' : 'info'" effect="plain">
+                {{ entry.tag }}
+              </el-tag>
+              <span class="sidebar-item-title">{{ entry.marker === 'last' ? '└ ' : entry.marker === 'mid' ? '├ ' : '' }}{{ entry.text }}</span>
+            </div>
+          </div>
+          <template v-if="isAdmin && editMode">
+            <div class="sidebar-edit-title">卷宗原稿</div>
+            <div
+              v-for="(v, idx) in volumes"
+              :key="v.id"
+              class="sidebar-item"
+              @click="selectVolume(v.id)"
+            >
+              <div class="sidebar-item-main">
+                <span class="sidebar-item-title">{{ v.title }}</span>
+              </div>
+              <div class="sidebar-item-actions" @click.stop>
+                <el-button :icon="Top" size="small" text :disabled="idx === 0" @click="moveVolume(idx, -1)" title="上移" />
+                <el-button :icon="Bottom" size="small" text :disabled="idx === volumes.length - 1" @click="moveVolume(idx, 1)" title="下移" />
+                <el-button :icon="Delete" size="small" text type="danger" @click="removeVolume(v)" title="删除" />
+              </div>
+            </div>
+          </template>
           <el-empty v-if="!loading && volumes.length === 0" description="暂无卷宗" :image-size="60" />
         </div>
       </aside>
 
       <!-- 主内容区（书本式阅读） -->
-      <main class="cepu-main">
+      <main class="cepu-main" :class="{ 'is-book-page': isOuChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry }">
+        <div v-if="(isOuChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry) && !loading && !volumeLoading && !accessError" class="book-script-bar">
+          <el-radio-group v-model="bookScript" size="small">
+            <el-radio-button value="horizontal">横排简体（版本A）</el-radio-button>
+            <el-radio-button value="antique">仿古竖排线装（版本B）</el-radio-button>
+          </el-radio-group>
+          <el-checkbox v-if="bookScript === 'antique'" v-model="titleVertical" size="small">标题竖排居右</el-checkbox>
+          <el-radio-group v-if="isOuChart" v-model="chartPack" size="small">
+            <el-radio-button value="exclusive">一图独占一页</el-radio-button>
+            <el-radio-button value="share">同页排布短图</el-radio-button>
+          </el-radio-group>
+        </div>
         <div v-if="loading" v-loading="true" class="cepu-loading" />
         <!-- 单卷加载中（世录卷实时生成耗时明显，给出进度提示） -->
         <div v-else-if="volumeLoading" class="volume-loading">
@@ -837,6 +1062,27 @@ onMounted(async () => {
             <el-button v-else @click="loadVolumes">重试</el-button>
           </div>
         </div>
+        <BookCatalog
+          v-else-if="viewingCatalog"
+          :entries="catalog"
+          :script="bookScript"
+          @open="openFromCatalog"
+        />
+        <NameIndexBook
+          v-else-if="viewingIndex"
+          :entries="indexEntries"
+          :script="bookScript"
+          @open-bio="openBiographyFromChart"
+        />
+        <GenerationIndexBook
+          v-else-if="viewingGeneration"
+          :rows="generationRows"
+          :script="bookScript"
+        />
+        <section v-else-if="placeholderEntry" class="slot-preview" :class="{ 'is-antique': bookScript === 'antique' }">
+          <h2>{{ placeholderEntry.text }}</h2>
+          <p>本篇尚未录入。目录里保留这一目，写好内容后会出现在这里。</p>
+        </section>
         <template v-else-if="volumeContent">
           <!-- 文档卷 -->
           <template v-if="volumeContent.type === 'document'">
@@ -870,6 +1116,19 @@ onMounted(async () => {
             </div>
           </template>
 
+          <template v-else-if="isBiography || isLadies">
+            <BiographyBook
+              :entries="volumeContent.entries || []"
+              :lineage-entries="isLadies ? indexEntries : undefined"
+              :volume-title="isLadies ? '闺秀录' : '人物传'"
+              :lead="isLadies ? '本卷收录族中女子完整行传，可配图；世系表内标注【详见闺秀录】者，在此查阅全文。' : undefined"
+              :anchor-id="`vol-${volumeContent.id}`"
+              :script="bookScript"
+              @select="openChartPerson"
+              @open-chart="openChartFromBiography"
+            />
+          </template>
+
           <!-- 世录卷（苏式） -->
           <template v-else>
             <h2 class="vol-title">{{ volumeContent.title }}</h2>
@@ -878,7 +1137,7 @@ onMounted(async () => {
               <span class="config-label">排版：</span>
               <el-radio-group v-model="volumeContent.config.layout" size="small">
                 <el-radio-button value="su">苏式</el-radio-button>
-                <el-radio-button value="ou">欧式</el-radio-button>
+                <el-radio-button value="ou_chart">欧式</el-radio-button>
                 <el-radio-button value="shixi_table">世系表</el-radio-button>
               </el-radio-group>
               <template v-if="volumeContent.config.layout === 'shixi_table'">
@@ -1001,26 +1260,19 @@ onMounted(async () => {
               </div>
             </div>
 
-            <!-- 欧式排版（二期）：世代分组格子对齐 -->
-            <div v-else class="ou-entries">
-              <div v-for="g in ouGroups" :key="g.generation" class="ou-group">
-                <div class="ou-gen-title">第{{ g.generation + 1 }}代</div>
-                <div class="ou-grid">
-                  <div
-                    v-for="e in g.entries"
-                    :id="`shilu-${e.person_id}`"
-                    :key="e.person_id"
-                    class="ou-card"
-                    :class="{ focused: focusedEntryId === e.person_id }"
-                    @click="openPerson(e.person_id, e.full_name, e)"
-                  >
-                    <div class="ou-card-name">{{ e.full_name }}</div>
-                    <div class="ou-card-text">{{ ouEntryText(e) }}</div>
-                    <div v-if="e.biography" class="ou-card-bio">{{ e.biography }}</div>
-                  </div>
-                </div>
-              </div>
-              <el-empty v-if="!volumeContent.entries?.length" description="该卷暂无世录条目" :image-size="60" />
+            <!-- 欧谱：五世一表。旧的 ou 卡片墙不再使用。 -->
+            <div v-else-if="isOuChart" class="ou-book-page">
+              <EuropeanChartView
+                variant="book"
+                :charts="ouChartModel.charts"
+                :captions="ouChartModel.captions"
+                :selected-id="personPanel?.person_id ?? null"
+                :script="bookScript"
+                :title-vertical="titleVertical"
+                :pack="chartPack"
+                @select="openChartPerson"
+                @open-bio="openBiographyFromChart"
+              />
             </div>
           </template>
         </template>
@@ -1108,25 +1360,50 @@ onMounted(async () => {
     </el-dialog>
 
     <!-- 导出设置（二期：页眉页脚 / 批注输出；PR#1：版式强制） -->
-    <el-dialog v-model="exportDialog" title="导出设置" width="480px">
-      <el-form label-width="72px">
+    <el-dialog v-model="exportDialog" title="导出设置" width="560px">
+      <el-form label-width="88px">
         <el-form-item label="页眉">
           <el-input v-model="exportOpts.header" placeholder="默认：族谱名 + 导出日期" />
         </el-form-item>
         <el-form-item label="页脚">
           <el-input v-model="exportOpts.footer" placeholder="默认：第 X 页 / 共 Y 页" />
         </el-form-item>
+        <el-form-item label="PDF">
+          <el-radio-group v-model="exportOpts.edition">
+            <el-radio value="electronic">电子版（可跳转）</el-radio>
+            <el-radio value="print">纸质打印（纯文字）</el-radio>
+          </el-radio-group>
+          <div class="form-hint">电子版保留蓝色下划线，世系表和人物传可以互相跳转。纸质版去掉链接，只留【详见人物传】和见世系文字。</div>
+        </el-form-item>
         <el-form-item label="版式">
           <el-radio-group v-model="exportOpts.layout">
             <el-radio :value="undefined">按卷配置</el-radio>
             <el-radio value="shixi_table">世系表开本（竖排）</el-radio>
             <el-radio value="su">苏式（横排）</el-radio>
-            <el-radio value="ou">欧式（横排）</el-radio>
+            <el-radio value="ou_chart">欧式（五世一表）</el-radio>
           </el-radio-group>
           <div class="form-hint">
             选择"世系表开本"时，PDF / Word 均按传统中式开本输出（双层边框、世代竖列、姓名红色楷体、左下角竖排标题）；
-            欧式按辈分横排对齐（与预览一致）。
+            欧式按五世一表输出表格，一图接一图，末世回到下一图首列。
           </div>
+        </el-form-item>
+        <el-form-item label="欧式文字">
+          <el-radio-group v-model="bookScript">
+            <el-radio value="horizontal">横排简体（版本A）</el-radio>
+            <el-radio value="antique">仿古竖排线装（版本B）</el-radio>
+          </el-radio-group>
+          <div class="form-hint">选定后，总目录、欧式五世表、人物传、闺秀录、人名索引整本使用同一文字方向。重新导出才会换成另一种。</div>
+        </el-form-item>
+        <el-form-item v-if="bookScript === 'antique'" label="图题">
+          <el-checkbox v-model="titleVertical">标题竖排居右</el-checkbox>
+          <div class="form-hint">默认仍是页面顶部横排居中。勾选后，图题改为竖排，靠版心右侧。</div>
+        </el-form-item>
+        <el-form-item label="欧式分页">
+          <el-radio-group v-model="chartPack">
+            <el-radio value="exclusive">一图独占一页</el-radio>
+            <el-radio value="share">同页排布短图</el-radio>
+          </el-radio-group>
+          <div class="form-hint">单张图不会被拆到两页。短图垂直居中仍由阅读页的「连续显示」控制。</div>
         </el-form-item>
         <el-form-item label="批注">
           <el-checkbox v-model="exportOpts.withAnnotations">导出内容包含批注</el-checkbox>
@@ -1180,6 +1457,17 @@ onMounted(async () => {
   background: #faf8f5;
   font-family: 'Songti SC', 'SimSun', 'Microsoft YaHei', serif;
 }
+.book-script-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  background: rgba(255, 252, 246, 0.96);
+  border: 1px solid #e4dccb;
+  border-radius: 6px;
+}
 .cepu-header {
   display: flex;
   align-items: center;
@@ -1227,10 +1515,41 @@ onMounted(async () => {
   color: #5d4037;
   border-bottom: 1px solid #ece7df;
 }
+.book-profile-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 4px;
+}
+.book-profile-label { font-size: 12px; color: #8a8175; }
+.book-profile-bar :deep(.el-radio-group) { display: flex; width: 100%; }
+.book-profile-bar :deep(.el-radio-button) { flex: 1; }
+.book-profile-bar :deep(.el-radio-button__inner) { width: 100%; padding: 6px 0; }
 .sidebar-list {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
+}
+.sidebar-item.is-child { margin-left: 16px; }
+.sidebar-item.is-group { cursor: default; }
+.sidebar-edit-title {
+  margin: 12px 8px 6px;
+  font-size: 12px;
+  color: #8a8175;
+}
+.slot-preview {
+  max-width: 720px;
+  margin: 28px auto;
+  font-family: 'KaiTi', 'STKaiti', 'SimSun', serif;
+  text-align: left;
+}
+.slot-preview h2 { margin: 0 0 12px; font-size: 22px; letter-spacing: 0.12em; }
+.slot-preview p { margin: 0; line-height: 1.8; color: #666; }
+.slot-preview.is-antique {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  font-family: 'SimSun', 'NSimSun', 'Songti SC', serif;
+  height: 72vh;
 }
 .sidebar-item {
   padding: 8px 10px;
@@ -1266,6 +1585,21 @@ onMounted(async () => {
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+}
+.cepu-main.is-book-page {
+  max-width: none;
+  margin: 0;
+  padding: 16px 16px 48px;
+  overflow: auto;
+  background: #efe6d4;
+}
+.cepu-main.is-book-page .vol-title {
+  font-size: 20px;
+  margin: 0 0 12px;
+  padding-bottom: 6px;
+}
+.ou-book-page {
+  display: block;
 }
 .vol-title {
   font-family: 'KaiTi', 'Songti SC', serif;

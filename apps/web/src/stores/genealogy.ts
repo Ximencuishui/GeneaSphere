@@ -7,8 +7,8 @@ export type ViewMode = 'compact' | 'detailed' | 'portrait' | 'xianshi' | 'su' | 
 /** 卡片信息密度。与视图模式独立：简洁维持现卡片，详情加高并多一行字辈/排行。 */
 export type CardDensity = 'simple' | 'detailed'
 
-/** 现代卡片 / 古籍垂丝图。与视图模式独立，切换时整图重排。 */
-export type TreeStyle = 'modern' | 'traditional'
+/** 现代卡片 / 古籍垂丝图 / 欧谱横格表。与视图模式独立，切换时整图重排。 */
+export type TreeStyle = 'modern' | 'traditional' | 'european'
 
 /** 全局世系 / 以某人为中心的亲属聚焦 */
 export type TreeViewType = 'global' | 'focus'
@@ -21,7 +21,7 @@ export const useGenealogyStore = defineStore("genealogy", () => {
   const viewMode = ref<ViewMode>('detailed')
   /** 默认简洁，避免一进页面就把已经调好的卡片撑高。 */
   const cardDensity = ref<CardDensity>('simple')
-  /** 默认现代卡片。古谱是垂丝图：竖排文字、无卡片、横担直线。 */
+  /** 默认现代卡片。古谱是垂丝图。欧谱是五世一图的表格，不走画布。 */
   const treeStyle = ref<TreeStyle>('modern')
   const mainLineage = ref<string[]>([])
   const totalPersons = ref(0)

@@ -35,7 +35,10 @@ import { buildSkewedGenealogyTree } from '@/utils/__fixtures__/skewed-clan';
 import { treeApi } from '@/api/tree';
 import type { GenealogyNode } from '@/types';
 import PersonEditDrawer from './PersonEditDrawer.vue';
+import EuropeanChartView from './EuropeanChartView.vue';
 import ImagePreview from './ImagePreview.vue';
+import { buildEuropeanCharts } from '@/utils/european-chart';
+import { europeanViewModel } from '@/utils/european-chart-source';
 import { LayoutEngine } from '@/utils/layout-engine';
 import type { LayoutNode, LayoutEdge, LayoutConfig, ViewportConfig } from '@/types/layout';
 import { useLayoutDebugPanel } from '@/composables/useLayoutDebugPanel';
@@ -539,7 +542,7 @@ const retryLoad = async () => {
     if (data) {
       const treeData = (data as any).data || data;
       genealogyStore.setTreeData(treeData);
-      await initGraph(treeData);
+      await presentTree(treeData);
     }
   } catch {
     // 错误已由 fetchTreeData 内设置到 errorState，无需再处理
@@ -722,8 +725,8 @@ const loadMoreBatch = async () => {
     // [2026-09-02 P2] 逐批合并后可能再次变深（mergeBatchIntoTree 把子孙挂回去），
     // 重新跑一次深度截断判断；perf 埋点会被覆盖，符合「最近一次」语义。
     maybeTruncateByDepth(treeData);
-    // 追加渲染：重新布局 + 重绘（复用完整管线：配偶边/吊线重挂载/过滤/裁剪/LOD 全兼容）
-    await initGraph(treeData);
+    // 追加渲染：卡片和垂丝图重走画布；欧谱只读这份树，表格自己会重排。
+    await presentTree(treeData);
   } catch {
     // 错误提示由 request 拦截器统一处理
   } finally {
@@ -1004,6 +1007,23 @@ const handleViewModeChange = (mode: ViewMode) => {
 };
 
 const isTraditional = computed(() => genealogyStore.treeStyle === 'traditional');
+const isEuropean = computed(() => genealogyStore.treeStyle === 'european');
+const isCanvasStyle = computed(() => !isTraditional.value && !isEuropean.value);
+const treeStyleLabel = computed(() => {
+  if (isEuropean.value) return '欧谱';
+  if (isTraditional.value) return '古谱';
+  return '现代';
+});
+const europeanView = computed(() => (
+  isEuropean.value
+    ? europeanViewModel(genealogyStore.treeData)
+    : { people: [], links: [], captions: {} }
+));
+const europeanCharts = computed(() => (
+  isEuropean.value
+    ? buildEuropeanCharts(europeanView.value.people, europeanView.value.links)
+    : []
+));
 const classicFontFamily = CLASSIC_FONT_FAMILY;
 const exportingChart = ref(false);
 const classicSkewNote = ref('');
@@ -1021,13 +1041,39 @@ async function exportClassicChart() {
   }
 }
 
-const handleTreeStyleChange = (style: TreeStyle) => {
+const handleTreeStyleChange = async (style: TreeStyle) => {
   if (genealogyStore.treeStyle === style) return;
   genealogyStore.setTreeStyle(style);
-  if (genealogyStore.treeData) {
-    debouncedInitGraph(genealogyStore.treeData);
+  if (style === 'european') {
+    await nextTick();
+    if (graph.value) {
+      try {
+        graph.value.destroy();
+      } catch {
+        /* 画布节点已经卸掉 */
+      }
+      graph.value = null;
+    }
+    return;
   }
+  if (!genealogyStore.treeData) return;
+  await nextTick();
+  debouncedInitGraph(genealogyStore.treeData);
 };
+
+function handleEuropeanSelect(personId: string) {
+  const node = findNodeInTree(genealogyStore.treeData, personId);
+  if (node) genealogyStore.selectNode(node);
+}
+
+/** 欧谱直接读树数据。只有卡片和垂丝图才把同一棵树送进 G6。 */
+async function presentTree(data: GenealogyNode) {
+  if (genealogyStore.treeStyle === 'european') {
+    if (loading.value) finishLoading();
+    return;
+  }
+  await initGraph(data);
+}
 
 interface ClassicGenerationRow {
   gen: number;
@@ -1134,6 +1180,10 @@ const refreshGraph = () => {
     void loadFocusTree(genealogyStore.focusCenterId);
     return;
   }
+  if (genealogyStore.treeStyle === 'european') {
+    void loadGlobalTree();
+    return;
+  }
   if (graph.value && genealogyStore.treeData) {
     initGraph(genealogyStore.treeData);
   }
@@ -1151,7 +1201,7 @@ const loadGlobalTree = async () => {
     if (!data) return;
     const treeData = (data as any).data || data;
     genealogyStore.setTreeData(treeData);
-    await initGraph(treeData);
+    await presentTree(treeData);
   } catch {
     genealogyStore.setViewType(previousType);
     // 错误已由 fetchTreeData 写到 errorState
@@ -1181,7 +1231,7 @@ const loadFocusTree = async (personId: string) => {
     shownPersons.value = collectNodeIds(root).length;
     genealogyStore.totalPersons = shownPersons.value;
     genealogyStore.setTreeData(root);
-    await initGraph(root);
+    await presentTree(root);
   } catch (error: any) {
     const status: number = error?.status || error?.response?.status || 0;
     const message: string = error?.message || String(error);
@@ -1662,6 +1712,16 @@ function handleDrawerClose() {
 function handleDrawerUpdated(updated: GenealogyNode) {
   // 用返回的节点替换 store 中的 selectedNode（前端缓存的引用）
   genealogyStore.selectNode(updated);
+  const existing = findNodeInTree(genealogyStore.treeData, String(updated.id));
+  if (existing && existing !== updated) {
+    if (updated.full_name) existing.full_name = updated.full_name;
+    existing.birth_date = updated.birth_date;
+    existing.death_date = updated.death_date;
+    existing.is_living = updated.is_living;
+    if (updated.spouses) existing.spouses = updated.spouses;
+    if (updated.generation_word) existing.generation_word = updated.generation_word;
+  }
+  if (genealogyStore.treeStyle === 'european') return;
 
   if (!graph.value || !genealogyStore.treeData) {
     refreshGraph();
@@ -1904,7 +1964,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="genealogy-tree-container" :class="{ 'is-traditional': isTraditional }">
+  <div class="genealogy-tree-container" :class="{ 'is-traditional': isTraditional, 'is-european': isEuropean }">
     <!-- Compact Toolbar (单行布局，隐藏 label 节省空间) -->
     <div class="tree-toolbar" :class="{ 'is-collapsed': toolbarCollapsed }">
       <el-button
@@ -1947,6 +2007,13 @@ defineExpose({
         >
           古谱视图
         </el-button>
+        <el-button
+          size="small"
+          :type="genealogyStore.treeStyle === 'european' ? 'primary' : 'default'"
+          @click="handleTreeStyleChange('european')"
+        >
+          欧谱
+        </el-button>
       </el-button-group>
 
       <el-button
@@ -1978,10 +2045,10 @@ defineExpose({
         </el-button>
       </el-button-group>
 
-      <el-divider v-show="!isTraditional" direction="vertical" />
+      <el-divider v-show="isCanvasStyle" direction="vertical" />
 
       <!-- View Mode -->
-      <el-button-group v-show="!isTraditional" class="view-mode-group">
+      <el-button-group v-show="isCanvasStyle" class="view-mode-group">
         <el-tooltip content="紧凑视图" placement="bottom">
           <el-button
             :type="genealogyStore.viewMode === 'compact' ? 'primary' : 'default'"
@@ -2038,9 +2105,9 @@ defineExpose({
         </el-tooltip>
       </el-button-group>
 
-      <el-divider v-show="!isTraditional" direction="vertical" />
+      <el-divider v-show="isCanvasStyle" direction="vertical" />
 
-      <el-button-group v-show="!isTraditional" class="density-group">
+      <el-button-group v-show="isCanvasStyle" class="density-group">
         <el-tooltip content="卡片密度：简洁（头像、姓名、生卒）" placement="bottom">
           <el-button
             size="small"
@@ -2203,22 +2270,22 @@ defineExpose({
       </span>
       <span class="stat-divider" v-if="partialTree">|</span>
       <span class="stat-item">
-        样式: <strong>{{ isTraditional ? '古谱' : '现代' }}</strong>
+        样式: <strong>{{ treeStyleLabel }}</strong>
       </span>
-      <span class="stat-divider" v-if="!isTraditional">|</span>
-      <span class="stat-item" v-if="!isTraditional">
+      <span class="stat-divider" v-if="isCanvasStyle">|</span>
+      <span class="stat-item" v-if="isCanvasStyle">
         视图: <strong>{{ viewModeLabel }}</strong>
       </span>
-      <span class="stat-divider" v-if="!isTraditional">|</span>
-      <span class="stat-item" v-if="!isTraditional">
+      <span class="stat-divider" v-if="isCanvasStyle">|</span>
+      <span class="stat-item" v-if="isCanvasStyle">
         密度: <strong>{{ genealogyStore.cardDensity === 'detailed' ? '详情' : '简洁' }}</strong>
       </span>
       <span class="stat-divider">|</span>
       <span class="stat-item">
         范围: <strong>{{ genealogyStore.viewType === 'focus' ? '亲属聚焦' : '全局世系' }}</strong>
       </span>
-      <span class="stat-divider">|</span>
-      <span class="stat-item">
+      <span class="stat-divider" v-if="!isEuropean">|</span>
+      <span class="stat-item" v-if="!isEuropean">
         布局: <strong>{{ layoutDirection === 'TB' ? '纵向' : '横向' }}</strong>
       </span>
       <span class="stat-item lineage-hint" v-if="genealogyStore.mainLineage.length">
@@ -2482,8 +2549,16 @@ defineExpose({
       </div>
     </div>
 
-    <!-- Graph Container -->
-    <div ref="container" class="genealogy-tree-canvas" v-show="!loading && !errorState"></div>
+    <!-- Graph Container。欧谱改走表格，把画布卸掉，避免 G6 还占着这个节点。 -->
+    <div v-if="!isEuropean" ref="container" class="genealogy-tree-canvas" v-show="!loading && !errorState"></div>
+
+    <EuropeanChartView
+      v-if="isEuropean && !loading && !errorState"
+      :charts="europeanCharts"
+      :captions="europeanView.captions"
+      :selected-id="genealogyStore.selectedNode?.id ?? null"
+      @select="handleEuropeanSelect"
+    />
 
     <div v-if="isTraditional && classicGenerations.length" class="classic-gen-rail">
       <div

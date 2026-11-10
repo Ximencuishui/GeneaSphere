@@ -38,7 +38,7 @@
         - 点击某代际 → 在该代际 y 最小节点上调用 focusNode（与右下角滑块口径一致）
       -->
       <div
-        v-if="generationSlots.length > 0 && genealogyStore.treeStyle !== 'traditional'"
+        v-if="generationSlots.length > 0 && genealogyStore.treeStyle === 'modern'"
         class="tree-gen-rail"
         :class="{
           'rail--hidden': showDetail,
@@ -90,7 +90,7 @@
       <!-- 模板里 `treeRef` 会被 Vue 自动 unwrap，访问 ref.value 已 unwrap 的 undefined.value 会抛错；
            因此这里直接用 `treeRef?.xxx`，optional chaining 兑底 undefined。 -->
       <TreeMinimap
-        v-if="genealogyStore.treeStyle !== 'traditional'"
+        v-if="genealogyStore.treeStyle === 'modern'"
         ref="minimapRef"
         :position="minimapPos"
         :size="minimapSizeRef"
@@ -100,7 +100,7 @@
 
       <!-- 代际滑块（M3）：位于右下角，hover 浮出，详情面板打开时互斥隐藏 -->
       <TreeGenerationSlider
-        v-if="genealogyStore.treeStyle !== 'traditional'"
+        v-if="genealogyStore.treeStyle === 'modern'"
         :visibility="sliderVis"
         :total-generations="treeRef?.getTotalGenerations?.() ?? 1"
         :get-snapshot="() => treeRef?.getMinimapSnapshot?.() ?? null"

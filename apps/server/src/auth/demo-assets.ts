@@ -47,6 +47,19 @@ export const ZHUXIAOXIAO_GALLERY = [
 /** 家族封面图 */
 export const CLAN_COVER_IMAGE = `${PICSUM_BASE}/geneasphere-clan-zhuxi-cover/1200/400`
 
+/**
+ * 能核对到公有领域肖像的名人。文件在 apps/web/public/portraits。
+ * 朱熹出自台北故宫藏元人《至圣先贤半身像》册「徽国公朱熹」，维基共享资源公有领域：
+ * https://commons.wikimedia.org/wiki/File:至聖先賢半身像_冊-117-朱熹.jpg
+ * 头像是同一幅画的半身裁切，整页留在 zhu-xi-album.jpg，供人物传配图。
+ * 朱塾、朱埜、朱在及女眷没有可核对的开源肖像，仍用占位图，不用别人的画像顶替。
+ */
+export const ZHU_XI_AVATAR = '/portraits/zhu-xi.jpg'
+export const ZHU_XI_PORTRAIT = '/portraits/zhu-xi-album.jpg'
+export const FAMOUS_PORTRAITS: Record<string, string> = {
+  朱熹: ZHU_XI_AVATAR,
+}
+
 /** 演示影像库图片（风景、人文、肖像），供相册/家族事件/迁徙地点配图使用 */
 export const DEMO_MEDIA_IMAGES = {
   // 风景：迁徙地与故居
@@ -64,7 +77,7 @@ export const DEMO_MEDIA_IMAGES = {
   genealogyHall: `${PICSUM_BASE}/zhuxi-genealogy-hall/800/600`,
   familyReunion: `${PICSUM_BASE}/zhuxi-family-reunion/800/600`,
   // 肖像
-  zhuxiPortrait: `${PICSUM_BASE}/zhuxi-zhuxi-portrait/600/800`,
+  zhuxiPortrait: ZHU_XI_PORTRAIT,
   zhuquanPortrait: `${PICSUM_BASE}/zhuxi-zhuquan-portrait/600/800`,
   zhuxiaoxiaoPhoto: `${PICSUM_BASE}/zhuxi-zhuxiaoxiao-photo/600/800`,
 }

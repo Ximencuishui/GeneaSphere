@@ -15,7 +15,130 @@ import {
   FEMALE_AVATAR,
   CLAN_COVER_IMAGE,
   DEMO_MEDIA_IMAGES,
+  FAMOUS_PORTRAITS,
+  ZHU_XI_AVATAR,
+  ZHU_XI_PORTRAIT,
 } from './demo-assets';
+
+const LADY_PLACES = ['崇安五夫', '建阳考亭', '尤溪', '婺源', '建宁府'];
+const LADY_DEEDS = [
+  '主中馈，课子读书，族中称其知礼。',
+  '侍舅姑以孝，治家俭而有法。',
+  '佐夫教子，遇岁歉则减膳周邻。',
+  '通《女诫》，闲时常以经义训女。',
+];
+const LADY_COURTESY = ['淑静', '德柔', '惠贞', '婉顺', '令仪'];
+const LADY_STORIES: Record<string, { courtesy_name?: string; native_place: string; burial_place: string; achievements: string; biography: string }> = {
+  '刘氏|朱熹': {
+    courtesy_name: '清四',
+    native_place: '崇安五夫',
+    burial_place: '建阳唐石里',
+    achievements: '文公元配，白水刘勉之女。',
+    biography: '刘氏，名清四，崇安五夫里人，白水刘勉之之女。绍兴年间归于朱熹。勉之家法谨严，氏幼习《女诫》，归朱氏后主中馈，事舅姑，使文公得专力问学。卒葬建阳唐石里。族谱闺秀录据旧谱补其行述。',
+  },
+  '吴氏|朱熹': {
+    native_place: '崇安',
+    burial_place: '建阳',
+    achievements: '文公侧室，朱埜之母。',
+    biography: '吴氏，崇安人，为朱熹侧室，生子埜。氏安于妾位，抚育诸子，不与嫡室争礼。族中记其恭顺，事见闺秀录。',
+  },
+  '林氏|朱塾': {
+    native_place: '古田',
+    burial_place: '建阳',
+    achievements: '朱塾元配。',
+    biography: '林氏，古田人，适朱熹长子塾。塾早卒，氏持家抚孤，教鉴等读书，不坠考亭家法。',
+  },
+  '陈氏|朱塾': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱塾侧室，朱铨之母。',
+    biography: '陈氏，建阳人，朱塾侧室，生铨。铨后迁婺源，氏之出也。旧谱仅存姓氏，此为演示补录。',
+  },
+  '赵氏|朱埜': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱埜元配。',
+    biography: '赵氏，建阳人，适朱熹次子埜。埜字文之，氏佐其理家，教子有法。',
+  },
+  '范氏|朱在': {
+    native_place: '崇安',
+    burial_place: '建阳',
+    achievements: '朱在元配。',
+    biography: '范氏，崇安人，适朱熹季子在。在续修《朱子实纪》，氏主持内政，使修谱不废家事。',
+  },
+  '郑氏|朱鉴': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱鉴元配。',
+    biography: '郑氏，建阳人，适朱塾之孙鉴。鉴编《朱文公实纪》，氏能识文字，常助检旧稿。',
+  },
+  '王氏|朱铨': {
+    native_place: '婺源',
+    burial_place: '婺源',
+    achievements: '朱铨元配。',
+    biography: '王氏，婺源人，适朱铨。铨自建阳回迁婺源，氏随行安家，为婺源支内助。',
+  },
+  '孙氏|朱潜': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱潜元配。',
+    biography: '孙氏，建阳人，适朱潜。潜为季房，氏治家勤俭，子孙后有迁福州者。',
+  },
+  '徐氏|朱鋆': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱鋆元配。',
+    biography: '徐氏，建阳人，适朱鋆。氏性宽和，邻里有急，常出粟相助。',
+  },
+  '陈氏|朱浚': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱浚元配。',
+    biography: '陈氏，建阳人，适朱浚。浚为季房子孙，氏课子习举业，家风不坠。',
+  },
+  '周氏|朱洪': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱洪元配。',
+    biography: '周氏，建阳人，适朱洪。氏奉祭如仪，岁时所荐皆亲手治办。',
+  },
+  '吴氏|朱沐': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱沐元配。',
+    biography: '吴氏，建阳人，适朱沐。氏寡言笑，而家政井然，族人称其有法度。',
+  },
+  '何氏|朱深': {
+    native_place: '建阳',
+    burial_place: '唐石里',
+    achievements: '朱深元配。',
+    biography: '何氏，建阳人，适朱深。卒后与夫同域，旧谱记其葬唐石里。',
+  },
+  '郭氏|朱桂': {
+    native_place: '婺源',
+    burial_place: '婺源',
+    achievements: '朱桂元配。',
+    biography: '郭氏，婺源人，适朱桂。桂为婺源支，氏守乡井，春秋扫墓不废。',
+  },
+  '马氏|朱桐': {
+    native_place: '婺源',
+    burial_place: '婺源',
+    achievements: '朱桐元配。',
+    biography: '马氏，婺源人，适朱桐。氏通女红，又以余力教女识字。',
+  },
+  '黄氏|朱森': {
+    native_place: '建阳',
+    burial_place: '建阳',
+    achievements: '朱森元配。',
+    biography: '黄氏，建阳人，适朱森。氏事亲孝，亲病则衣不解带。',
+  },
+  '罗氏|朱柄': {
+    native_place: '建阳',
+    burial_place: '唐石里',
+    achievements: '朱柄元配。',
+    biography: '罗氏，建阳人，适朱柄。柄葬唐石里，氏后亦归葬其侧。',
+  },
+};
 /**
  * 演示种子数据服务 - 朱熹族谱版（1000 人）
  * 始祖朱熹（1130-1200），覆盖约 28 代。
@@ -283,8 +406,14 @@ export class DemoSeedService implements OnModuleInit {
       // [2026-08-24] 补齐迁徙事件冷启动数据，让迁徙地图首次打开即有轨迹可展示
       await this.seedMigrationEvents(demoClan.id, demoUser.id.toString());
 
+      // 朱熹等有公有领域肖像的名人，把头像从占位图换成仓库里的开源画像。
+      await this.ensureFamousPortraits(demoClan.id);
+
       // [2026-08-24] 补齐图片影像类演示数据：相册、影像、人物关联、家族大事件、迁徙地点配图
       await this.seedMediaDemoData(demoClan.id, demoUser.id.toString());
+
+      // 闺秀录需要完整行传才会成页。历史女眷原来只有家世备注，这里补至少 30 条。
+      await this.ensureLadiesBiographies(demoClan.id, demoUser.id.toString());
 
       // [2026-08-24] 补齐公告与各类审批演示数据
       await this.seedAnnouncements(demoClan.id, demoUser.id.toString());
@@ -295,6 +424,143 @@ export class DemoSeedService implements OnModuleInit {
       this.logger.error('种子数据初始化失败:', error.message);
       this.logger.error(error.stack);
     }
+  }
+
+  /**
+   * 把已入库的名人头像从 picsum 换成仓库里的公有领域肖像。
+   * 只改姓名能对上的人；没有开源肖像的历史人物不动。
+   */
+  private async ensureFamousPortraits(clanId: bigint) {
+    const names = Object.keys(FAMOUS_PORTRAITS);
+    for (const name of names) {
+      const person = await this.prisma.person.findFirst({
+        where: { clan_id: clanId, full_name: name, deleted_at: null },
+        orderBy: { id: 'asc' },
+        select: { id: true },
+      });
+      if (!person) continue;
+      const avatar = FAMOUS_PORTRAITS[name];
+      await this.prisma.person.update({
+        where: { id: person.id },
+        data: { avatar_url: avatar, thumbnail_url: avatar },
+      });
+    }
+    const portrait = await this.prisma.mediaArchive.findFirst({
+      where: { clan_id: clanId, description: '朱熹画像' },
+      select: { id: true },
+    });
+    if (portrait) {
+      await this.prisma.mediaArchive.update({
+        where: { id: portrait.id },
+        data: { file_url: ZHU_XI_PORTRAIT, display_url: ZHU_XI_PORTRAIT, thumb_url: ZHU_XI_AVATAR },
+      });
+    }
+    await this.prisma.clanAlbum.updateMany({
+      where: { clan_id: clanId, name: '历代先祖' },
+      data: { cover_url: ZHU_XI_AVATAR },
+    });
+    this.logger.log('  ✅ 名人肖像已换成公有领域画像（朱熹）');
+  }
+
+  /**
+   * 给演示谱的女眷补完整行传和少量肖像。
+   * 已有行传的人不改写。不足 30 条时，先补嫁入朱氏的女眷，再补朱姓女子。
+   */
+  private async ensureLadiesBiographies(clanId: bigint, uploaderId: string) {
+    const target = 32;
+    const women = await this.prisma.person.findMany({
+      where: { clan_id: clanId, gender: 'female', deleted_at: null },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        full_name: true,
+        birth_place: true,
+        bio: { select: { biography: true } },
+        wife_in: {
+          take: 1,
+          select: { husband: { select: { full_name: true } } },
+        },
+      },
+    });
+    const typos = women.filter((woman) => woman.bio?.biography?.includes('崇安五夫人'));
+    if (typos.length) this.logger.log(`  更正闺秀录笔误 ${typos.length} 条`);
+    for (const woman of typos) {
+      const husband = woman.wife_in[0]?.husband?.full_name || '';
+      const story = this.ladyStory(woman.full_name, husband, woman.birth_place, 0);
+      await this.prisma.personBio.upsert({
+        where: { person_id: woman.id },
+        create: { person_id: woman.id, ...story },
+        update: story,
+      });
+    }
+    const filled = women.filter((woman) => woman.bio?.biography?.trim()).length;
+    if (filled >= target) {
+      this.logger.log(`  闺秀录已有 ${filled} 条完整行传，跳过补录`);
+      return;
+    }
+    const pending = [...women]
+      .filter((woman) => !woman.bio?.biography?.trim())
+      .sort((a, b) => {
+        const rank = (name: string) => (name.endsWith('氏') ? 0 : 1);
+        const byName = rank(a.full_name) - rank(b.full_name);
+        if (byName !== 0) return byName;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      })
+      .slice(0, target - filled);
+    let portraits = 0;
+    for (const [index, woman] of pending.entries()) {
+      const husband = woman.wife_in[0]?.husband?.full_name || '';
+      const story = this.ladyStory(woman.full_name, husband, woman.birth_place, index);
+      await this.prisma.personBio.upsert({
+        where: { person_id: woman.id },
+        create: { person_id: woman.id, ...story },
+        update: story,
+      });
+      if (index < 12) {
+        const linked = await this.prisma.mediaPersonLink.findFirst({
+          where: {
+            person_id: woman.id,
+            media: { category: '肖像', description: { contains: '闺秀录' } },
+          },
+          select: { media_id: true },
+        });
+        if (!linked) {
+          const url = FEMALE_AVATAR(3000 + index);
+          const media = await this.prisma.mediaArchive.create({
+            data: {
+              clan_id: clanId,
+              uploader_id: uploaderId,
+              file_url: url,
+              display_url: url,
+              description: `${woman.full_name}闺秀录配图`,
+              category: '肖像',
+              media_type: 'image',
+            },
+          });
+          await this.prisma.mediaPersonLink.create({
+            data: { media_id: media.id, person_id: woman.id },
+          });
+          portraits += 1;
+        }
+      }
+    }
+    this.logger.log(`  ✅ 闺秀录补录行传 ${pending.length} 条，新配图 ${portraits} 张`);
+  }
+
+  private ladyStory(name: string, husband: string, birthPlace: string | null, index: number) {
+    const known = LADY_STORIES[`${name}|${husband}`];
+    if (known) return { ...known, source_note: '演示闺秀录补录' };
+    const place = birthPlace || LADY_PLACES[index % LADY_PLACES.length];
+    const deed = LADY_DEEDS[index % LADY_DEEDS.length];
+    const spouse = husband ? `适同郡朱${husband.replace(/^朱/, '')}` : '未字而通女诫';
+    return {
+      courtesy_name: LADY_COURTESY[index % LADY_COURTESY.length],
+      native_place: place,
+      burial_place: place,
+      achievements: husband ? '主中馈，课子读书' : '未嫁，佐母治家',
+      biography: `${name}，${place}人。${spouse}。${deed}\n族谱称其知礼，事载闺秀。`,
+      source_note: '演示闺秀录补录',
+    };
   }
 
   /**
@@ -396,7 +662,196 @@ export class DemoSeedService implements OnModuleInit {
       this.logger.log('  ✅ 卷三闺秀录已创建');
     }
 
-    this.logger.log('  册谱卷宗冷启动检查完成（卷一谱序源流、卷二世系录、卷三闺秀录）');
+    await this.ensureRuleDocuments(clanId, adminUserId);
+    await this.ensureAppendixDocuments(clanId, adminUserId);
+    this.logger.log('  册谱卷宗冷启动检查完成（卷一谱序源流、卷二谱规图志、卷三闺秀录、卷五艺文附录）');
+  }
+
+  /** 标准宗谱卷二：凡例、家训、像赞、祠堂坟图。占位卷补正文，已有正文不覆盖。 */
+  private async ensureRuleDocuments(clanId: bigint, adminUserId: string) {
+    const pieces: { match: (title: string) => boolean; title: string; content: string }[] = [
+      {
+        match: (title) => title.includes('凡例'),
+        title: '凡例',
+        content: `<h3 style="text-align:center;">凡例</h3>
+<p style="text-indent:2em;">本篇是谱规。卷一谱序里的凡例只存大意，编辑与查阅以这一卷为准。</p>
+<ol style="line-height:1.9;">
+<li>本谱以朱熹为一世，其子塾、埜、在为二世，以下依父系递推。旧谱若自朱松或茶院起算，对照时先看起算之人。</li>
+<li>男子书名，女子书氏。已嫁书适某，未字书未字。侧室注明，不与元配混书。</li>
+<li>字号、籍贯、生卒、葬地，有据则书，无考则缺。生卒只记到年。</li>
+<li>功名、官职、著述择要记入人物传。完整行传才进人物传、闺秀录；只有姓氏或家世备注的，不单独成传。</li>
+<li>养子、出继、兼祧注明原委。出继者于本生父名下标出，于所后父名下入世系。</li>
+<li>世系表用欧式五世。同名依父名与房分区分。女眷见世系者，表内注「详见闺秀录」。</li>
+<li>迁徙记始迁之人、年份与落脚处。坟茔只记谱载地名，不替代实地踏勘。</li>
+<li>本次数字化续修所补的女眷行传，文末注「演示闺秀录补录」，与旧谱原文分开。</li>
+</ol>`,
+      },
+      {
+        match: (title) => title.includes('家训'),
+        title: '家训',
+        content: `<h3 style="text-align:center;">家训</h3>
+<p style="text-indent:2em;">族中家训以文公《白鹿洞书院揭示》为纲。下文按通行文本摘录，供子弟诵习。</p>
+<h4>五教之目</h4>
+<p style="text-align:center;">父子有亲。君臣有义。夫妇有别。长幼有序。朋友有信。</p>
+<h4>为学之序</h4>
+<p style="text-align:center;">博学之。审问之。慎思之。明辨之。笃行之。</p>
+<h4>修身之要</h4>
+<p style="text-align:center;">言忠信。行笃敬。惩忿窒欲。迁善改过。</p>
+<h4>处事之要</h4>
+<p style="text-align:center;">正其义不谋其利。明其道不计其功。</p>
+<h4>接物之要</h4>
+<p style="text-align:center;">己所不欲，勿施于人。行有不得，反求诸己。</p>
+<h4>紫阳日用八则</h4>
+<ol style="line-height:1.9;">
+<li>孝父母：晨昏定省，侍奉无怠。</li>
+<li>友兄弟：兄友弟恭，和睦相处。</li>
+<li>谨夫妇：相敬如宾，勤俭持家。</li>
+<li>教子孙：诗书传家，以德为先。</li>
+<li>睦宗族：守望相助，患难与共。</li>
+<li>重丧祭：慎终追远，祭祀以诚。</li>
+<li>崇节俭：量入为出，戒奢以俭。</li>
+<li>守国法：奉公守法，立身行道。</li>
+</ol>`,
+      },
+      {
+        match: (title) => title.includes('像赞'),
+        title: '像赞',
+        content: `<h3 style="text-align:center;">像赞</h3>
+<p style="text-indent:2em;">卷首所载徽国公像，出自元人《至圣先贤半身像》册。赞文为本次修谱所拟，以便像与赞同卷可阅。</p>
+<h4>徽国公像赞</h4>
+<p style="text-align:center;">紫阳之山，考亭之水。<br/>巾服俨然，德容可迩。<br/>格物致知，修身齐家。<br/>四子成书，百世所法。<br/>子孙展卷，如侍函丈。</p>
+<p style="text-indent:2em;">长房塾、次房埜、季房在，各守一龛。祭时先赞后献，赞词用本篇，不另撰。</p>`,
+      },
+      {
+        match: (title) => title.includes('祠堂') || title.includes('坟'),
+        title: '祠堂坟图',
+        content: `<h3 style="text-align:center;">祠堂坟图</h3>
+<p style="text-indent:2em;">下列为谱载方位，供祭扫时对照。演示谱没有实测图，图中只排座次与地名。</p>
+<h4>考亭宗祠座次</h4>
+<table style="width:100%;border-collapse:collapse;margin:12px 0;text-align:center;">
+<tr><td style="border:1px solid #ddd;padding:10px;" colspan="3">祠门朝南</td></tr>
+<tr>
+<td style="border:1px solid #ddd;padding:10px;">左昭<br/>长房朱塾</td>
+<td style="border:1px solid #ddd;padding:10px;">中龛<br/>徽国公朱熹</td>
+<td style="border:1px solid #ddd;padding:10px;">右穆<br/>次房朱埜 · 季房朱在</td>
+</tr>
+<tr><td style="border:1px solid #ddd;padding:10px;" colspan="3">享堂 · 祭田在祠东</td></tr>
+</table>
+<h4>坟茔</h4>
+<table style="width:100%;border-collapse:collapse;margin:12px 0;">
+<tr style="background:#f5f5f5;"><th style="border:1px solid #ddd;padding:8px;">墓</th><th style="border:1px solid #ddd;padding:8px;">地点</th><th style="border:1px solid #ddd;padding:8px;">备注</th></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">文公墓</td><td style="border:1px solid #ddd;padding:8px;">建阳唐石里，九峰山下</td><td style="border:1px solid #ddd;padding:8px;">主墓。祭扫先至此。</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">考亭祠墓</td><td style="border:1px solid #ddd;padding:8px;">建阳考亭，与书院相望</td><td style="border:1px solid #ddd;padding:8px;">祭田亩数旧谱互异，缺疑。</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">婺源祖茔</td><td style="border:1px solid #ddd;padding:8px;">紫阳山下</td><td style="border:1px solid #ddd;padding:8px;">闽赣两房春秋合祭。</td></tr>
+</table>
+<p style="text-indent:2em;">坟图只记谱上的地名。实地界址、亩分，以各房祭田册为准。</p>`,
+      },
+    ];
+    await this.ensureDemoDocuments(clanId, adminUserId, '卷二', pieces);
+  }
+
+  /** 标准宗谱卷五：诗文碑记、修谱纪事、附录考据。占位卷补正文，已有正文不覆盖。 */
+  private async ensureAppendixDocuments(clanId: bigint, adminUserId: string) {
+    const pieces: { match: (title: string) => boolean; title: string; content: string }[] = [
+      {
+        match: (title) => title.includes('诗文') || title.includes('碑'),
+        title: '诗文碑记',
+        content: `<h3 style="text-align:center;">诗文</h3>
+<p style="text-indent:2em;">文公遗诗，谱中择其与读书、寻源相关者录之，以便族人讽诵。原文为宋人所作，此处作演示摘录。</p>
+<h4>观书有感</h4>
+<p style="text-align:center;">半亩方塘一鉴开，天光云影共徘徊。<br/>问渠那得清如许，为有源头活水来。</p>
+<h4>春日</h4>
+<p style="text-align:center;">胜日寻芳泗水滨，无边光景一时新。<br/>等闲识得东风面，万紫千红总是春。</p>
+<h3 style="text-align:center;">碑记</h3>
+<h4>考亭朱氏宗祠碑记</h4>
+<p style="text-indent:2em;">建阳考亭，文公卜居讲学之地。后裔立祠于斯，春秋二祭。祠坐北向南，中龛奉徽国公，左昭右穆，分长房塾、次房埜、季房在。碑立于祠门之右，记建祠缘起，并诫子孙毋鬻祭田、毋荒坟茔。</p>
+<h4>紫阳楼题记</h4>
+<p style="text-indent:2em;">婺源紫阳，为朱氏祖居所在。楼以山名，族人自闽返乡，多于此叙昭穆。题记载：楼重建于近世，额仍旧称，所以志水源也。演示谱存其大意，不充旧碑全文。</p>`,
+      },
+      {
+        match: (title) => title.includes('纪事'),
+        title: '修谱纪事',
+        content: `<h3 style="text-align:center;">修谱纪事</h3>
+<p style="text-indent:2em;">紫阳朱氏之谱，始记于宋，中经续修，至今次数字化编纂。下列为演示用纪事，便于目录第五卷有可翻阅的正文。</p>
+<table style="width:100%;border-collapse:collapse;margin:12px 0;">
+<tr style="background:#f5f5f5;"><th style="border:1px solid #ddd;padding:8px;">时间</th><th style="border:1px solid #ddd;padding:8px;">主事</th><th style="border:1px solid #ddd;padding:8px;">所成</th></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">宋嘉定</td><td style="border:1px solid #ddd;padding:8px;">朱在</td><td style="border:1px solid #ddd;padding:8px;">续修族谱，辑《朱子实纪》十二卷</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">宋</td><td style="border:1px solid #ddd;padding:8px;">朱鉴</td><td style="border:1px solid #ddd;padding:8px;">编《朱文公实纪》，长房文献赖以不坠</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">明嘉靖</td><td style="border:1px solid #ddd;padding:8px;">建阳房族长</td><td style="border:1px solid #ddd;padding:8px;">补录考亭支迁徙，坟图附于卷末</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">清乾隆</td><td style="border:1px solid #ddd;padding:8px;">婺源支</td><td style="border:1px solid #ddd;padding:8px;">回抄祖地世系，与闽谱对勘</td></tr>
+<tr><td style="border:1px solid #ddd;padding:8px;">公元二〇二五年</td><td style="border:1px solid #ddd;padding:8px;">续修理事会</td><td style="border:1px solid #ddd;padding:8px;">本次演示谱：世系、人物传、闺秀录一并入册</td></tr>
+</table>
+<h4>本次修谱经过</h4>
+<p style="text-indent:2em;">乙巳之春，理事会集议于建阳。先核旧稿，再访各房生卒、迁徙与女眷。主编朱文斌总其例，副主编朱武强考世系，朱秀兰搜集老谱，朱慧敏录入，朱致远排版，朱守正终校。秋末齐稿，即以本册为演示定本。</p>
+<p style="text-indent:2em;">纪事只录修谱本身。家训、凡例见卷二谱规，墓志与考据见本卷附录。</p>`,
+      },
+      {
+        match: (title) => title.includes('附录') || title.includes('考据') || title.includes('墓志') || title.includes('艺文'),
+        title: '附录考据',
+        content: `<h3 style="text-align:center;">附录考据</h3>
+<p style="text-indent:2em;">本篇收墓志摘要、坟茔与世系考异。演示谱所据，以常见谱牒说法为准，无考者缺之，不另造事实。</p>
+<h4>文公墓志摘要</h4>
+<p style="text-indent:2em;">朱熹，字元晦，一字仲晦，号晦庵，晚号晦翁，谥文，追封徽国公。宋建炎四年生于尤溪，庆元六年卒于建阳考亭，享年七十一。葬建阳唐石里。子三：塾、埜、在。著述以《四书章句集注》《资治通鉴纲目》为世所重。旧志原文甚长，此仅摘世系所必记者。</p>
+<h4>坟茔</h4>
+<ul style="line-height:1.8;">
+<li>文公墓：福建建阳唐石里，九峰山下。示范谱标注其地，不替代实地踏勘。</li>
+<li>考亭祠墓：建阳考亭，与书院相望。祭田亩数旧谱互异，本次缺疑。</li>
+<li>婺源祖茔：紫阳山下，闽赣两房春秋合祭。</li>
+</ul>
+<h4>世系考异</h4>
+<p style="text-indent:2em;">一、本谱以朱熹为一世。若旧谱自茶院或朱松起算，代数各差一世至数世，对照时须先看起算之人。</p>
+<p style="text-indent:2em;">二、长房朱塾早卒，孙鉴编实纪；次房朱埜之后有迁婺源者；季房朱在之后有迁福州、苏州者。同名者依父名与房分区分，不因姓名相同而合并。</p>
+<p style="text-indent:2em;">三、女眷旧谱多只书某氏。本次闺秀录补行传者，注明「演示闺秀录补录」，与旧谱原文分开。</p>
+<h4>引用书目</h4>
+<p style="text-indent:2em;">《朱子实纪》《朱文公实纪》，及建阳、婺源两房旧谱抄本。演示环境未附原书影像，考据只存条目，供目录第五卷翻检。</p>`,
+      },
+    ];
+
+    await this.ensureDemoDocuments(clanId, adminUserId, '卷五', pieces);
+  }
+
+  private async ensureDemoDocuments(
+    clanId: bigint,
+    adminUserId: string,
+    label: string,
+    pieces: { match: (title: string) => boolean; title: string; content: string }[],
+  ) {
+    for (const piece of pieces) {
+      const volumes = await this.prisma.bookVolume.findMany({
+        where: { clan_id: clanId, type: 'document' },
+        orderBy: { sort_order: 'asc' },
+      });
+      const found = volumes.find((volume) => piece.match(volume.title));
+      if (!found) {
+        const maxOrder = await this.prisma.bookVolume.aggregate({
+          where: { clan_id: clanId },
+          _max: { sort_order: true },
+        });
+        await this.prisma.bookVolume.create({
+          data: {
+            clan_id: clanId,
+            sort_order: (maxOrder._max.sort_order ?? 0) + 1,
+            title: piece.title,
+            type: 'document',
+            content: piece.content,
+            created_by: adminUserId,
+          },
+        });
+        this.logger.log(`  ✅ ${label}${piece.title}已创建`);
+        continue;
+      }
+      const text = found.content?.trim() ?? '';
+      const blank = !text || text.includes('此处录入') || text.includes('本篇尚未录入');
+      if (!blank) {
+        this.logger.log(`  ${label}${piece.title}已有正文，跳过`);
+        continue;
+      }
+      await this.prisma.bookVolume.update({
+        where: { id: found.id },
+        data: { content: piece.content },
+      });
+      this.logger.log(`  ✅ ${label}${found.title}占位已补为演示正文`);
+    }
   }
 
   /** 家族概况冷启动：精神、家规、口号、来源 + 理事会 + 修谱小组 */
@@ -699,7 +1154,7 @@ export class DemoSeedService implements OnModuleInit {
     const albumSeeds = [
       { name: '宗祠故居', description: '宗祠、故居与祖地风貌', cover_url: DEMO_MEDIA_IMAGES.genealogyHall },
       { name: '祭祖大典', description: '清明、冬至祭祖活动影像', cover_url: DEMO_MEDIA_IMAGES.ancestorWorship1 },
-      { name: '历代先祖', description: '重点历史人物肖像与简介', cover_url: DEMO_MEDIA_IMAGES.zhuxiPortrait },
+      { name: '历代先祖', description: '重点历史人物肖像与简介', cover_url: ZHU_XI_AVATAR },
       { name: '家族聚会', description: '宗亲联谊与家族活动', cover_url: DEMO_MEDIA_IMAGES.familyReunion },
       { name: '迁徙风光', description: '迁徙沿途与定居地风光', cover_url: DEMO_MEDIA_IMAGES.hangzhouWestLake },
     ];
@@ -1567,7 +2022,8 @@ export class DemoSeedService implements OnModuleInit {
       is_living: !f.death || f.death >= DemoSeedService.CURRENT_YEAR,
       birth_place: DemoSeedService.BIRTH_PLACES[f.generation % DemoSeedService.BIRTH_PLACES.length],
       migration_branch: f.branch,
-      avatar_url: HISTORICAL_AVATAR(f.generation * 10 + (f.branch ? f.branch.charCodeAt(0) : 0), f.gender),
+      avatar_url: FAMOUS_PORTRAITS[f.name] ?? HISTORICAL_AVATAR(f.generation * 10 + (f.branch ? f.branch.charCodeAt(0) : 0), f.gender),
+      thumbnail_url: FAMOUS_PORTRAITS[f.name] ?? null,
     }));
     const createdHistorical = await this.prisma.person.createManyAndReturn({ data: historicalData });
     createdHistorical.forEach((p, idx) => { historicalMap.set(DemoSeedService.HISTORICAL_FIGURES[idx].name, p.id); });

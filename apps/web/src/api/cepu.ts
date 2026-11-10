@@ -14,6 +14,7 @@ export interface BookVolume {
 }
 
 export interface ShiluChild {
+  person_id?: string;
   name: string;
   gender: string;
   rank?: number;
@@ -41,7 +42,13 @@ export interface ShiluEntry {
   anecdotes?: string;
   biography?: string;
   adoption_note?: string;
+  art_name?: string;
+  epitaph?: string;
+  source_note?: string;
+  figures?: { url: string; caption: string }[];
   father_name?: string;
+  father_id?: string;
+  child_type?: string;
   spouses: ShiluSpouse[];
   children: ShiluChild[];
   premature: boolean;
@@ -79,6 +86,18 @@ export const cepuApi = {
   /** share：分享只读 token（来自 ?share=），透传给读端点 */
   getVolumes: (clanId: string | number, share?: string) =>
     request.get<BookVolume[]>(`/api/cepu/${clanId}/volumes`, share ? { params: { share } } : undefined),
+
+  getBookProfile: (clanId: string | number, share?: string) =>
+    request.get<{ profile: 'compact' | 'standard' }>(`/api/cepu/${clanId}/book-profile`, share ? { params: { share } } : undefined),
+
+  setBookProfile: (clanId: string | number, profile: 'compact' | 'standard') =>
+    request.patch<{ profile: 'compact' | 'standard' }>(`/api/cepu/${clanId}/book-profile`, { profile }),
+
+  getGenerationIndex: (clanId: string | number, share?: string) =>
+    request.get<{ generation: number; character: string; note?: string | null }[]>(
+      `/api/cepu/${clanId}/generation-index`,
+      share ? { params: { share } } : undefined,
+    ),
 
   getVolume: (clanId: string | number, id: string | number, share?: string) =>
     request.get<{ id: string; title: string; type: string; content?: string; config?: any; entries?: ShiluEntry[] }>(
@@ -130,7 +149,12 @@ export const cepuApi = {
       header?: string;
       footer?: string;
       withAnnotations?: boolean;
-      layout?: 'su' | 'ou' | 'shixi_table';
+      layout?: 'su' | 'ou' | 'ou_chart' | 'shixi_table';
+      edition?: 'electronic' | 'print';
+      script?: 'horizontal' | 'antique';
+      titleVertical?: boolean;
+      pack?: 'exclusive' | 'share';
+      profile?: 'compact' | 'standard';
     } = {},
     share?: string,
   ) => {
@@ -139,6 +163,11 @@ export const cepuApi = {
     if (opts.footer) qs.set('footer', opts.footer);
     if (opts.withAnnotations) qs.set('withAnnotations', '1');
     if (opts.layout) qs.set('layout', opts.layout);
+    if (opts.edition) qs.set('edition', opts.edition);
+    if (opts.script === 'antique') qs.set('script', 'antique');
+    if (opts.titleVertical) qs.set('titleVertical', '1');
+    if (opts.pack === 'share') qs.set('chartPack', 'share');
+    if (opts.profile) qs.set('profile', opts.profile);
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-pdf${q ? `?${q}` : ''}`;
@@ -147,12 +176,23 @@ export const cepuApi = {
   /** 导出 Word（.doc）URL（PR#1 透传 layout；二期：分享 token） */
   exportWordUrl: (
     clanId: string | number,
-    opts: { withAnnotations?: boolean; layout?: 'su' | 'ou' | 'shixi_table' } = {},
+    opts: {
+      withAnnotations?: boolean;
+      layout?: 'su' | 'ou' | 'ou_chart' | 'shixi_table';
+      script?: 'horizontal' | 'antique';
+      titleVertical?: boolean;
+      pack?: 'exclusive' | 'share';
+      profile?: 'compact' | 'standard';
+    } = {},
     share?: string,
   ) => {
     const qs = new URLSearchParams();
     if (opts.withAnnotations) qs.set('withAnnotations', '1');
     if (opts.layout) qs.set('layout', opts.layout);
+    if (opts.script === 'antique') qs.set('script', 'antique');
+    if (opts.titleVertical) qs.set('titleVertical', '1');
+    if (opts.pack === 'share') qs.set('chartPack', 'share');
+    if (opts.profile) qs.set('profile', opts.profile);
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-word${q ? `?${q}` : ''}`;

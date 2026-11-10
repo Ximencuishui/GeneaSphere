@@ -65,6 +65,39 @@ export class CepuController {
     }
   }
 
+  /** 谱书复杂度。精简谱是当前这套，标准宗谱才展开谱规图志和艺文附录。 */
+  @Public()
+  @UseGuards(ShareAccessGuard)
+  @Get(':clanSlug/book-profile')
+  async getBookProfile(@Param('clanSlug') clanSlug: string, @Req() req: any) {
+    const clanId = await this.resolveClanId(clanSlug);
+    this.assertShareAllowed(req, clanId);
+    return { profile: await this.cepuService.getBookProfile(clanId) };
+  }
+
+  @Patch(':clanSlug/book-profile')
+  async setBookProfile(
+    @Req() req: any,
+    @Param('clanSlug') clanSlug: string,
+    @Body() body: { profile?: string },
+  ) {
+    const userId = req?.user?.userId as string | undefined;
+    const clanId = await this.requireAdmin(clanSlug, userId);
+    const profile = body.profile === 'standard' ? 'standard' : 'compact';
+    return this.cepuService.setBookProfile(clanId, profile);
+  }
+
+  /** 标准宗谱的字辈索引。没有字辈时返回空列表。 */
+  @Public()
+  @UseGuards(ShareAccessGuard)
+  @Get(':clanSlug/generation-index')
+  async generationIndex(@Param('clanSlug') clanSlug: string, @Req() req: any) {
+    const clanId = await this.resolveClanId(clanSlug);
+    this.assertShareAllowed(req, clanId);
+    const rows = await this.cepuService.listGenerationIndex(clanId);
+    return serializeBigInt(rows);
+  }
+
   /** 卷宗列表（空库自动生成默认卷结构）；登录或有效分享链接可读 */
   @Public()
   @UseGuards(ShareAccessGuard)
@@ -230,19 +263,29 @@ export class CepuController {
     @Query('footer') footer: string | undefined,
     @Query('withAnnotations') withAnnotations: string | undefined,
     @Query('layout') layout: string | undefined,
+    @Query('edition') edition: string | undefined,
+    @Query('script') script: string | undefined,
+    @Query('titleVertical') titleVertical: string | undefined,
+    @Query('chartPack') chartPack: string | undefined,
+    @Query('profile') profile: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
     // 校验强制版式参数,只接受白名单值;非法或空 = 按卷配置
     const forceLayout =
-      layout === 'su' || layout === 'ou' || layout === 'shixi_table' ? layout : undefined;
+      layout === 'su' || layout === 'ou' || layout === 'ou_chart' || layout === 'shixi_table' ? layout : undefined;
     try {
       const buffer = await this.cepuService.exportPdf(clanId, {
         header,
         footer,
         withAnnotations: withAnnotations === '1' || withAnnotations === 'true',
         forceLayout,
+        edition: edition === 'print' ? 'print' : 'electronic',
+        script: script === 'antique' ? 'antique' : 'horizontal',
+        titleVertical: titleVertical === '1' || titleVertical === 'true',
+        pack: chartPack === 'share' ? 'share' : 'exclusive',
+        profile: profile === 'standard' ? 'standard' : profile === 'compact' ? 'compact' : undefined,
       });
       res.set({
         'Content-Type': 'application/pdf',
@@ -267,16 +310,24 @@ export class CepuController {
     @Req() req: any,
     @Query('withAnnotations') withAnnotations: string | undefined,
     @Query('layout') layout: string | undefined,
+    @Query('script') script: string | undefined,
+    @Query('titleVertical') titleVertical: string | undefined,
+    @Query('chartPack') chartPack: string | undefined,
+    @Query('profile') profile: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
     const forceLayout =
-      layout === 'su' || layout === 'ou' || layout === 'shixi_table' ? layout : undefined;
+      layout === 'su' || layout === 'ou' || layout === 'ou_chart' || layout === 'shixi_table' ? layout : undefined;
     try {
       const buffer = await this.cepuService.exportWord(clanId, {
         withAnnotations: withAnnotations === '1' || withAnnotations === 'true',
         forceLayout,
+        script: script === 'antique' ? 'antique' : 'horizontal',
+        titleVertical: titleVertical === '1' || titleVertical === 'true',
+        pack: chartPack === 'share' ? 'share' : 'exclusive',
+        profile: profile === 'standard' ? 'standard' : profile === 'compact' ? 'compact' : undefined,
       });
       res.set({
         'Content-Type': 'application/msword',
