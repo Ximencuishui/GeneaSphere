@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
 import { serializeBigInt } from '../../common/bigint-serializer';
+import { refreshFamilyRulesVolume } from '../../cepu/clan-rules';
 
 /**
  * 家族概况（菜单重构 2026-08-20）
@@ -169,6 +170,9 @@ export class ClanOverviewController {
       where: { id: clanId },
       data: updateData,
     });
+    if (body.rules !== undefined) {
+      await refreshFamilyRulesVolume(this.prisma, clanId, updated.rules);
+    }
 
     await this.adminService.logAction({
       clanId,

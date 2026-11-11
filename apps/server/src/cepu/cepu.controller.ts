@@ -268,6 +268,7 @@ export class CepuController {
     @Query('titleVertical') titleVertical: string | undefined,
     @Query('chartPack') chartPack: string | undefined,
     @Query('profile') profile: string | undefined,
+    @Query('beadLines') beadLines: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
@@ -286,6 +287,7 @@ export class CepuController {
         titleVertical: titleVertical === '1' || titleVertical === 'true',
         pack: chartPack === 'share' ? 'share' : 'exclusive',
         profile: profile === 'standard' ? 'standard' : profile === 'compact' ? 'compact' : undefined,
+        beadLines: beadLines === '1' || beadLines === 'true',
       });
       res.set({
         'Content-Type': 'application/pdf',
@@ -314,6 +316,7 @@ export class CepuController {
     @Query('titleVertical') titleVertical: string | undefined,
     @Query('chartPack') chartPack: string | undefined,
     @Query('profile') profile: string | undefined,
+    @Query('beadLines') beadLines: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
@@ -328,6 +331,7 @@ export class CepuController {
         titleVertical: titleVertical === '1' || titleVertical === 'true',
         pack: chartPack === 'share' ? 'share' : 'exclusive',
         profile: profile === 'standard' ? 'standard' : profile === 'compact' ? 'compact' : undefined,
+        beadLines: beadLines === '1' || beadLines === 'true',
       });
       res.set({
         'Content-Type': 'application/msword',

@@ -148,7 +148,7 @@ function bindHead(pageIndex: number, element: unknown) {
       <section v-for="group in groups" :key="'measure-' + group.letter" class="idx-group">
         <h3 class="idx-letter">【{{ group.letter }}】</h3>
         <p v-for="row in group.rows" :key="'measure-' + row.personId + '-' + row.chartNo" class="idx-row">
-          {{ row.name }}｜{{ row.generationLabel }}｜世系图号：第{{ row.chartNo }}图｜页码：第{{ row.pageNo }}页
+          {{ row.name }}｜{{ row.pinyin }}｜{{ row.generationLabel }}｜苏式第{{ row.suChartNo || '—' }}图｜欧式第{{ row.ouChartNo || row.chartNo }}图｜第{{ row.pageNo }}页
         </p>
       </section>
     </div>
@@ -156,7 +156,7 @@ function bindHead(pageIndex: number, element: unknown) {
       <div class="idx-stage">
         <header class="idx-head">
           <h2 class="idx-title">卷首 · 人名索引</h2>
-          <p class="idx-lead">本索引按姓名拼音排序，标注对应欧式世系图号、所在页码，方便检索查阅。</p>
+          <p class="idx-lead">本索引按姓名拼音排序。一条记录同时列出苏式图号、欧式图号和页码。</p>
         </header>
         <p class="idx-empty">本索引暂无已录入完整行传的族人。</p>
       </div>
@@ -171,7 +171,7 @@ function bindHead(pageIndex: number, element: unknown) {
       <div class="idx-stage" :ref="(element) => bindStage(pageIndex, element)">
         <header v-if="pageIndex === 0" class="idx-head" :ref="(element) => bindHead(pageIndex, element)">
           <h2 class="idx-title">卷首 · 人名索引</h2>
-          <p class="idx-lead">本索引按姓名拼音排序，标注对应欧式世系图号、所在页码，方便检索查阅。</p>
+          <p class="idx-lead">本索引按姓名拼音排序。一条记录同时列出苏式图号、欧式图号和页码。</p>
         </header>
         <div class="idx-columns">
           <section v-for="group in page" :key="group.letter" class="idx-group">
@@ -182,7 +182,7 @@ function bindHead(pageIndex: number, element: unknown) {
                 :href="`#${biographyAnchorId(row.name, row.chartNo)}`"
                 :title="`跳转到人物传：${row.name}，第${row.chartNo}图`"
                 @click.prevent="emit('open-bio', { name: row.name, chartNo: row.chartNo })"
-              >{{ row.name }}</a>｜{{ row.generationLabel }}｜世系图号：第{{ row.chartNo }}图｜页码：第{{ row.pageNo }}页
+              >{{ row.name }}</a>｜{{ row.pinyin }}｜{{ row.generationLabel }}｜苏式第{{ row.suChartNo || '—' }}图｜欧式第{{ row.ouChartNo || row.chartNo }}图｜第{{ row.pageNo }}页
             </p>
           </section>
         </div>

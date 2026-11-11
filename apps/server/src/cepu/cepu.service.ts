@@ -3,10 +3,12 @@ import { PrismaService, Prisma } from '@geneasphere/db';
 import { Gender } from '@prisma/client';
 import * as puppeteer from 'puppeteer-core';
 import { ouChartCss, renderOuChartBook } from './ou-chart-html';
+import { renderSuChartBook, suChartCss } from './su-chart-html';
 import { biographyCss, renderBiographyBook } from './biography-html';
 import { nameIndexCss, renderNameIndexBook } from './name-index-html';
 import { catalogCss, renderCatalogBook, renderGenerationIndex, renderPlaceholder } from './catalog-html';
 import { buildBookCatalog, isBiographyVolume, isLadiesVolume, isLineageVolume, type BookProfile, type CatalogEntry } from './book-catalog';
+import { htmlToRules, isFamilyRulesTitle, rulesToHtml } from './clan-rules';
 
 /**
  * 册谱服务（《册谱模块需求文档（PRD）》一期核心闭环）
@@ -287,12 +289,22 @@ export class CepuService {
     if (!volume) throw new NotFoundException('卷宗不存在');
     // [二期 2026-08-20] 变更后写入新版本快照（可回滚）
     // - 60 分钟去重窗口：连续保存相同配置不会产生噪声版本
+    const nextTitle = body.title ?? volume.title;
+    let nextContent = body.content;
+    if (nextContent !== undefined && volume.type === 'document' && isFamilyRulesTitle(nextTitle)) {
+      const plain = htmlToRules(nextContent);
+      nextContent = plain ? rulesToHtml(plain) : '';
+      await this.prisma.clan.update({
+        where: { id: volume.clan_id },
+        data: { rules: plain || null },
+      });
+    }
     const updated = await this.prisma.$transaction(async (tx) => {
       const v = await tx.bookVolume.update({
         where: { id: volumeId },
         data: {
           ...(body.title !== undefined && { title: body.title }),
-          ...(body.content !== undefined && volume.type === 'document' && { content: body.content }),
+          ...(nextContent !== undefined && volume.type === 'document' && { content: nextContent }),
           ...(body.config !== undefined && volume.type === 'shilu' && { config: body.config }),
         },
       });
@@ -377,6 +389,12 @@ export class CepuService {
     });
     // 回滚可能改世录配置，失效该家族世录缓存
     if (volume) this.invalidateShiluCache(volume.clan_id);
+    if (volume && isFamilyRulesTitle(updated.title)) {
+      await this.prisma.clan.update({
+        where: { id: volume.clan_id },
+        data: { rules: htmlToRules(updated.content ?? '') || null },
+      });
+    }
     return updated;
   }
 
@@ -408,6 +426,20 @@ export class CepuService {
     });
     if (!volume) throw new NotFoundException('卷宗不存在');
     if (volume.type === 'document') {
+      if (isFamilyRulesTitle(volume.title)) {
+        const clan = await this.prisma.clan.findUnique({
+          where: { id: clanId },
+          select: { rules: true },
+        });
+        const rulesText = clan?.rules?.trim() || htmlToRules(volume.content ?? '');
+        return {
+          id: volume.id.toString(),
+          title: volume.title,
+          type: volume.type,
+          content: rulesText ? rulesToHtml(rulesText) : (volume.content ?? ''),
+          rulesText,
+        };
+      }
       return { id: volume.id.toString(), title: volume.title, type: volume.type, content: volume.content ?? '' };
     }
     const ownConfig = (volume.config as ShiluConfig | null) ?? {};
@@ -909,6 +941,7 @@ export class CepuService {
       titleVertical?: boolean;
       pack?: 'exclusive' | 'share';
       profile?: BookProfile;
+      beadLines?: boolean;
     } = {},
   ): Promise<Buffer> {
     const [clan, volumes] = await Promise.all([
@@ -927,6 +960,7 @@ export class CepuService {
       titleVertical: opts.titleVertical,
       pack: opts.pack,
       profile: opts.profile ?? await this.getBookProfile(clanId),
+      beadLines: opts.beadLines,
     });
 
     const headerText = this.esc(opts.header || `${clan.name} · ${new Date().toLocaleDateString('zh-CN')}`);
@@ -950,6 +984,7 @@ export class CepuService {
       .vol-content{line-height:1.9;text-indent:2em;font-size:14px;}
       ${this.shixiTableCss()}
       ${ouChartCss()}
+      ${suChartCss()}
       ${biographyCss()}
       ${nameIndexCss()}
       ${catalogCss()}
@@ -1000,6 +1035,7 @@ export class CepuService {
       titleVertical?: boolean;
       pack?: 'exclusive' | 'share';
       profile?: BookProfile;
+      beadLines?: boolean;
     } = {},
   ): Promise<Buffer> {
     const [clan, volumes] = await Promise.all([
@@ -1018,6 +1054,7 @@ export class CepuService {
       titleVertical: opts.titleVertical,
       pack: opts.pack,
       profile: opts.profile ?? await this.getBookProfile(clanId),
+      beadLines: opts.beadLines,
     });
 
     // 是否启用世系表开本(强制 > 卷配置),决定是否走中式开本页面尺寸
@@ -1047,6 +1084,7 @@ h1{text-align:center;font-family:'KaiTi',serif;font-size:26px;border-bottom:2px 
 .vol-content{line-height:1.9;text-indent:2em;font-size:14px;}
 ${this.shixiTableCss()}
 ${ouChartCss()}
+${suChartCss()}
 ${biographyCss()}
 ${nameIndexCss()}
 ${catalogCss()}
@@ -1358,6 +1396,7 @@ ${sections.join('')}
       titleVertical?: boolean;
       pack?: 'exclusive' | 'share';
       profile?: BookProfile;
+      beadLines?: boolean;
     } = {},
   ): Promise<string[]> {
     const profile = options.profile ?? 'compact';
@@ -1423,13 +1462,14 @@ ${sections.join('')}
     clanId: bigint,
     v: any,
     entry: CatalogEntry,
-    annotations: Map<string, string[]>,
+    _annotations: Map<string, string[]>,
     options: {
       forceLayout?: 'su' | 'ou' | 'ou_chart' | 'shixi_table';
       electronic?: boolean;
       script?: 'horizontal' | 'antique';
       titleVertical?: boolean;
       pack?: 'exclusive' | 'share';
+      beadLines?: boolean;
     },
     lineageEntries: () => Promise<ShiluEntry[]>,
   ): Promise<string> {
@@ -1440,11 +1480,24 @@ ${sections.join('')}
       config: (v.config ?? null) as { layout?: string; gender_filter?: string } | null,
     };
     if (v.type === 'document') {
-      const body = `<div id="${this.esc(entry.anchor)}"><h2 class="vol-title">${this.esc(entry.text)}</h2><div class="vol-content">${v.content ?? ''}</div></div>`;
+      let content = v.content ?? '';
+      if (isFamilyRulesTitle(String(v.title))) {
+        const clan = await this.prisma.clan.findUnique({
+          where: { id: clanId },
+          select: { rules: true },
+        });
+        if (clan?.rules?.trim()) content = rulesToHtml(clan.rules);
+      }
+      const body = `<div id="${this.esc(entry.anchor)}"><h2 class="vol-title">${this.esc(entry.text)}</h2><div class="vol-content">${content}</div></div>`;
       return options.script === 'antique' ? `<div class="book-prose is-antique">${body}</div>` : body;
     }
     const cfg = ((v.config as ShiluConfig | null) ?? {}) as ShiluConfig;
     const { entries } = await this.getVolume(clanId, v.id);
+    const lineageStyle = options.forceLayout === 'su'
+      ? 'su'
+      : options.forceLayout === 'ou' || options.forceLayout === 'ou_chart'
+        ? 'ou'
+        : 'both';
     if (isLadiesVolume(catalogVolume)) {
       return renderBiographyBook(entries, {
         electronic: options.electronic !== false,
@@ -1453,6 +1506,7 @@ ${sections.join('')}
         lead: '本卷收录族中女子完整行传，可配图；世系表内标注【详见闺秀录】者，在此查阅全文。',
         anchor: entry.anchor,
         lineage: await lineageEntries(),
+        lineageStyle,
       });
     }
     const layout = isBiographyVolume(catalogVolume) ? 'biography' : (options.forceLayout ?? cfg.layout ?? 'su');
@@ -1473,6 +1527,7 @@ ${sections.join('')}
         script: options.script,
         title: '人物传',
         anchor: entry.anchor,
+        lineageStyle,
       });
     }
     if (layout === 'shixi_table') {
@@ -1482,31 +1537,15 @@ ${sections.join('')}
         : `<h2 class="vol-title">${this.esc(entry.text)}</h2><div class="vol-content"><p>（该卷暂无世录条目）</p></div>`;
       return `<div id="${this.esc(entry.anchor)}">${body}</div>`;
     }
-    const rows = entries
-      .map((e) => {
-        const rank = e.rank ? `第${e.rank} ` : '';
-        const courtesy = e.courtesy_name ? `，字${e.courtesy_name}` : '';
-        const years = e.birth_year
-          ? `，${e.birth_year}${e.death_year ? ` - ${e.death_year}` : e.is_living ? ' - 今' : ''}`
-          : '';
-        const burial = e.burial_place ? `，葬${e.burial_place}` : '';
-        const spouses = e.spouses.length
-          ? `，配${e.spouses.map((s) => `${s.name}${s.native_place ? `（${s.native_place}）` : ''}`).join('、')}`
-          : '';
-        const kids = e.children.length
-          ? `，子女：${e.children
-              .map((c) => `${c.name}${c.child_type && c.child_type !== 'BIOLOGICAL' ? '（过继）' : ''}`)
-              .join('、')}`
-          : '';
-        const bio = e.biography ? `<p class="bio">${this.esc(e.biography)}</p>` : '';
-        const anns = annotations.get(`person:${e.person_id}`) || [];
-        const annHtml = anns.length
-          ? `<p class="annotation">批注:${anns.map((n) => this.esc(n)).join('；')}</p>`
-          : '';
-        return `<div class="entry"><p class="entry-head">${rank}${this.esc(e.full_name)}${courtesy}${years}${burial}${spouses}${kids}</p>${bio}${annHtml}</div>`;
-      })
-      .join('');
-    const suBody = `<div id="${this.esc(entry.anchor)}"><h2 class="vol-title">${this.esc(entry.text)}</h2>${rows}</div>`;
-    return options.script === 'antique' ? `<div class="book-prose is-antique">${suBody}</div>` : suBody;
+    const title = `<h2 class="vol-title">${this.esc(entry.text)}</h2>`;
+    const book = renderSuChartBook(entries, {
+      electronic: options.electronic !== false,
+      script: options.script,
+      titleVertical: options.titleVertical,
+      pack: options.pack,
+      beadLines: options.beadLines,
+    });
+    const bookHtml = `<div id="${this.esc(entry.anchor)}">${book}</div>`;
+    return options.script === 'antique' ? `<div class="book-prose is-antique">${title}</div>${bookHtml}` : `<div id="${this.esc(entry.anchor)}">${title}${book}</div>`;
   }
 }

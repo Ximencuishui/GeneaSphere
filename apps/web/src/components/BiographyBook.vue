@@ -8,6 +8,8 @@ import {
   biographyAnchorId,
   buildBiographyEntries,
   packBiographyPages,
+  suBiographyAnchorId,
+  suTreeAnchorId,
   treeAnchorId,
   type BiographyEntry,
   type BiographySource,
@@ -30,7 +32,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'select', personId: string): void;
-  (e: 'open-chart', chartNo: number): void;
+  (e: 'open-chart', payload: { chartNo: number; style: 'ou' | 'su' }): void;
 }>();
 
 const ordered = computed(() => buildBiographyEntries(props.entries, props.lineageEntries));
@@ -160,10 +162,16 @@ function bindHead(pageIndex: number, element: unknown) {
               <span class="bio-name" @click="emit('select', entry.personId)">{{ entry.name }}</span><template v-if="entry.chartNo">｜<a
                 class="bio-jump"
                 :href="`#${treeAnchorId(entry.chartNo)}`"
-                :title="`跳转到世系第${entry.chartNo}图`"
-                @click.prevent="emit('open-chart', entry.chartNo)"
-              >见世系第{{ entry.chartNo }}图</a></template>
+                :title="`跳转到欧式世系第${entry.chartNo}图`"
+                @click.prevent="emit('open-chart', { chartNo: entry.chartNo, style: 'ou' })"
+              >见世系欧式第{{ entry.chartNo }}图</a></template><template v-if="entry.suChartNo">｜<a
+                class="bio-jump"
+                :href="`#${suTreeAnchorId(entry.suChartNo)}`"
+                :title="`跳转到苏式世系第${entry.suChartNo}图`"
+                @click.prevent="emit('open-chart', { chartNo: entry.suChartNo, style: 'su' })"
+              >见世系苏式第{{ entry.suChartNo }}图</a></template>
             </h3>
+            <span v-if="entry.suChartNo" :id="suBiographyAnchorId(entry.name, entry.suChartNo)" class="bio-anchor" />
             <p class="bio-info">{{ infoLine(entry) }}</p>
             <p v-if="entry.nativePlace" class="bio-native">籍贯/迁居：{{ entry.nativePlace }}</p>
             <div class="bio-body">

@@ -20,11 +20,12 @@ import {
 } from '@element-plus/icons-vue';
 import { cepuApi, type BookVolume, type ShiluEntry, type PersonBio } from '@/api/cepu';
 import EuropeanChartView from '@/components/EuropeanChartView.vue';
+import SuChartView from '@/components/SuChartView.vue';
 import BiographyBook from '@/components/BiographyBook.vue';
 import NameIndexBook from '@/components/NameIndexBook.vue';
 import BookCatalog from '@/components/BookCatalog.vue';
 import GenerationIndexBook from '@/components/GenerationIndexBook.vue';
-import { europeanChartsFromShilu } from '@/utils/european-chart-shilu';
+import { europeanChartsFromShilu, europeanViewFromShilu } from '@/utils/european-chart-shilu';
 import { buildBookCatalog, findCatalogVolume, isLadiesVolume, type BookProfile, type CatalogEntry } from '@/utils/book-catalog';
 
 /**
@@ -58,6 +59,7 @@ const volumeContent = ref<{
   title: string;
   type: string;
   content?: string;
+  rulesText?: string;
   config?: any;
   entries?: ShiluEntry[];
 } | null>(null);
@@ -72,6 +74,16 @@ const tempLayout = ref<'su' | 'ou' | 'ou_chart' | 'shixi_table' | 'biography'>('
 const bookScript = ref<'horizontal' | 'antique'>('horizontal');
 const titleVertical = ref(false);
 const chartPack = ref<'exclusive' | 'share'>('exclusive');
+const bookZoom = ref(1);
+const bookContinuous = ref(false);
+/** 只作用于苏式。切到欧式时按钮隐藏，状态留着，切回来还是上次的选择。 */
+const suBeadLines = ref(false);
+const bookZoomLabel = computed(() => `${Math.round(bookZoom.value * 100)}%`);
+
+function zoomBook(delta: number) {
+  const next = Math.round((bookZoom.value + delta) * 10) / 10;
+  bookZoom.value = Math.min(2, Math.max(0.6, next));
+}
 
 function onLayoutChange(val: string | number | boolean | undefined) {
   // 临时切换样式，仅影响页面渲染，不修改卷宗配置
@@ -95,6 +107,13 @@ const effectiveLayout = computed(() => {
 
 /** 欧式不再是卡片墙。旧配置 ou 和新版式 ou_chart 都走五世一表。 */
 const isOuChart = computed(() => effectiveLayout.value === 'ou' || effectiveLayout.value === 'ou_chart');
+const isSuChart = computed(() => (
+  volumeContent.value?.type === 'shilu'
+  && !isBiography.value
+  && !isLadies.value
+  && effectiveLayout.value === 'su'
+));
+const isLineageChart = computed(() => isOuChart.value || isSuChart.value);
 const isLadies = computed(() => {
   const volume = volumeContent.value;
   if (!volume) return false;
@@ -109,6 +128,7 @@ const placeholderEntry = ref<CatalogEntry | null>(null);
 const generationRows = ref<{ generation: number; character: string; note?: string | null }[]>([]);
 const indexEntries = ref<ShiluEntry[]>([]);
 const catalog = computed(() => buildBookCatalog(volumes.value, bookProfile.value));
+const lineageModel = computed(() => europeanViewFromShilu(volumeContent.value?.entries || []));
 const ouChartModel = computed(() => europeanChartsFromShilu(volumeContent.value?.entries || []));
 
 const focusedEntryId = ref<string | null>(null);
@@ -366,25 +386,6 @@ function applyFocus() {
   }
 }
 
-// ---------- 世录渲染（苏式） ----------
-function entryHead(e: ShiluEntry): string {
-  const rank = e.rank ? `第${e.rank} ` : '';
-  const courtesy = e.courtesy_name ? `，字${e.courtesy_name}` : '';
-  const years = e.birth_year
-    ? `，${e.birth_year}${e.death_year ? ` - ${e.death_year}` : e.is_living ? ' - 今' : ''}`
-    : '';
-  const burial = e.burial_place ? `，葬${e.burial_place}` : '';
-  const spouses = e.spouses.length
-    ? `，配${e.spouses.map((s) => `${s.name}${s.native_place ? `（${s.native_place}）` : ''}`).join('、')}`
-    : '';
-  const kids = e.children.length
-    ? `，子女：${e.children
-        .map((c) => `${c.name}${c.child_type && c.child_type !== 'BIOLOGICAL' ? '（过继）' : ''}`)
-        .join('、')}`
-    : '';
-  return `${rank}${e.full_name}${courtesy}${years}${burial}${spouses}${kids}`;
-}
-
 // ---------- 人物面板（世录条目点击） ----------
 async function openPerson(personId: string, fullName: string, entry?: ShiluEntry) {
   personPanel.value = { person_id: personId, full_name: fullName, entry };
@@ -447,25 +448,26 @@ async function openNameIndex() {
   }
 }
 
-async function openBiographyFromChart(payload: { name: string; chartNo: number; citeBook?: string }) {
+async function openBiographyFromChart(payload: { name: string; chartNo: number; citeBook?: string; anchorId?: string }) {
   const volume = findCatalogVolume(volumes.value, payload.citeBook === '闺秀录' ? 'ladies' : 'biography')
     ?? findCatalogVolume(volumes.value, 'biography');
   if (!volume) return;
   if (activeVolumeId.value !== volume.id) await selectVolume(volume.id);
   await nextTick();
-  scrollToId(`bio-${payload.name}-${payload.chartNo}`);
+  scrollToId(payload.anchorId || `bio-${payload.name}-${payload.chartNo}`);
 }
 
-async function openChartFromBiography(chartNo: number) {
+async function openChartFromBiography(payload: number | { chartNo: number; style?: 'ou' | 'su' }) {
+  const chartNo = typeof payload === 'number' ? payload : payload.chartNo;
+  const style = typeof payload === 'number' ? 'ou' : (payload.style ?? 'ou');
   const volume = findCatalogVolume(volumes.value, 'lineage');
   if (!volume) return;
   if (activeVolumeId.value !== volume.id) await selectVolume(volume.id);
-  if (volumeContent.value?.config) {
-    const layout = volumeContent.value.config.layout;
-    if (layout !== 'ou' && layout !== 'ou_chart') volumeContent.value.config._tempLayout = 'ou_chart';
-  }
+  const layout = style === 'su' ? 'su' : 'ou_chart';
+  tempLayout.value = layout;
+  if (volumeContent.value?.config) volumeContent.value.config._tempLayout = layout;
   await nextTick();
-  scrollToId(`tree-${chartNo}`);
+  scrollToId(style === 'su' ? `tree-su-${chartNo}` : `tree-${chartNo}`);
 }
 
 function jumpToTree(personId: string) {
@@ -548,6 +550,7 @@ async function doExportPdf() {
         titleVertical: bookScript.value === 'antique' && titleVertical.value,
         pack: chartPack.value,
         profile: bookProfile.value,
+        beadLines: suBeadLines.value,
       },
       shareToken.value,
     );
@@ -578,6 +581,7 @@ async function doExportWord() {
           titleVertical: bookScript.value === 'antique' && titleVertical.value,
           pack: chartPack.value,
           profile: bookProfile.value,
+          beadLines: suBeadLines.value,
         },
         shareToken.value,
       ),
@@ -869,12 +873,18 @@ async function removeVolume(v: BookVolume) {
   }
 }
 
+const isFamilyRulesVolume = computed(() => (volumeContent.value?.title || '').includes('家训'));
+
 async function saveDocument() {
   if (!activeVolumeId.value) return;
+  const sharedRules = isFamilyRulesVolume.value;
   await cepuApi.updateVolume(activeVolumeId.value, {
-    content: volumeContent.value?.content ?? '',
+    content: sharedRules
+      ? (volumeContent.value?.rulesText ?? volumeContent.value?.content ?? '')
+      : (volumeContent.value?.content ?? ''),
   });
-  ElMessage.success('内容已保存');
+  if (sharedRules) await selectVolume(activeVolumeId.value);
+  ElMessage.success(sharedRules ? '家训已保存，家族概况同步更新' : '内容已保存');
 }
 
 async function saveShiluConfig() {
@@ -1036,17 +1046,32 @@ onMounted(async () => {
       </aside>
 
       <!-- 主内容区（书本式阅读） -->
-      <main class="cepu-main" :class="{ 'is-book-page': isOuChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry }">
-        <div v-if="(isOuChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry) && !loading && !volumeLoading && !accessError" class="book-script-bar">
+      <main class="cepu-main" :class="{ 'is-book-page': isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry }">
+        <div v-if="(isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry) && !loading && !volumeLoading && !accessError" class="book-script-bar">
           <el-radio-group v-model="bookScript" size="small">
             <el-radio-button value="horizontal">横排简体（版本A）</el-radio-button>
             <el-radio-button value="antique">仿古竖排线装（版本B）</el-radio-button>
           </el-radio-group>
+          <button
+            v-if="isSuChart"
+            type="button"
+            class="su-bead-toggle"
+            :class="{ 'is-active': suBeadLines }"
+            :aria-pressed="suBeadLines"
+            @click="suBeadLines = !suBeadLines"
+          >{{ suBeadLines ? '隐藏垂珠连线' : '显示垂珠连线' }}</button>
           <el-checkbox v-if="bookScript === 'antique'" v-model="titleVertical" size="small">标题竖排居右</el-checkbox>
-          <el-radio-group v-if="isOuChart" v-model="chartPack" size="small">
+          <el-radio-group v-if="isLineageChart" v-model="chartPack" size="small">
             <el-radio-button value="exclusive">一图独占一页</el-radio-button>
             <el-radio-button value="share">同页排布短图</el-radio-button>
           </el-radio-group>
+          <div v-if="isLineageChart" class="book-zoom-bar">
+            <button type="button" @click="zoomBook(-0.1)">缩小</button>
+            <span>{{ bookZoomLabel }}</span>
+            <button type="button" @click="zoomBook(0.1)">放大</button>
+            <button type="button" @click="bookZoom = 1">原大</button>
+            <button type="button" :class="{ 'is-active': bookContinuous }" :aria-pressed="bookContinuous" @click="bookContinuous = !bookContinuous">连续显示</button>
+          </div>
         </div>
         <div v-if="loading" v-loading="true" class="cepu-loading" />
         <!-- 单卷加载中（世录卷实时生成耗时明显，给出进度提示） -->
@@ -1089,7 +1114,16 @@ onMounted(async () => {
             <h2 class="vol-title">{{ volumeContent.title }}</h2>
             <div v-if="!(isAdmin && editMode)" class="book-article" v-html="volumeContent.content || ''" />
             <div v-else class="book-editor">
+              <p v-if="isFamilyRulesVolume" class="rules-source-note">这一篇和家族概况里的「家规家训」是同一份文字，改任何一边都会写回另一边。</p>
               <el-input
+                v-if="isFamilyRulesVolume"
+                v-model="volumeContent.rulesText"
+                type="textarea"
+                :rows="16"
+                placeholder="与家族概况的家规家训相同"
+              />
+              <el-input
+                v-else
                 v-model="volumeContent.content"
                 type="textarea"
                 :rows="16"
@@ -1167,28 +1201,23 @@ onMounted(async () => {
               <el-button type="primary" size="small" @click="saveShiluConfig">应用并重新生成</el-button>
             </div>
 
-            <!-- 苏式排版（默认 layout=su 或未配置）：横排文字条目 -->
-            <div v-if="effectiveLayout === 'su'" class="shilu-entries">
-              <div
-                v-for="e in volumeContent.entries || []"
-                :id="`shilu-${e.person_id}`"
-                :key="e.person_id"
-                class="shilu-entry"
-                :class="{ focused: focusedEntryId === e.person_id }"
-                @click="openPerson(e.person_id, e.full_name, e)"
-              >
-                <div class="shilu-gen">第{{ e.generation + 1 }}代</div>
-                <div class="shilu-text">
-                  <span class="entry-head">{{ entryHead(e) }}</span>
-                  <span v-if="e.adoption_note" class="entry-note">（{{ e.adoption_note }}）</span>
-                </div>
-                <div v-if="e.biography" class="shilu-bio">{{ e.biography }}</div>
-                <div v-if="e.achievements || e.anecdotes" class="shilu-extra">
-                  <span v-if="e.achievements">{{ e.achievements }}</span>
-                  <span v-if="e.anecdotes">{{ e.anecdotes }}</span>
-                </div>
-              </div>
-              <el-empty v-if="!volumeContent.entries?.length" description="该卷暂无世录条目" :image-size="60" />
+            <!-- 苏式：支派纵谱。父子上下相承，先长房后次房。 -->
+            <div v-if="isSuChart" class="ou-book-page">
+              <SuChartView
+                :people="lineageModel.people"
+                :links="lineageModel.links"
+                :captions="lineageModel.captions"
+                :selected-id="personPanel?.person_id ?? null"
+                :script="bookScript"
+                :title-vertical="titleVertical"
+                :pack="chartPack"
+                :zoom="bookZoom"
+                :continuous="bookContinuous"
+                :bead-lines="suBeadLines"
+                :show-toolbar="false"
+                @select="openChartPerson"
+                @open-bio="openBiographyFromChart"
+              />
             </div>
 
             <!-- 世系表开本(PR#1 竖排预览):与 PDF 排版同构,在线翻页查看 -->
@@ -1270,6 +1299,9 @@ onMounted(async () => {
                 :script="bookScript"
                 :title-vertical="titleVertical"
                 :pack="chartPack"
+                :zoom="bookZoom"
+                :continuous="bookContinuous"
+                :show-toolbar="false"
                 @select="openChartPerson"
                 @open-bio="openBiographyFromChart"
               />
@@ -1385,6 +1417,7 @@ onMounted(async () => {
           <div class="form-hint">
             选择"世系表开本"时，PDF / Word 均按传统中式开本输出（双层边框、世代竖列、姓名红色楷体、左下角竖排标题）；
             欧式按五世一表输出表格，一图接一图，末世回到下一图首列。
+            苏式是否带垂珠连线，跟页面上的开关一致。
           </div>
         </el-form-item>
         <el-form-item label="欧式文字">
@@ -1403,7 +1436,7 @@ onMounted(async () => {
             <el-radio value="exclusive">一图独占一页</el-radio>
             <el-radio value="share">同页排布短图</el-radio>
           </el-radio-group>
-          <div class="form-hint">单张图不会被拆到两页。短图垂直居中仍由阅读页的「连续显示」控制。</div>
+          <div class="form-hint">苏式、欧式共用这一分页开关。连续显示开启后整支连排；关闭后按 A4 分页，一图一页。</div>
         </el-form-item>
         <el-form-item label="批注">
           <el-checkbox v-model="exportOpts.withAnnotations">导出内容包含批注</el-checkbox>
@@ -1467,6 +1500,47 @@ onMounted(async () => {
   background: rgba(255, 252, 246, 0.96);
   border: 1px solid #e4dccb;
   border-radius: 6px;
+}
+.book-zoom-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.book-zoom-bar button {
+  font-family: inherit;
+  font-size: 13px;
+  color: #3e3a35;
+  background: #fff;
+  border: 1px solid #d2c6b2;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.book-zoom-bar button.is-active,
+.su-bead-toggle.is-active {
+  color: #fff;
+  background: #2a241c;
+  border-color: #2a241c;
+}
+.su-bead-toggle {
+  font-family: inherit;
+  font-size: 13px;
+  color: #3e3a35;
+  background: #fff;
+  border: 1px solid #d2c6b2;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.book-zoom-bar span {
+  min-width: 48px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #3e3a35;
+  font-size: 13px;
+}
+@media print {
+  .book-zoom-bar, .su-bead-toggle { display: none; }
 }
 .cepu-header {
   display: flex;
@@ -1620,6 +1694,12 @@ onMounted(async () => {
   max-width: 100%;
   margin: 8px auto;
   display: block;
+}
+.rules-source-note {
+  margin: 0 0 8px;
+  color: #8a7355;
+  font-size: 13px;
+  line-height: 1.6;
 }
 .book-editor .editor-actions {
   margin-top: 10px;

@@ -217,11 +217,12 @@ watch(
               <ElInput
                 v-model="clanInfo.rules"
                 type="textarea"
-                :rows="4"
-                placeholder="请输入家规家训内容"
-                maxlength="2000"
+                :rows="8"
+                placeholder="与册谱卷二家训是同一份文字"
+                maxlength="8000"
                 show-word-limit
               />
+              <p class="rules-source-note">册谱标准宗谱卷二「家训」读的就是这里。在册谱里修改，也会写回这一栏。</p>
             </ElFormItem>
           </ElForm>
         </ElCard>
@@ -320,6 +321,13 @@ watch(
 .clan-info-dialog :deep(.el-dialog__body) {
   padding-top: 8px;
   padding-bottom: 8px;
+}
+
+.rules-source-note {
+  margin: 6px 0 0;
+  color: #8a7355;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .form-section {

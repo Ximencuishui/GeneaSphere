@@ -19,11 +19,18 @@ const props = withDefaults(defineProps<{
   titleVertical?: boolean;
   /** exclusive：一图独占一页。share：短图可以排在同一页。 */
   pack?: 'exclusive' | 'share';
+  /** 册谱顶部控件传入时，和苏式共用同一比例。 */
+  zoom?: number;
+  /** 传入时由册谱顶部记住。开启后取消分页隔离。缺省 null，沿用组件内部状态。 */
+  continuous?: boolean | null;
+  showToolbar?: boolean;
 }>(), {
   variant: 'canvas',
   script: 'horizontal',
   titleVertical: false,
   pack: 'exclusive',
+  continuous: null,
+  showToolbar: true,
 });
 
 const emit = defineEmits<{
@@ -68,13 +75,16 @@ const sheetCaptions = computed(() => {
   return next;
 });
 
-const zoom = ref(1);
+const localZoom = ref(1);
+const localContinuous = ref(true);
+const zoom = computed(() => (props.zoom == null ? localZoom.value : props.zoom));
+const continuous = computed(() => (props.continuous == null ? localContinuous.value : props.continuous));
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`);
-const continuous = ref(true);
+const flow = computed(() => props.continuous === true);
 
 function zoomBy(delta: number) {
   const next = Math.round((zoom.value + delta) * 10) / 10;
-  zoom.value = Math.min(2, Math.max(0.6, next));
+  localZoom.value = Math.min(2, Math.max(0.6, next));
 }
 
 function onSelect(personId: string) {
@@ -83,18 +93,18 @@ function onSelect(personId: string) {
 </script>
 
 <template>
-  <div class="european-chart-view" :class="{ 'is-book': variant === 'book' }">
+  <div class="european-chart-view" :class="{ 'is-book': variant === 'book', 'is-flow': flow }">
     <p v-if="bookCharts.length === 0" class="ou-empty-state">当前世系还排不出欧谱</p>
-    <div v-if="variant === 'book' && bookCharts.length" class="ou-zoom-bar">
+    <div v-if="showToolbar && variant === 'book' && bookCharts.length" class="ou-zoom-bar">
       <button type="button" @click="zoomBy(-0.1)">缩小</button>
       <span class="ou-zoom-label">{{ zoomLabel }}</span>
       <button type="button" @click="zoomBy(0.1)">放大</button>
-      <button type="button" @click="zoom = 1">原大</button>
+      <button type="button" @click="localZoom = 1">原大</button>
       <button
         type="button"
         :class="{ 'is-active': continuous }"
         :aria-pressed="continuous"
-        @click="continuous = !continuous"
+        @click="localContinuous = !localContinuous"
       >连续显示</button>
     </div>
     <div v-if="bookCharts.length" class="ou-book-flow" :style="variant === 'book' ? { zoom } : undefined">
@@ -111,7 +121,7 @@ function onSelect(personId: string) {
         :with-anchor="variant === 'book'"
         :page-number="variant === 'book' ? pageIndex + 1 : undefined"
         :page-count="variant === 'book' ? sheetGroups.length : undefined"
-        :center="variant === 'book' && continuous"
+        :center="variant === 'book' && continuous && !flow"
         :script="script"
         :title-vertical="titleVertical"
         @select="onSelect"
@@ -198,6 +208,15 @@ function onSelect(personId: string) {
   justify-content: center;
   align-items: flex-start;
   gap: 18px 22px;
+}
+
+.is-book.is-flow :deep(.ou-sheet.is-book) {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  break-after: auto;
+  page-break-after: auto;
+  box-shadow: none;
 }
 
 @media print {

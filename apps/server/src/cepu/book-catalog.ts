@@ -86,7 +86,7 @@ export function buildBookCatalog(volumes: readonly CatalogVolume[], profile: Boo
       volumeEntry('preface', '卷一｜谱序源流', '文档', preface, 'book-slot-preface'),
       group('rules', '卷二｜谱规图志', '文档', 'book-rules'),
       ...RULE_SLOTS.map((slot, index) => child(slot.key, slot.label, index === RULE_SLOTS.length - 1 ? 'last' : 'mid', rules[index])),
-      volumeEntry('lineage', '卷三｜世系录（欧式五世世系表）', '世录', lineage, 'book-slot-lineage'),
+      volumeEntry('lineage', '卷三｜世系录', '世录', lineage, 'book-slot-lineage'),
       group('zhuan', '卷四｜传志篇', '传志', 'book-zhuan'),
       child('biography', '人物传', 'mid', biography),
       child('ladies', '闺秀录', 'last', ladies),

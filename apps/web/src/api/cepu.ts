@@ -155,6 +155,7 @@ export const cepuApi = {
       titleVertical?: boolean;
       pack?: 'exclusive' | 'share';
       profile?: 'compact' | 'standard';
+      beadLines?: boolean;
     } = {},
     share?: string,
   ) => {
@@ -168,6 +169,7 @@ export const cepuApi = {
     if (opts.titleVertical) qs.set('titleVertical', '1');
     if (opts.pack === 'share') qs.set('chartPack', 'share');
     if (opts.profile) qs.set('profile', opts.profile);
+    if (opts.beadLines) qs.set('beadLines', '1');
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-pdf${q ? `?${q}` : ''}`;
@@ -183,6 +185,7 @@ export const cepuApi = {
       titleVertical?: boolean;
       pack?: 'exclusive' | 'share';
       profile?: 'compact' | 'standard';
+      beadLines?: boolean;
     } = {},
     share?: string,
   ) => {
@@ -193,6 +196,7 @@ export const cepuApi = {
     if (opts.titleVertical) qs.set('titleVertical', '1');
     if (opts.pack === 'share') qs.set('chartPack', 'share');
     if (opts.profile) qs.set('profile', opts.profile);
+    if (opts.beadLines) qs.set('beadLines', '1');
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-word${q ? `?${q}` : ''}`;

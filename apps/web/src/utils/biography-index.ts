@@ -3,8 +3,9 @@
  * 图号取分页之后的第 N 图；同一人只记最先出现的那一格。
  */
 import { fitEuropeanChartsToPages, type EuropeanChart } from '@/utils/european-chart';
-import { europeanChartsFromShilu } from '@/utils/european-chart-shilu';
+import { europeanChartsFromShilu, europeanViewFromShilu, type ShiluChartEntry } from '@/utils/european-chart-shilu';
 import { formatLifeYears } from '@/utils/genealogy-card';
+import { buildSuCharts, indexSuAppearances } from '@/utils/su-chart';
 
 export interface BiographyFigure {
   url: string;
@@ -57,6 +58,8 @@ export interface BiographyEntry {
   paragraphs: string[];
   note?: string;
   chartNos: number[];
+  /** 苏式正文图号。没有对应支派时是 0。 */
+  suChartNo: number;
   figures: BiographyFigure[];
 }
 
@@ -66,6 +69,14 @@ export function biographyAnchorId(name: string, chartNo: number): string {
 
 export function treeAnchorId(chartNo: number): string {
   return `tree-${chartNo}`;
+}
+
+export function suTreeAnchorId(chartNo: number): string {
+  return `tree-su-${chartNo}`;
+}
+
+export function suBiographyAnchorId(name: string, chartNo: number): string {
+  return `bio-su-${String(name).trim()}-${chartNo}`;
 }
 
 /** 条目前后的分隔只算外边距。内边距已经含在测得的高度里。 */
@@ -102,8 +113,10 @@ export function buildBiographyEntries(
   lineage?: readonly BiographySource[],
 ): BiographyEntry[] {
   if (!lineage) return entriesFromOwnCharts(entries);
-  const chartSource = lineage.length ? lineage : entries;
+  const source = lineage.length ? lineage : entries;
+  const chartSource = lineageChartEntries(source);
   const appearances = indexChartAppearances(fitEuropeanChartsToPages(europeanChartsFromShilu(chartSource).charts));
+  const suNumbers = suChartNumbers(source);
   const list: BiographyEntry[] = [];
   let extra = appearances.size + 1;
   for (const entry of entries) {
@@ -113,23 +126,56 @@ export function buildBiographyEntries(
     const appearance = own
       ?? (father ? { chartNo: father.chartNo, sequence: extra, chartNos: [father.chartNo] } : { chartNo: 0, sequence: extra, chartNos: [] });
     if (!own) extra += 1;
-    list.push(toBiographyEntry(entry, appearance));
+    const suChartNo = suNumbers.get(String(entry.person_id))
+      ?? (entry.father_id ? suNumbers.get(String(entry.father_id)) : undefined)
+      ?? 0;
+    list.push(toBiographyEntry(entry, appearance, suChartNo));
   }
   list.sort((a, b) => a.sequence - b.sequence || a.name.localeCompare(b.name, 'zh'));
   return list;
 }
 
 function entriesFromOwnCharts(entries: readonly BiographySource[]): BiographyEntry[] {
-  const appearances = indexChartAppearances(fitEuropeanChartsToPages(europeanChartsFromShilu(entries).charts));
+  const appearances = indexChartAppearances(fitEuropeanChartsToPages(europeanChartsFromShilu(lineageChartEntries(entries)).charts));
+  const suNumbers = suChartNumbers(entries);
   const byId = new Map(entries.map((entry) => [String(entry.person_id), entry]));
   const list: BiographyEntry[] = [];
   for (const [id, appearance] of appearances) {
     const entry = byId.get(id);
     if (!entry || !hasFullBiography(entry.biography)) continue;
-    list.push(toBiographyEntry(entry, appearance));
+    list.push(toBiographyEntry(entry, appearance, suNumbers.get(id) ?? 0));
   }
   list.sort((a, b) => a.sequence - b.sequence);
   return list;
+}
+
+export function lineageChartEntries(entries: readonly BiographySource[]): ShiluChartEntry[] {
+  return entries.map((entry) => ({
+    person_id: String(entry.person_id),
+    generation: entry.generation,
+    rank: entry.rank,
+    full_name: entry.full_name,
+    courtesy_name: entry.courtesy_name,
+    art_name: entry.art_name,
+    birth_year: entry.birth_year,
+    death_year: entry.death_year,
+    is_living: entry.is_living,
+    native_place: entry.native_place,
+    father_id: entry.father_id,
+    child_type: entry.child_type,
+    spouses: (entry.spouses || [])
+      .map((spouse) => ({ name: String(spouse.name || '').trim() }))
+      .filter((spouse) => spouse.name),
+    children: entry.children,
+  }));
+}
+
+function suChartNumbers(entries: readonly BiographySource[]): Map<string, number> {
+  const model = europeanViewFromShilu(lineageChartEntries(entries));
+  const appearances = indexSuAppearances(buildSuCharts(model.people, model.links));
+  const numbers = new Map<string, number>();
+  for (const [id, appearance] of appearances) numbers.set(id, appearance.chartNo);
+  return numbers;
 }
 
 export function packBiographyPages(heights: readonly number[], firstBudget: number, budget: number): number[][] {
@@ -156,7 +202,7 @@ export function generationLabel(generation: number): string {
   return `第${chineseGeneration(generation)}世`;
 }
 
-function toBiographyEntry(entry: BiographySource, appearance: ChartAppearance): BiographyEntry {
+function toBiographyEntry(entry: BiographySource, appearance: ChartAppearance, suChartNo = 0): BiographyEntry {
   const spouses = (entry.spouses || [])
     .map((spouse) => String(spouse.name || '').trim())
     .filter(Boolean)
@@ -179,6 +225,7 @@ function toBiographyEntry(entry: BiographySource, appearance: ChartAppearance): 
     paragraphs: storyParagraphs(entry),
     note: notes.length ? notes.join('；') : undefined,
     chartNos: appearance.chartNos,
+    suChartNo,
     figures: (entry.figures || []).filter((figure) => figure.url),
   };
 }

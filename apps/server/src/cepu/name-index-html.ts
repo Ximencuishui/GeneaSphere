@@ -3,10 +3,11 @@
  */
 import { buildEuropeanCharts, fitEuropeanChartsToPages } from './european-chart';
 import { biographyAnchorId, indexChartAppearances } from './biography-index';
-import { buildNameIndex, type NameIndexGroup, type NameIndexRow } from './name-index';
+import { buildNameIndex, namePinyin, type NameIndexGroup, type NameIndexRow } from './name-index';
+import { buildSuCharts, indexSuAppearances } from './su-chart';
 import type { ShiluEntry } from './cepu.service';
 
-const LEAD = '本索引按姓名拼音排序，标注对应欧式世系图号、所在页码，方便检索查阅。';
+const LEAD = '本索引按姓名拼音排序。一条记录同时列出苏式图号、欧式图号和页码。';
 
 export function renderNameIndexBook(entries: ShiluEntry[], options: { electronic?: boolean; script?: 'horizontal' | 'antique' } = {}): string {
   const electronic = options.electronic !== false;
@@ -131,25 +132,32 @@ export function nameIndexCss(): string {
 }
 
 function indexGroups(entries: ShiluEntry[]): NameIndexGroup[] {
-  const pages = fitEuropeanChartsToPages(buildEuropeanCharts(peopleOf(entries), linksOf(entries)));
+  const people = peopleOf(entries);
+  const links = linksOf(entries);
+  const pages = fitEuropeanChartsToPages(buildEuropeanCharts(people, links));
   const appearances = indexChartAppearances(pages);
+  const suAppearances = indexSuAppearances(buildSuCharts(people, links));
   const byId = new Map(entries.map((entry) => [String(entry.person_id), entry]));
   const candidates = [];
   for (const [id, appearance] of appearances) {
     const entry = byId.get(id);
     if (!entry?.biography?.trim()) continue;
+    const suChartNo = suAppearances.get(id)?.chartNo ?? 0;
     candidates.push({
       personId: id,
       name: entry.full_name,
       generation: entry.generation,
-      chartNos: appearance.chartNos,
+      chartNos: [appearance.chartNo],
+      suChartNo,
+      ouChartNo: appearance.chartNo,
+      pageNo: suChartNo || appearance.chartNo,
     });
   }
   return buildNameIndex(candidates);
 }
 
 function renderGroup(group: NameIndexGroup, electronic: boolean): string {
-  const rows = group.rows.map((row) => `<p class="idx-row">${renderName(row, electronic)}｜${esc(row.generationLabel)}｜世系图号：第${row.chartNo}图｜页码：第${row.pageNo}页</p>`).join('');
+  const rows = group.rows.map((row) => `<p class="idx-row">${renderName(row, electronic)}｜${esc(row.pinyin || namePinyin(row.name))}｜${esc(row.generationLabel)}｜苏式第${row.suChartNo || '—'}图｜欧式第${row.ouChartNo || row.chartNo}图｜第${row.pageNo}页</p>`).join('');
   return `<section class="idx-group"><h3 class="idx-letter">【${esc(group.letter)}】</h3>${rows}</section>`;
 }
 

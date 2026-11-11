@@ -10,15 +10,21 @@ export interface NameIndexCandidate {
   /** 世录里的辈分，根是 0。 */
   generation: number;
   chartNos: number[];
+  suChartNo?: number;
+  ouChartNo?: number;
+  pageNo?: number;
 }
 
 export interface NameIndexRow {
   personId: string;
   name: string;
+  pinyin: string;
   generation: number;
   generationLabel: string;
   chartNo: number;
   pageNo: number;
+  suChartNo: number;
+  ouChartNo: number;
 }
 
 export interface NameIndexGroup {
@@ -162,7 +168,9 @@ export function buildNameIndex(candidates: readonly NameIndexCandidate[]): NameI
         generation,
         generationLabel: `${chineseGeneration(generation)}世`,
         chartNo,
-        pageNo: chartNo,
+        pageNo: candidate.pageNo ?? chartNo,
+        suChartNo: candidate.suChartNo ?? 0,
+        ouChartNo: candidate.ouChartNo ?? chartNo,
         pinyin: namePinyin(name),
         strokes: surnameStrokes(name),
       });
@@ -184,10 +192,13 @@ export function buildNameIndex(candidates: readonly NameIndexCandidate[]): NameI
     list.push({
       personId: row.personId,
       name: row.name,
+      pinyin: row.pinyin,
       generation: row.generation,
       generationLabel: row.generationLabel,
       chartNo: row.chartNo,
       pageNo: row.pageNo,
+      suChartNo: row.suChartNo,
+      ouChartNo: row.ouChartNo,
     });
     groups.set(letter, list);
   }

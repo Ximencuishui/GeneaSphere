@@ -2,9 +2,10 @@
  * 卷首人名索引。只收录有完整行传的族人，一条图号一行。
  * 一图一页，所以世系录页脚上的页码就是图号。
  */
-import { fitEuropeanChartsToPages } from '@/utils/european-chart';
-import { europeanChartsFromShilu } from '@/utils/european-chart-shilu';
-import { hasFullBiography, indexChartAppearances, type BiographySource } from '@/utils/biography-index';
+import { buildEuropeanCharts, fitEuropeanChartsToPages } from '@/utils/european-chart';
+import { europeanViewFromShilu } from '@/utils/european-chart-shilu';
+import { hasFullBiography, indexChartAppearances, lineageChartEntries, type BiographySource } from '@/utils/biography-index';
+import { buildSuCharts, indexSuAppearances } from '@/utils/su-chart';
 import { HANZI_BASE, HANZI_PINYIN_B64, HANZI_STROKE_B64, HANZI_SYLLABLES } from '@/utils/hanzi-index-data';
 
 export interface NameIndexCandidate {
@@ -13,15 +14,24 @@ export interface NameIndexCandidate {
   /** 世录里的辈分，根是 0。 */
   generation: number;
   chartNos: number[];
+  /** 苏式正文图号。不传时索引行里记 0。 */
+  suChartNo?: number;
+  /** 欧式正文图号。不传时沿用本行的 chartNo。 */
+  ouChartNo?: number;
+  /** 页码。不传时沿用图号。 */
+  pageNo?: number;
 }
 
 export interface NameIndexRow {
   personId: string;
   name: string;
+  pinyin: string;
   generation: number;
   generationLabel: string;
   chartNo: number;
   pageNo: number;
+  suChartNo: number;
+  ouChartNo: number;
 }
 
 export interface NameIndexGroup {
@@ -165,7 +175,9 @@ export function buildNameIndex(candidates: readonly NameIndexCandidate[]): NameI
         generation,
         generationLabel: `${chineseGeneration(generation)}世`,
         chartNo,
-        pageNo: chartNo,
+        pageNo: candidate.pageNo ?? chartNo,
+        suChartNo: candidate.suChartNo ?? 0,
+        ouChartNo: candidate.ouChartNo ?? chartNo,
         pinyin: namePinyin(name),
         strokes: surnameStrokes(name),
       });
@@ -187,10 +199,13 @@ export function buildNameIndex(candidates: readonly NameIndexCandidate[]): NameI
     list.push({
       personId: row.personId,
       name: row.name,
+      pinyin: row.pinyin,
       generation: row.generation,
       generationLabel: row.generationLabel,
       chartNo: row.chartNo,
       pageNo: row.pageNo,
+      suChartNo: row.suChartNo,
+      ouChartNo: row.ouChartNo,
     });
     groups.set(letter, list);
   }
@@ -201,18 +216,24 @@ export function buildNameIndex(candidates: readonly NameIndexCandidate[]): NameI
 }
 
 export function nameIndexFromEntries(entries: readonly BiographySource[]): NameIndexGroup[] {
-  const pages = fitEuropeanChartsToPages(europeanChartsFromShilu(entries).charts);
+  const model = europeanViewFromShilu(lineageChartEntries(entries));
+  const pages = fitEuropeanChartsToPages(buildEuropeanCharts(model.people, model.links));
   const appearances = indexChartAppearances(pages);
+  const suAppearances = indexSuAppearances(buildSuCharts(model.people, model.links));
   const byId = new Map(entries.map((entry) => [String(entry.person_id), entry]));
   const candidates: NameIndexCandidate[] = [];
   for (const [id, appearance] of appearances) {
     const entry = byId.get(id);
     if (!entry || !hasFullBiography(entry.biography)) continue;
+    const suChartNo = suAppearances.get(id)?.chartNo ?? 0;
     candidates.push({
       personId: id,
       name: entry.full_name,
       generation: entry.generation,
-      chartNos: appearance.chartNos,
+      chartNos: [appearance.chartNo],
+      suChartNo,
+      ouChartNo: appearance.chartNo,
+      pageNo: suChartNo || appearance.chartNo,
     });
   }
   return buildNameIndex(candidates);

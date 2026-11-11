@@ -7,6 +7,7 @@ import {
   RelationChangeStatus,
 } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { FAMILY_RULES_TEXT, chooseFamilyRules, htmlToRules, refreshFamilyRulesVolume, rulesToHtml } from '../cepu/clan-rules';
 import {
   ADMIN_AVATAR,
   MEMBER_AVATAR,
@@ -402,6 +403,7 @@ export class DemoSeedService implements OnModuleInit {
 
       // [2026-08-21] 补齐家族概况冷启动数据：精神、家规、口号、来源 + 理事会 + 修谱小组
       await this.seedClanOverview(demoClan.id);
+      await this.alignFamilyRules(demoClan.id);
 
       // [2026-08-24] 补齐迁徙事件冷启动数据，让迁徙地图首次打开即有轨迹可展示
       await this.seedMigrationEvents(demoClan.id, demoUser.id.toString());
@@ -689,29 +691,7 @@ export class DemoSeedService implements OnModuleInit {
       {
         match: (title) => title.includes('家训'),
         title: '家训',
-        content: `<h3 style="text-align:center;">家训</h3>
-<p style="text-indent:2em;">族中家训以文公《白鹿洞书院揭示》为纲。下文按通行文本摘录，供子弟诵习。</p>
-<h4>五教之目</h4>
-<p style="text-align:center;">父子有亲。君臣有义。夫妇有别。长幼有序。朋友有信。</p>
-<h4>为学之序</h4>
-<p style="text-align:center;">博学之。审问之。慎思之。明辨之。笃行之。</p>
-<h4>修身之要</h4>
-<p style="text-align:center;">言忠信。行笃敬。惩忿窒欲。迁善改过。</p>
-<h4>处事之要</h4>
-<p style="text-align:center;">正其义不谋其利。明其道不计其功。</p>
-<h4>接物之要</h4>
-<p style="text-align:center;">己所不欲，勿施于人。行有不得，反求诸己。</p>
-<h4>紫阳日用八则</h4>
-<ol style="line-height:1.9;">
-<li>孝父母：晨昏定省，侍奉无怠。</li>
-<li>友兄弟：兄友弟恭，和睦相处。</li>
-<li>谨夫妇：相敬如宾，勤俭持家。</li>
-<li>教子孙：诗书传家，以德为先。</li>
-<li>睦宗族：守望相助，患难与共。</li>
-<li>重丧祭：慎终追远，祭祀以诚。</li>
-<li>崇节俭：量入为出，戒奢以俭。</li>
-<li>守国法：奉公守法，立身行道。</li>
-</ol>`,
+        content: rulesToHtml(FAMILY_RULES_TEXT),
       },
       {
         match: (title) => title.includes('像赞'),
@@ -854,6 +834,29 @@ export class DemoSeedService implements OnModuleInit {
     }
   }
 
+  /** 家族概况的家规和卷二家训收成同一份。演示旧稿会被换成统一文本，改过的内容保留。 */
+  private async alignFamilyRules(clanId: bigint) {
+    const clan = await this.prisma.clan.findUnique({
+      where: { id: clanId },
+      select: { rules: true },
+    });
+    if (!clan) return;
+    const volumes = await this.prisma.bookVolume.findMany({
+      where: { clan_id: clanId, type: 'document' },
+      select: { title: true, content: true },
+    });
+    const book = volumes.find((volume) => volume.title.includes('家训'));
+    const next = chooseFamilyRules(clan.rules ?? '', htmlToRules(book?.content ?? ''));
+    if ((clan.rules ?? '') !== next) {
+      await this.prisma.clan.update({
+        where: { id: clanId },
+        data: { rules: next },
+      });
+    }
+    await refreshFamilyRulesVolume(this.prisma, clanId, next);
+    this.logger.log('  ✅ 家规家训已与卷二家训对齐');
+  }
+
   /** 家族概况冷启动：精神、家规、口号、来源 + 理事会 + 修谱小组 */
   private async seedClanOverview(clanId: bigint) {
     // 1) 补齐家族基础信息（spirit / rules / slogan / origin_place）
@@ -873,7 +876,7 @@ export class DemoSeedService implements OnModuleInit {
           slogan: clan.slogan || '传承朱子家训，弘扬理学精神',
           origin_place: clan.origin_place || '江西婺源',
           spirit: clan.spirit || '忠孝传家远，诗书继世长。\n恪守朱子家训，秉持格物致知、诚意正心、修身齐家、治国平天下之道。',
-          rules: clan.rules || '一、孝父母：百善孝为先，晨昏定省，侍奉无怠。\n二、友兄弟：手足情深，兄友弟恭，和睦相处。\n三、谨夫妇：相敬如宾，勤俭持家，共育后代。\n四、教子孙：诗书传家，以德为先，严慈相济。\n五、睦宗族：宗族和睦，守望相助，患难与共。\n六、重丧祭：慎终追远，祭祀以诚，不忘根本。\n七、崇节俭：戒奢以俭，量入为出，积善余庆。\n八、守国法：奉公守法，不涉邪僻，立身行道。',
+          rules: clan.rules || FAMILY_RULES_TEXT,
         },
       });
       this.logger.log('  ✅ 家族概况信息已补齐（口号/来源/精神/家规）');

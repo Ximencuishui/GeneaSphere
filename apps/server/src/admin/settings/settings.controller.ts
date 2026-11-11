@@ -5,6 +5,7 @@ import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
 import { Role } from '@prisma/client';
 import { serializeBigInt } from '../../common/bigint-serializer';
+import { refreshFamilyRulesVolume } from '../../cepu/clan-rules';
 
 @ApiTags('admin/settings')
 @Controller('api/admin/settings')
@@ -546,6 +547,9 @@ const [photos, videos, others] = await Promise.all([
       where: { id: clanId },
       data: updateData,
     });
+    if (body.rules !== undefined) {
+      await refreshFamilyRulesVolume(this.prisma, clanId, updated.rules);
+    }
 
     await this.adminService.logAction({
       clanId,

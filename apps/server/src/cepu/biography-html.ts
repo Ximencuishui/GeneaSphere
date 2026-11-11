@@ -3,6 +3,7 @@
  */
 import { buildEuropeanCharts, fitEuropeanChartsToPages } from './european-chart';
 import { biographyAnchorId, indexChartAppearances, treeAnchorId } from './biography-index';
+import { buildSuCharts, indexSuAppearances } from './su-chart';
 import type { ShiluEntry } from './cepu.service';
 
 const CN_DIGIT = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'] as const;
@@ -19,6 +20,8 @@ export function renderBiographyBook(
     lead?: string;
     anchor?: string;
     lineage?: ShiluEntry[];
+    /** 导出某一套世系时，回链只写这一套图号。 */
+    lineageStyle?: 'su' | 'ou' | 'both';
   } = {},
 ): string {
   const electronic = options.electronic !== false;
@@ -27,7 +30,7 @@ export function renderBiographyBook(
   const lead = options.lead || BIO_LEAD;
   const anchor = options.anchor || 'book-biography';
   const mark = antique ? ' is-antique' : '';
-  const articles = biographyArticles(entries, electronic, options.lineage);
+  const articles = biographyArticles(entries, electronic, options.lineage, options.lineageStyle ?? 'both');
   if (articles.length === 0) {
     return `<div id="${esc(anchor)}" class="bio-book${mark}"><section class="bio-sheet is-odd${mark}"><div class="bio-stage"><header class="bio-head"><h2 class="bio-volume">${esc(title)}</h2><p class="bio-lead">${esc(lead)}</p></header><p class="bio-empty">本卷暂无已录入完整行传的族人。</p></div><p class="bio-foot">第 1 页 / 共 1 页</p></section></div>`;
   }
@@ -189,19 +192,30 @@ export function biographyCss(): string {
   `;
 }
 
-function biographyArticles(entries: ShiluEntry[], electronic: boolean, lineage?: ShiluEntry[]): string[] {
+function biographyArticles(
+  entries: ShiluEntry[],
+  electronic: boolean,
+  lineage?: ShiluEntry[],
+  lineageStyle: 'su' | 'ou' | 'both' = 'both',
+): string[] {
   if (!lineage) {
-    const pages = fitEuropeanChartsToPages(buildEuropeanCharts(peopleOf(entries), linksOf(entries)));
+    const people = peopleOf(entries);
+    const links = linksOf(entries);
+    const pages = fitEuropeanChartsToPages(buildEuropeanCharts(people, links));
     const appearances = indexChartAppearances(pages);
+    const suNumbers = suChartNumbers(people, links);
     const byId = new Map(entries.map((entry) => [String(entry.person_id), entry]));
     return [...appearances.entries()]
-      .map(([id, appearance]) => ({ entry: byId.get(id), appearance }))
-      .filter((item): item is { entry: ShiluEntry; appearance: { chartNo: number; sequence: number; chartNos: number[] } } => Boolean(item.entry?.biography?.trim()))
+      .map(([id, appearance]) => ({ entry: byId.get(id), appearance, suChartNo: suNumbers.get(id) ?? 0 }))
+      .filter((item): item is { entry: ShiluEntry; appearance: { chartNo: number; sequence: number; chartNos: number[] }; suChartNo: number } => Boolean(item.entry?.biography?.trim()))
       .sort((a, b) => a.appearance.sequence - b.appearance.sequence)
-      .map(({ entry, appearance }) => renderArticle(entry, appearance, electronic));
+      .map(({ entry, appearance, suChartNo }) => renderArticle(entry, appearance, suChartNo, electronic, lineageStyle));
   }
   const source = lineage.length ? lineage : entries;
-  const appearances = indexChartAppearances(fitEuropeanChartsToPages(buildEuropeanCharts(peopleOf(source), linksOf(source))));
+  const people = peopleOf(source);
+  const links = linksOf(source);
+  const appearances = indexChartAppearances(fitEuropeanChartsToPages(buildEuropeanCharts(people, links)));
+  const suNumbers = suChartNumbers(people, links);
   let extra = appearances.size + 1;
   const ordered = entries
     .filter((entry) => entry.biography?.trim())
@@ -213,10 +227,24 @@ function biographyArticles(entries: ShiluEntry[], electronic: boolean, lineage?:
           ? { chartNo: father.chartNo, sequence: extra, chartNos: [father.chartNo] }
           : { chartNo: 0, sequence: extra, chartNos: [] as number[] });
       if (!own) extra += 1;
-      return { entry, appearance };
+      const suChartNo = suNumbers.get(String(entry.person_id))
+        ?? (entry.father_id ? suNumbers.get(String(entry.father_id)) : undefined)
+        ?? 0;
+      return { entry, appearance, suChartNo };
     })
     .sort((a, b) => a.appearance.sequence - b.appearance.sequence);
-  return ordered.map(({ entry, appearance }) => renderArticle(entry, appearance, electronic));
+  return ordered.map(({ entry, appearance, suChartNo }) => renderArticle(entry, appearance, suChartNo, electronic, lineageStyle));
+}
+
+function suChartNumbers(
+  people: ReturnType<typeof peopleOf>,
+  links: ReturnType<typeof linksOf>,
+): Map<string, number> {
+  const numbers = new Map<string, number>();
+  for (const [id, appearance] of indexSuAppearances(buildSuCharts(people, links))) {
+    numbers.set(id, appearance.chartNo);
+  }
+  return numbers;
 }
 
 function peopleOf(entries: ShiluEntry[]) {
@@ -260,7 +288,9 @@ function linksOf(entries: ShiluEntry[]) {
 function renderArticle(
   entry: ShiluEntry,
   appearance: { chartNo: number; chartNos: number[] },
+  suChartNo: number,
   electronic: boolean,
+  lineageStyle: 'su' | 'ou' | 'both',
 ): string {
   const generation = `第${chineseGeneration(Math.max(1, Math.floor(entry.generation) + 1))}世`;
   const years = lifeYears(entry);
@@ -279,15 +309,23 @@ function renderArticle(
     .filter(Boolean);
   const notes = [entry.epitaph, entry.source_note].map((item) => String(item || '').trim()).filter(Boolean);
   const chartNo = appearance.chartNo;
-  const extraAnchors = appearance.chartNos
-    .filter((item) => item !== chartNo)
-    .map((item) => `<span id="${esc(biographyAnchorId(entry.full_name, item))}" class="bio-anchor"></span>`)
-    .join('');
-  const seeChart = chartNo
+  const extraAnchors = [
+    ...appearance.chartNos
+      .filter((item) => item !== chartNo)
+      .map((item) => `<span id="${esc(biographyAnchorId(entry.full_name, item))}" class="bio-anchor"></span>`),
+    suChartNo ? `<span id="${esc(`bio-su-${entry.full_name.trim()}-${suChartNo}`)}" class="bio-anchor"></span>` : '',
+  ].join('');
+  const seeOu = chartNo && lineageStyle !== 'su'
     ? (electronic
-      ? `<a class="book-jump" href="#${treeAnchorId(chartNo)}" title="${esc(`跳转到世系第${chartNo}图`)}">见世系第${chartNo}图</a>`
-      : `见世系第${chartNo}图`)
+      ? `<a class="book-jump" href="#${treeAnchorId(chartNo)}" title="${esc(`跳转到欧式世系第${chartNo}图`)}">见世系欧式第${chartNo}图</a>`
+      : `见世系欧式第${chartNo}图`)
     : '';
+  const seeSu = suChartNo && lineageStyle !== 'ou'
+    ? (electronic
+      ? `<a class="book-jump" href="#tree-su-${suChartNo}" title="${esc(`跳转到苏式世系第${suChartNo}图`)}">见世系苏式第${suChartNo}图</a>`
+      : `见世系苏式第${suChartNo}图`)
+    : '';
+  const seeChart = [seeOu, seeSu].filter(Boolean).join('｜');
   const figures = (entry.figures || []).filter((figure) => figure.url);
   const figureHtml = figures.length
     ? `<aside class="bio-figures">${figures.map((figure) => `<figure class="bio-figure"><img src="${esc(figure.url)}" alt="${esc(figure.caption)}" /><figcaption>${esc(`图：${figure.caption}`)}</figcaption></figure>`).join('')}</aside>`
