@@ -76,26 +76,11 @@ function Upload-Files {
     scp -P $SSHPort $tempTar "root@${ServerIP}:${RemoteDir}/deploy.tar.gz"
 
     Write-Host "  Extracting..."
-    ssh -p $SSHPort "root@$ServerIP" "
-        cd $RemoteDir
-        # 1) 前端 dist 先解压到 staging 并原子切换，避免 nginx 读到写了一半的文件
-        rm -rf .deploy-staging
-        mkdir -p .deploy-staging
-        if tar -tzf deploy.tar.gz | grep -q '^apps/web/dist/'; then
-            tar -xzf deploy.tar.gz -C .deploy-staging apps/web/dist
-            if [ -d apps/web/dist ]; then
-                rm -rf apps/web/dist.old
-                mv apps/web/dist apps/web/dist.old
-            fi
-            mv .deploy-staging/apps/web/dist apps/web/dist
-            rm -rf apps/web/dist.old
-        fi
-        rm -rf .deploy-staging
-        # 2) 其余源码文件原地解压覆盖（不影响运行中的服务）
-        tar -xzf deploy.tar.gz --exclude='apps/web/dist'
-        rm -f deploy.tar.gz
-        echo 'Extract done'
-    "
+    # 解压逻辑放在独立 shell 脚本中（scripts/remote/extract-deploy.sh），
+    # 避免 PowerShell 内联多行命令的转义/换行符问题（生产事故 2026-11-11）。
+    ssh -p $SSHPort "root@$ServerIP" "mkdir -p $RemoteDir/scripts/remote"
+    scp -P $SSHPort -q "$ProjectDir\scripts\remote\extract-deploy.sh" "root@${ServerIP}:${RemoteDir}/scripts/remote/extract-deploy.sh"
+    ssh -p $SSHPort "root@$ServerIP" "bash $RemoteDir/scripts/remote/extract-deploy.sh $RemoteDir"
 
     Remove-Item $tempTar -Force -ErrorAction SilentlyContinue
     Write-Host "  Upload done" -ForegroundColor Green
@@ -139,11 +124,8 @@ function Build-Local {
 function Deploy-Remote {
     Write-Host "[Deploy] Running deploy on server..." -ForegroundColor Yellow
 
-    ssh -p $SSHPort "root@$ServerIP" "
-        export USE_MIRROR=false
-        export INSTALL_TESSERACT=false
-        bash $RemoteDir/deploy.sh
-    "
+    # 单行简单命令链，禁用镜像源与 Tesseract 安装
+    ssh -p $SSHPort "root@$ServerIP" "cd $RemoteDir && USE_MIRROR=false INSTALL_TESSERACT=false bash deploy.sh"
 }
 
 # ==================== Main ====================

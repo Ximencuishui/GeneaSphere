@@ -201,14 +201,15 @@ deploy_project() {
         npx prisma generate --schema=packages/db/prisma/schema.prisma
 
         log_info "构建后端..."
-        pnpm --filter server build 2>&1 | tail -3
+        # node-linker=hoisted 模式下 apps/server 下没有 .bin，直接调用根目录的 nest
+        (cd "$PROJECT_DIR/apps/server" && NODE_OPTIONS='--max-old-space-size=1024' "$PROJECT_DIR/node_modules/.bin/nest" build) 2>&1 | tail -3
 
         log_info "构建前端..."
         # 先修复 vue-tsc 可能的问题，跳过类型检查直接用 vite build
         # 输出到 dist.new（而非原地覆盖 dist）：构建成功后由 swap_web_dist 原子切换，
         # 避免部署过程中 nginx 读到写了一半的文件（此前会出现 ERR_CONNECTION_RESET / 404）。
         cd "$PROJECT_DIR/apps/web"
-        NODE_OPTIONS='--max-old-space-size=1024' npx vite build --outDir dist.new 2>&1 | tail -5
+        NODE_OPTIONS='--max-old-space-size=2048' npx vite build --outDir dist.new 2>&1 | tail -5
         cd "$PROJECT_DIR"
     fi
 
