@@ -88,7 +88,10 @@ export const cepuApi = {
     request.get<BookVolume[]>(`/api/cepu/${clanId}/volumes`, share ? { params: { share } } : undefined),
 
   getBookProfile: (clanId: string | number, share?: string) =>
-    request.get<{ profile: 'compact' | 'standard' }>(`/api/cepu/${clanId}/book-profile`, share ? { params: { share } } : undefined),
+    request.get<{ profile: 'compact' | 'standard'; cover?: { name: string; hall: string; volume: string; year: string; place?: string } }>(
+      `/api/cepu/${clanId}/book-profile`,
+      share ? { params: { share } } : undefined,
+    ),
 
   setBookProfile: (clanId: string | number, profile: 'compact' | 'standard') =>
     request.patch<{ profile: 'compact' | 'standard' }>(`/api/cepu/${clanId}/book-profile`, { profile }),

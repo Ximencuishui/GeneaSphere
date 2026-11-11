@@ -73,7 +73,11 @@ export class CepuController {
   async getBookProfile(@Param('clanSlug') clanSlug: string, @Req() req: any) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
-    return { profile: await this.cepuService.getBookProfile(clanId) };
+    const [profile, cover] = await Promise.all([
+      this.cepuService.getBookProfile(clanId),
+      this.cepuService.getBookCover(clanId),
+    ]);
+    return { profile, cover };
   }
 
   @Patch(':clanSlug/book-profile')

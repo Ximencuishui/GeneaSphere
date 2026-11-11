@@ -7,6 +7,12 @@ import {
   layoutSuPlates,
   nestSuBlocks,
   placeSuChart,
+  suAntiqueOverflows,
+  SU_ANTIQUE_BEAD_PT,
+  SU_ANTIQUE_DIVIDER_PT,
+  SU_ANTIQUE_FRAME_SIDE_PT,
+  SU_ANTIQUE_FRAME_TOP_PT,
+  SU_ANTIQUE_PERSON_RULE_PT,
   suBranchName,
   suFrameWeightPt,
   suGenerationLabel,
@@ -242,7 +248,12 @@ describe('垂珠板', () => {
     expect(antique.railX).not.toBeNull();
     const antiqueBar = antique.lines.find((rule) => rule.parentId === 'r');
     expect(antiqueBar).toBeTruthy();
-    expect(at(antique, 'a').beadY).toBeLessThan((antiqueBar?.y ?? 0) + (antiqueBar?.length ?? 0));
+    expect(antiqueBar?.x).toBe(at(antique, 'r').beadX);
+    expect(antiqueBar?.x).toBe(at(antique, 'a').beadX);
+    expect(antiqueBar?.y).toBe(at(antique, 'r').beadY);
+    expect(Math.round(((antiqueBar?.y ?? 0) + (antiqueBar?.length ?? 0)) * 100) / 100).toBe(at(antique, 'a').beadY);
+    expect(at(antique, 'b').beadX).not.toBe(at(antique, 'r').beadX);
+    expect(suAntiqueOverflows(antique)).toEqual([]);
   });
 
   it('版本A每个珠心都落在父子连线上，文字让开珠圈', () => {
@@ -268,18 +279,45 @@ describe('垂珠板', () => {
     expect(suFrameWeightPt(3)).toBe(4);
   });
 
-  it('世代栏：简体用数字，仿古用汉字，圆圈在世代线上方', () => {
+  it('世代栏：简体用数字，仿古用汉字，珠心落在垂线上且收在版心内', () => {
     expect(suGenerationLabel(7, 'horizontal')).toBe('7世');
     expect(suGenerationLabel(7, 'antique')).toBe('七世');
     expect(suGenerationLabel(10, 'antique')).toBe('十世');
     expect(suGenerationLabel(23, 'antique')).toBe('二十三世');
-    const place = placeSuChart(nestSuBlocks(buildSuCharts(people, links, { blocksPerPage: 20 })[0].blocks), 'antique');
+    expect(SU_ANTIQUE_FRAME_TOP_PT / SU_ANTIQUE_FRAME_SIDE_PT).toBe(2);
+    const roots = nestSuBlocks(buildSuCharts(people, links, { blocksPerPage: 20 })[0].blocks);
+    const place = placeSuChart(roots, 'antique');
     expect(place.generations.map((band) => band.label)).toEqual(['一世', '二世', '三世', '四世']);
-    expect(place.generations.every((band) => band.boxed)).toBe(true);
-    expect(place.bands).toEqual([]);
+    expect(place.generations.every((band) => band.boxed && band.w === 4.2)).toBe(true);
+    expect(place.rails && place.generations.every((band) => band.x > place.rails!.left && band.x + band.w < place.rails!.right)).toBe(true);
+    expect(place.underlines).toHaveLength(place.people.length);
+    expect(place.bands).toHaveLength(0);
+    expect(SU_ANTIQUE_FRAME_TOP_PT).toBe(4);
+    expect(SU_ANTIQUE_FRAME_SIDE_PT).toBe(2);
+    expect(SU_ANTIQUE_DIVIDER_PT).toBe(1);
+    expect(SU_ANTIQUE_BEAD_PT).toBe(1);
+    expect(SU_ANTIQUE_PERSON_RULE_PT).toBe(0.5);
+    expect(place.bands).toHaveLength(0);
+    expect(place.lines.every((rule) => rule.axis === 'v')).toBe(true);
     const head = place.people.find((item) => item.personId === 'r');
     const band = place.generations.find((item) => item.row === 0);
-    expect(head && band && head.beadY).toBeLessThan(band?.y ?? 0);
+    expect(head && band && head.beadY).toBeGreaterThanOrEqual(band.y);
+    expect(head && band && head.beadY).toBeLessThanOrEqual(band.y + band.h);
+    for (const bead of place.beads) {
+      const onLine = place.lines.some((rule) => (
+        rule.axis === 'v'
+        && Math.abs(rule.x - bead.x) < 0.02
+        && bead.y >= rule.y - 0.02
+        && bead.y <= rule.y + rule.length + 0.02
+      ));
+      expect(onLine, bead.personId).toBe(true);
+    }
+    const long = placeSuChart(roots, 'antique', roots.flatMap(function walk(node): { index: number; chars: number }[] {
+      return [{ index: node.index, chars: 96 }, ...node.children.flatMap(walk)];
+    }));
+    expect(long.people.every((person) => person.textScale < 1)).toBe(true);
+    expect(suAntiqueOverflows(place)).toEqual([]);
+    expect(suAntiqueOverflows(long)).toEqual([]);
   });
 });
 

@@ -162,6 +162,21 @@ export class CepuService {
 
   // ==================== 卷宗管理 ====================
 
+  async getBookCover(clanId: bigint): Promise<{ name: string; hall: string; volume: string; year: string; place: string }> {
+    const clan = await this.prisma.clan.findUnique({
+      where: { id: clanId },
+      select: { name: true, slogan: true, origin_place: true, updated_at: true },
+    });
+    const year = clan?.updated_at?.getFullYear() ?? new Date().getFullYear();
+    return {
+      name: clan?.name?.trim() || '族谱',
+      hall: (clan?.slogan || '').trim(),
+      volume: '全卷',
+      year: `公元${year}年重修`,
+      place: (clan?.origin_place || '').trim(),
+    };
+  }
+
   async getBookProfile(clanId: bigint): Promise<BookProfile> {
     const clan = await this.prisma.clan.findUnique({
       where: { id: clanId },

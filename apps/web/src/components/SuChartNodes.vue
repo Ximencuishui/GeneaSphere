@@ -2,12 +2,13 @@
 /**
  * 苏式垂珠的一板。
  * 版本A：文字横排在线右，兄弟横线贴在诸子圆圈下沿。
- * 版本B：文字竖排在线左，只留各支向下的垂线，不画兄弟横线。
- * 圆圈在世代线上方。关掉垂珠时只拿掉竖线、横线和圆圈，板位与文字不动。
+ * 版本B：文字竖排在线左，只留各支向下的垂线，不画兄弟横线，也不画斜线。
+ * 珠圈圆心落在垂线节点上。关掉垂珠时只拿掉竖线和圆圈，板位与文字不动。
  */
 import { computed, ref } from 'vue';
 import {
   placeSuChart,
+  type SuAntiqueMeasure,
   type SuBeadNode,
   type SuChart,
   type SuGenerationBand,
@@ -45,7 +46,16 @@ const emit = defineEmits<{
 
 const BRIEF_LIMIT = 18;
 
-const place = computed(() => placeSuChart(props.nodes, props.antique ? 'antique' : 'horizontal'));
+const place = computed(() => {
+  if (!props.antique) return placeSuChart(props.nodes, 'horizontal');
+  const measures: SuAntiqueMeasure[] = [];
+  const visit = (node: SuBeadNode) => {
+    measures.push({ index: node.index, chars: antiqueCharCount(node) });
+    node.children.forEach(visit);
+  };
+  props.nodes.forEach(visit);
+  return placeSuChart(props.nodes, 'antique', measures);
+});
 const noteMode = computed(() => continueNoteMode(props.continueNote, props.antique ? 'antique' : 'horizontal'));
 const hiddenPortraits = ref(new Set<string>());
 
@@ -83,7 +93,7 @@ function plateStyle(): Record<string, string> {
 }
 
 function personStyle(person: SuPlacedPerson): Record<string, string> {
-  return {
+  const style: Record<string, string> = {
     left: `${person.textX}mm`,
     top: `${person.textY}mm`,
     width: `${person.textW}mm`,
@@ -91,6 +101,13 @@ function personStyle(person: SuPlacedPerson): Record<string, string> {
     writingMode: props.antique ? 'vertical-rl' : 'horizontal-tb',
     textOrientation: props.antique ? 'upright' : 'mixed',
   };
+  if (!props.antique) return style;
+  style.background = 'transparent';
+  style.color = '#000';
+  style.border = '0';
+  style.boxShadow = 'none';
+  if (person.textScale < 0.999) style['--su-fit'] = String(person.textScale);
+  return style;
 }
 
 function ruleStyle(rule: SuRule): Record<string, string> {
@@ -109,7 +126,7 @@ function bandStyle(y: number): Record<string, string> {
 }
 
 function genStyle(band: SuGenerationBand): Record<string, string> {
-  return {
+  const style: Record<string, string> = {
     left: `${band.x}mm`,
     top: `${band.y}mm`,
     width: `${band.w}mm`,
@@ -117,6 +134,21 @@ function genStyle(band: SuGenerationBand): Record<string, string> {
     writingMode: band.boxed ? 'vertical-rl' : 'horizontal-tb',
     textOrientation: band.boxed ? 'upright' : 'mixed',
   };
+  if (!band.boxed) return style;
+  style.background = '#000';
+  style.color = '#fff';
+  style.border = '0';
+  style.borderRadius = '0';
+  style.boxShadow = 'none';
+  style.outline = 'none';
+  return style;
+}
+
+function antiqueCharCount(node: SuBeadNode): number {
+  const fields = antiqueFields(node).reduce((sum, field) => sum + field.length, 0);
+  const notes = personNotes(node).reduce((sum, note) => sum + note.text.length, 0);
+  const bio = hasBiography(node) ? 5 : 0;
+  return Math.max(1, node.block.name.length + fields + notes + bio);
 }
 
 function personNotes(node: SuBeadNode): Array<ReturnType<typeof formatContinueNote> & { href: string }> {
@@ -155,8 +187,6 @@ function antiqueFields(node: SuBeadNode): string[] {
   const years = yearsText(node);
   if (years) fields.push(years);
   if (node.block.spouseText) fields.push(node.block.spouseText);
-  const children = node.children.map((child) => child.block.name).filter((name) => name.length > 0);
-  if (children.length) fields.push(`子${children.join('、')}`);
   const burial = burialText(node);
   if (burial) fields.push(burial);
   if (node.block.mark) fields.push(node.block.mark);
@@ -219,9 +249,10 @@ function isSelected(personId: string): boolean {
     :style="plateStyle()"
   >
     <span
-      v-if="place.railX != null"
-      class="su-rail"
-      :style="{ left: `${place.railX}mm` }"
+      v-for="line in place.underlines"
+      :key="`ul-${line.index}`"
+      class="su-person-rule"
+      :style="{ left: `${line.x}mm`, top: `${line.y}mm`, width: `${line.w}mm` }"
     ></span>
     <span
       v-for="y in place.bands"
@@ -235,7 +266,7 @@ function isSelected(personId: string): boolean {
       class="su-gen"
       :class="{ 'is-boxed': band.boxed }"
       :style="genStyle(band)"
-    >{{ band.label }}</div>
+    ><span class="su-gen-label">{{ band.label }}</span></div>
     <template v-if="beadLines">
       <span
         v-for="(rule, ruleIndex) in place.lines"
@@ -336,7 +367,7 @@ function isSelected(personId: string): boolean {
   border: none;
   background: transparent;
   color: #000;
-  font-family: 'SimSun', 'NSimSun', 'Songti SC', serif;
+  font-family: 'FangSong', 'STFangsong', 'FangSong_GB2312', 'Songti SC', 'SimSun', serif;
 }
 
 .su-rail {
@@ -344,7 +375,16 @@ function isSelected(personId: string): boolean {
   top: 0;
   bottom: 0;
   z-index: 1;
-  width: 0.4pt;
+  width: var(--su-divider-pt, 1pt);
+  background: #000;
+  pointer-events: none;
+}
+
+.su-person-rule {
+  position: absolute;
+  z-index: 1;
+  height: var(--su-person-rule-pt, 0.5pt);
+  border: 0;
   background: #000;
   pointer-events: none;
 }
@@ -355,8 +395,14 @@ function isSelected(personId: string): boolean {
   right: 14mm;
   z-index: 1;
   height: 0;
-  border-top: 0.3pt solid #000;
+  border-top: 0.8pt solid #000;
   pointer-events: none;
+}
+
+.su-plate.is-antique .su-band {
+  left: auto;
+  right: 20mm;
+  width: 4mm;
 }
 
 .su-gen {
@@ -372,15 +418,28 @@ function isSelected(personId: string): boolean {
 
 .su-gen.is-boxed {
   box-sizing: border-box;
-  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
   background: #000;
   color: #fff;
-  font-size: 12px;
-  line-height: 1.15;
-  letter-spacing: 0.16em;
+  font-size: 8pt;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
   text-align: center;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
+}
+
+.su-gen.is-boxed .su-gen-label {
+  margin: auto;
+  background: transparent;
+  color: #fff;
 }
 
 .su-rule {
@@ -391,8 +450,13 @@ function isSelected(personId: string): boolean {
 }
 
 .su-rule.is-v {
-  width: 0.4pt;
-  transform: translateX(-0.2pt);
+  width: var(--su-bead-pt, 1pt);
+  transform: translateX(-0.5pt);
+}
+
+.su-plate.is-antique .su-rule.is-v {
+  width: var(--su-bead-pt, 1pt);
+  transform: translateX(-0.5pt);
 }
 
 .su-rule.is-h {
@@ -408,10 +472,14 @@ function isSelected(personId: string): boolean {
   height: 2.4mm;
   margin-left: -1.2mm;
   margin-top: -1.2mm;
-  border: 0.4pt solid #000;
+  border: var(--su-bead-pt, 1pt) solid #000;
   border-radius: 50%;
   background: #fff;
   pointer-events: none;
+}
+
+.su-plate.is-antique .su-bead {
+  border-width: var(--su-bead-pt, 1pt);
 }
 
 .su-person .su-seam {
@@ -430,9 +498,15 @@ function isSelected(personId: string): boolean {
   white-space: normal;
 }
 
-.su-vrun .su-seam {
-  writing-mode: horizontal-tb;
-  text-orientation: mixed;
+.su-plate.is-antique .su-vrun .su-seam,
+.su-plate.is-antique .su-continue,
+.su-plate.is-antique .su-continue-link,
+.su-plate.is-antique .su-jump,
+.su-plate.is-antique .su-meta,
+.su-plate.is-antique .su-name {
+  display: inline;
+  background: transparent;
+  box-shadow: none;
 }
 
 .su-continue {
@@ -463,12 +537,14 @@ function isSelected(personId: string): boolean {
 
 .su-person {
   position: absolute;
-  z-index: 3;
+  z-index: 4;
   box-sizing: border-box;
   margin: 0;
   padding: 0;
   overflow: hidden;
   background: transparent;
+  border: 0;
+  box-shadow: none;
   cursor: pointer;
 }
 
@@ -547,14 +623,50 @@ function isSelected(personId: string): boolean {
   text-decoration: underline;
 }
 
+.su-plate.is-antique .su-person,
+.su-plate.is-antique .su-vrun,
 .su-plate.is-antique .su-name,
 .su-plate.is-antique .su-meta,
 .su-plate.is-antique .su-courtesy,
 .su-plate.is-antique .su-years,
 .su-plate.is-antique .su-kin,
 .su-plate.is-antique .su-mark,
-.su-plate.is-antique .su-brief {
+.su-plate.is-antique .su-brief,
+.su-plate.is-antique .su-jump {
+  background: transparent;
   color: #000;
+  border: 0;
+  box-shadow: none;
+}
+
+.su-plate.is-antique .su-name {
+  font-size: calc(14pt * var(--su-fit, 1));
+  font-weight: 500;
+}
+.su-plate.is-antique .su-meta,
+.su-plate.is-antique .su-courtesy,
+.su-plate.is-antique .su-years,
+.su-plate.is-antique .su-kin,
+.su-plate.is-antique .su-mark {
+  font-size: calc(9pt * var(--su-fit, 1));
+  font-weight: 400;
+}
+.su-plate.is-antique .su-seam,
+.su-plate.is-antique .su-continue,
+.su-plate.is-antique .su-continue-link {
+  font-size: calc(8pt * var(--su-fit, 1));
+  font-weight: 400;
+}
+.su-plate.is-antique .su-jump {
+  font-size: calc(7.5pt * var(--su-fit, 1));
+  font-weight: 400;
+}
+
+.su-plate.is-antique .su-seam,
+.su-plate.is-antique .su-continue,
+.su-plate.is-antique .su-continue-link {
+  background: transparent;
+  color: #c0392b;
 }
 
 .su-meta {
@@ -564,8 +676,9 @@ function isSelected(personId: string): boolean {
 
 .su-plate.is-antique .su-jump {
   color: #000;
-  text-decoration: none;
-  border-bottom: 0.4pt solid #000;
+  text-decoration: underline;
+  text-underline-offset: 1px;
+  border: 0;
 }
 
 @media print {

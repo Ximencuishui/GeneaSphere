@@ -222,7 +222,7 @@ function frameLabel(weight: number): string {
 .su-flow {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: safe center;
   align-items: flex-start;
   gap: 18px 22px;
 }

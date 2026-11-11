@@ -6,12 +6,19 @@
  */
 import type { ShiluEntry } from './cepu.service';
 import {
+  SU_ANTIQUE_BEAD_PT,
+  SU_ANTIQUE_DIVIDER_PT,
+  SU_ANTIQUE_FRAME_SIDE_PT,
+  SU_ANTIQUE_FRAME_TOP_PT,
+  SU_ANTIQUE_PERSON_RULE_PT,
   SU_BLOCKS_PER_PAGE,
   buildSuCharts,
   groupSuCharts,
   nestSuBlocks,
   placeSuChart,
+  suAntiqueColumn,
   suFrameWeightPt,
+  type SuAntiqueMeasure,
   type SuBeadNode,
   type SuBlock,
   type SuChart,
@@ -101,32 +108,43 @@ export function suChartCss(): string {
       letter-spacing: 0.28em; writing-mode: horizontal-tb;
     }
     .su-plate { position: relative; margin: 0 auto; writing-mode: horizontal-tb; }
-    .su-rail { position: absolute; top: 0; bottom: 0; z-index: 1; width: 0.4pt; background: #000; }
-    .su-band { position: absolute; left: 0; right: 14mm; z-index: 1; height: 0; border-top: 0.3pt solid #000; }
+    .su-rail { position: absolute; top: 0; bottom: 0; z-index: 1; width: ${SU_ANTIQUE_DIVIDER_PT}pt; background: #000; }
+    .su-plate.is-antique .su-rail { width: ${SU_ANTIQUE_DIVIDER_PT}pt; transform: translateX(-0.5pt); }
+    .su-band { position: absolute; left: 0; right: 14mm; z-index: 1; height: 0; border-top: 0.8pt solid #000; }
+    .su-plate.is-antique .su-band { left: auto; right: 20mm; width: 4mm; }
     .su-gen { position: absolute; z-index: 3; overflow: hidden; color: #5c564c; font-size: 11px; line-height: 1.2; letter-spacing: 0.06em; }
     .su-gen.is-boxed {
-      box-sizing: border-box; border: none; background: #000; color: #fff;
-      font-size: 12px; line-height: 1.15; letter-spacing: 0.16em; text-align: center;
+      box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+      border: 0; border-radius: 0; outline: none; box-shadow: none; background: #000; color: #fff;
+      font-size: 8pt; font-weight: 500; line-height: 1.05; letter-spacing: 0.02em; text-align: center;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
+    .su-gen.is-boxed .su-gen-label { margin: auto; background: transparent; color: #fff; }
     .su-rule { position: absolute; z-index: 1; background: #000; }
-    .su-rule.is-v { width: 0.4pt; transform: translateX(-0.2pt); }
+    .su-rule.is-v { width: ${SU_ANTIQUE_BEAD_PT}pt; transform: translateX(-0.5pt); }
+    .su-plate.is-antique .su-rule.is-v { width: ${SU_ANTIQUE_BEAD_PT}pt; transform: translateX(-0.5pt); }
     .su-rule.is-h { height: 0.4pt; transform: translateY(-0.2pt); }
     .su-bead {
       position: absolute; z-index: 2; box-sizing: border-box; width: 2.4mm; height: 2.4mm;
-      margin-left: -1.2mm; margin-top: -1.2mm; border: 0.4pt solid #000; border-radius: 50%;
+      margin-left: -1.2mm; margin-top: -1.2mm; border: ${SU_ANTIQUE_BEAD_PT}pt solid #000; border-radius: 50%;
       background: #fff;
     }
+    .su-plate.is-antique .su-bead { border-width: ${SU_ANTIQUE_BEAD_PT}pt; }
     .su-person .su-seam {
       position: static; display: block; margin: 0.4mm 0 0; color: #c0392b;
       font-size: 10px; font-weight: 700; line-height: 1.3; letter-spacing: 0.02em;
       white-space: normal;
     }
     .su-continue { display: block; }
-    .su-vrun .su-seam { writing-mode: horizontal-tb; text-orientation: mixed; }
+    .su-sheet.is-antique .su-vrun .su-seam,
+    .su-sheet.is-antique .su-continue,
+    .su-sheet.is-antique .su-continue-link,
+    .su-sheet.is-antique .su-jump,
+    .su-sheet.is-antique .su-meta,
+    .su-sheet.is-antique .su-name { display: inline; background: transparent; box-shadow: none; }
     .su-continue-link, .su-person .su-seam a { color: #c0392b; text-decoration: underline; }
     .su-seam.is-off { letter-spacing: 0; white-space: nowrap; }
-    .su-person { position: absolute; z-index: 3; box-sizing: border-box; margin: 0; padding: 0; overflow: hidden; background: transparent; }
+    .su-person { position: absolute; z-index: 4; box-sizing: border-box; margin: 0; padding: 0; overflow: hidden; background: transparent; border: 0; box-shadow: none; }
     .su-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1mm; }
     .su-name { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; line-height: 1.25; }
     .su-avatar {
@@ -158,23 +176,40 @@ export function suChartCss(): string {
       pointer-events: none;
     }
     .su-sheet.is-antique {
-      width: 297mm; height: 210mm; padding: 8mm 8mm 10mm;
+      width: 297mm; min-width: 297mm; height: 210mm; min-height: 210mm; padding: 8mm 8mm 12mm;
       background: #fff; color: #000;
-      font-family: 'SimSun', 'NSimSun', 'Songti SC', serif;
+      font-family: 'FangSong', 'STFangsong', 'FangSong_GB2312', 'Songti SC', 'SimSun', serif;
       page: su-landscape;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     .su-sheet.is-antique .su-frame {
-      position: relative; box-sizing: border-box; height: 100%;
-      padding: 3mm 16mm 3mm 3mm;
-      border-top: 1.2pt solid #000; border-bottom: 1.2pt solid #000;
-      border-left: 0.6pt solid #000; border-right: 0.6pt solid #000;
+      position: relative; box-sizing: border-box; flex: 1 1 auto; min-height: 0; height: auto;
+      --su-pad-right: 15mm; padding: 4mm var(--su-pad-right) 4mm 4mm; overflow: hidden; background: #fff;
+      border-style: solid; border-color: #000; border-radius: 0;
+      border-top-width: ${SU_ANTIQUE_FRAME_TOP_PT}pt; border-bottom-width: ${SU_ANTIQUE_FRAME_TOP_PT}pt;
+      border-left-width: ${SU_ANTIQUE_FRAME_SIDE_PT}pt; border-right-width: ${SU_ANTIQUE_FRAME_SIDE_PT}pt;
     }
+    .su-col-line {
+      position: absolute; top: 0; bottom: 0; z-index: 6; width: ${SU_ANTIQUE_DIVIDER_PT}pt; background: #000;
+      transform: translateX(0.5pt); pointer-events: none;
+    }
+    .su-person-rule {
+      position: absolute; z-index: 1; height: ${SU_ANTIQUE_PERSON_RULE_PT}pt; border: 0; background: #000;
+    }
+    .su-sheet.is-antique .su-branch { position: relative; }
+    .su-sheet.is-antique .su-branch + .su-branch { margin-top: 4mm; }
     .su-sheet.is-antique .su-title {
-      position: absolute; top: 4mm; right: 3mm; z-index: 5; width: 10mm; max-height: 160mm; margin: 0;
-      overflow: hidden; writing-mode: vertical-rl; text-orientation: upright; text-align: start;
-      letter-spacing: 0.16em; line-height: 1.15; font-size: 14px; font-weight: 600; color: #000;
+      position: relative; width: auto; max-height: none; margin: 0 0 3mm; overflow: hidden;
+      writing-mode: horizontal-tb; text-align: right; letter-spacing: 0.12em; line-height: 1.15;
+      font-size: 18pt; font-weight: 500; color: #000; background: transparent; border: 0;
     }
+    .su-sheet.is-antique.is-title-vertical .su-title {
+      position: absolute; top: 2mm; right: -12.4mm; bottom: 2mm; z-index: 5; width: 7.2mm; margin: 0;
+      writing-mode: vertical-rl; text-orientation: upright; text-align: start;
+      letter-spacing: 0.06em; line-height: 1; font-size: 18pt; font-weight: 500;
+      background: transparent; border: 0;
+    }
+    .su-sheet.is-antique .su-foot { font-size: 8pt; font-weight: 400; letter-spacing: 0.12em; color: #000; }
     .su-sheet.is-antique .su-name,
     .su-sheet.is-antique .su-meta,
     .su-sheet.is-antique .su-courtesy,
@@ -183,7 +218,24 @@ export function suChartCss(): string {
     .su-sheet.is-antique .su-mark,
     .su-sheet.is-antique .su-brief,
     .su-sheet.is-antique .su-foot { color: #000; }
-    .su-sheet.is-antique a.su-jump { color: #000; text-decoration: none; border-bottom: 0.4pt solid #000; }
+    .su-sheet.is-antique .su-person,
+    .su-sheet.is-antique .su-vrun,
+    .su-sheet.is-antique .su-name,
+    .su-sheet.is-antique .su-meta,
+    .su-sheet.is-antique .su-jump { background: transparent; color: #000; border: 0; box-shadow: none; }
+    .su-sheet.is-antique .su-name { font-size: calc(14pt * var(--su-fit, 1)); font-weight: 500; }
+    .su-sheet.is-antique .su-meta,
+    .su-sheet.is-antique .su-courtesy,
+    .su-sheet.is-antique .su-years,
+    .su-sheet.is-antique .su-kin,
+    .su-sheet.is-antique .su-mark { font-size: calc(9pt * var(--su-fit, 1)); font-weight: 400; }
+    .su-sheet.is-antique .su-seam,
+    .su-sheet.is-antique .su-continue,
+    .su-sheet.is-antique .su-continue-link { font-size: calc(8pt * var(--su-fit, 1)); font-weight: 400; }
+    .su-sheet.is-antique .su-jump { font-size: calc(7.5pt * var(--su-fit, 1)); font-weight: 400; color: #000; text-decoration: underline; border: 0; }
+    .su-sheet.is-antique .su-seam,
+    .su-sheet.is-antique .su-continue,
+    .su-sheet.is-antique .su-continue-link { background: transparent; color: #c0392b; }
     .su-plate.is-antique { margin-left: auto; margin-right: 0; border: none; }
   `;
 }
@@ -205,12 +257,16 @@ function renderSheet(
 ): string {
   const antique = script === 'antique';
   const classes = ['su-sheet', pageNumber % 2 === 0 ? 'is-even' : 'is-odd'];
-  if (antique) classes.push('is-antique', 'is-landscape', 'is-title-vertical');
-  else if (titleVertical) classes.push('is-title-vertical');
+  if (antique) classes.push('is-antique', 'is-landscape');
+  if (antique && titleVertical) classes.push('is-title-vertical');
   if (!antique && showFrame) classes.push('is-modern-frame');
   const frameStyle = !antique && showFrame ? ` style="--su-frame-pt:${framePt}pt"` : '';
   const body = charts.map((chart) => renderBranch(chart, captions, electronic, script, beadLines, noteMode, chartPages, showAvatars)).join('');
-  const stage = antique ? `<div class="su-stage su-frame">${body}</div>` : `<div class="su-stage">${body}</div>`;
+  const rails = antique ? suAntiqueColumn() : null;
+  const railHtml = rails
+    ? `<span class="su-rail su-col-line" style="right:calc(var(--su-pad-right) + ${rails.leftFromRight}mm)"></span><span class="su-rail su-col-line" style="right:calc(var(--su-pad-right) + ${rails.rightFromRight}mm)"></span>`
+    : '';
+  const stage = antique ? `<div class="su-stage su-frame">${railHtml}${body}</div>` : `<div class="su-stage">${body}</div>`;
   return `<section class="${classes.join(' ')}"${frameStyle}>${stage}<p class="su-foot">第 ${pageNumber} 页 / 共 ${pageCount} 页</p></section>`;
 }
 
@@ -225,15 +281,21 @@ function renderBranch(
   showAvatars: boolean,
 ): string {
   const nodes = nestSuBlocks(chart.blocks);
-  const place = placeSuChart(nodes, script);
-  const byIndex = indexNodes(nodes);
   const antique = script === 'antique';
-  const rail = place.railX == null ? '' : `<span class="su-rail" style="left:${place.railX}mm"></span>`;
+  const place = placeSuChart(
+    nodes,
+    script,
+    antique ? antiqueMeasures(nodes, captions, noteMode, chartPages) : undefined,
+  );
+  const byIndex = indexNodes(nodes);
+  const rail = antique || place.railX == null ? '' : `<span class="su-rail" style="left:${place.railX}mm"></span>`;
+  const underlines = place.underlines.map((line) => `<span class="su-person-rule" style="left:${line.x}mm;top:${line.y}mm;width:${line.w}mm"></span>`).join('');
   const bands = place.bands.map((y) => `<span class="su-band" style="top:${y}mm"></span>`).join('');
   const gens = place.generations.map((band) => {
     const mode = band.boxed ? 'vertical-rl' : 'horizontal-tb';
     const orient = band.boxed ? 'upright' : 'mixed';
-    return `<div class="su-gen${band.boxed ? ' is-boxed' : ''}" style="left:${band.x}mm;top:${band.y}mm;width:${band.w}mm;height:${band.h}mm;writing-mode:${mode};text-orientation:${orient}">${esc(band.label)}</div>`;
+    const ink = band.boxed ? 'background:#000;color:#fff;border:0;border-radius:0;box-shadow:none;outline:none;' : '';
+    return `<div class="su-gen${band.boxed ? ' is-boxed' : ''}" style="left:${band.x}mm;top:${band.y}mm;width:${band.w}mm;height:${band.h}mm;writing-mode:${mode};text-orientation:${orient};${ink}"><span class="su-gen-label">${esc(band.label)}</span></div>`;
   }).join('');
   const rules = beadLines
     ? place.lines.map((rule) => {
@@ -252,12 +314,12 @@ function renderBranch(
     return renderPerson(node, person, chart, captions, electronic, antique, noteMode, chartPages, showAvatars);
   }).join('');
   const titleName = antique ? chart.branchName.replace(/支世系$/, '支派') : chart.branchName;
-  return `<div class="su-branch"><a id="tree-su-${chart.index + 1}" class="su-anchor"></a><h2 class="su-title">第${chart.index + 1}图 · ${esc(titleName)}</h2><div class="su-plate${antique ? ' is-antique' : ''}" data-reading="${place.reading}" style="width:${place.width}mm;height:${place.height}mm;writing-mode:horizontal-tb">${rail}${bands}${gens}${rules}${beads}${people}</div></div>`;
+  return `<div class="su-branch"><a id="tree-su-${chart.index + 1}" class="su-anchor"></a><h2 class="su-title">第${chart.index + 1}图 · ${esc(titleName)}</h2><div class="su-plate${antique ? ' is-antique' : ''}" data-reading="${place.reading}" style="width:${place.width}mm;height:${place.height}mm;writing-mode:horizontal-tb">${rail}${underlines}${bands}${gens}${rules}${beads}${people}</div></div>`;
 }
 
 function renderPerson(
   node: SuBeadNode,
-  person: { textX: number; textY: number; textW: number; textH: number; col: number; row: number },
+  person: { textX: number; textY: number; textW: number; textH: number; textScale?: number; col: number; row: number },
   chart: SuChart,
   captions: Record<string, Caption>,
   electronic: boolean,
@@ -280,10 +342,12 @@ function renderPerson(
   const note = renderContinue(block, electronic, noteMode, chartPages);
   const mode = antique ? 'vertical-rl' : 'horizontal-tb';
   const orient = antique ? 'upright' : 'mixed';
-  const style = `left:${person.textX}mm;top:${person.textY}mm;width:${person.textW}mm;height:${person.textH}mm;writing-mode:${mode};text-orientation:${orient}`;
+  const fit = antique && person.textScale != null && person.textScale < 0.999 ? `--su-fit:${person.textScale};` : '';
+  const ink = antique ? 'background:transparent;color:#000;border:0;box-shadow:none;' : '';
+  const style = `left:${person.textX}mm;top:${person.textY}mm;width:${person.textW}mm;height:${person.textH}mm;writing-mode:${mode};text-orientation:${orient};${ink}${fit}`;
   const avatar = !antique && showAvatars ? renderAvatar(caption?.avatarUrl) : '';
   const body = antique
-    ? `<div class="su-vrun"><span class="su-name">${esc(block.name)}</span>${antiqueFields(node, caption).map((field) => `<span class="su-meta">${esc(field)}</span>`).join('')}${note}</div>${jump}`
+    ? `<div class="su-vrun"><span class="su-name">${esc(block.name)}</span>${antiqueFields(node, caption).map((field) => `<span class="su-meta">${esc(field)}</span>`).join('')}${note}${jump}</div>`
     : `<div class="su-body"><div class="su-name-row">${avatar}<span class="su-name">${esc(block.name)}</span>${courtesy ? `<span class="su-courtesy">（${esc(courtesy)}）</span>` : ''}</div>${years ? `<p class="su-years">${esc(years)}</p>` : ''}${block.spouseText ? `<p class="su-kin">${esc(block.spouseText)}</p>` : ''}${burial ? `<p class="su-kin">${esc(burial)}</p>` : ''}${block.mark ? `<p class="su-mark">${esc(block.mark)}</p>` : ''}${brief ? `<p class="su-brief">${esc(brief)}</p>` : ''}${note}</div>${jump}`;
   return `<article class="su-person${person.row === 0 ? ' is-head' : ''}"${anchor} data-person-id="${esc(block.personId)}" data-col="${person.col}" data-row="${person.row}" data-depth="${block.depth}" style="${style}">${body}</article>`;
 }
@@ -295,11 +359,50 @@ function antiqueFields(node: SuBeadNode, caption: Caption | undefined): string[]
   const years = lifeYears(caption);
   if (years) fields.push(years);
   if (node.block.spouseText) fields.push(node.block.spouseText);
-  const children = node.children.map((child) => child.block.name).filter((name) => name.length > 0);
-  if (children.length) fields.push(`子${children.join('、')}`);
   if (caption?.burialPlace) fields.push(`葬${caption.burialPlace}`);
   if (node.block.mark) fields.push(node.block.mark);
   return fields;
+}
+
+function antiqueMeasures(
+  nodes: readonly SuBeadNode[],
+  captions: Record<string, Caption>,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
+): SuAntiqueMeasure[] {
+  const list: SuAntiqueMeasure[] = [];
+  const visit = (node: SuBeadNode) => {
+    const caption = captions[node.block.personId];
+    const fields = antiqueFields(node, caption).reduce((sum, field) => sum + field.length, 0);
+    const bio = caption?.biography?.trim() ? 5 : 0;
+    list.push({
+      index: node.index,
+      chars: Math.max(1, node.block.name.length + fields + continueCharCount(node.block, noteMode, chartPages) + bio),
+    });
+    node.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  return list;
+}
+
+function continueCharCount(
+  block: SuBlock,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
+): number {
+  let count = 0;
+  for (const chartNo of block.cutChartNos ?? []) {
+    count += formatContinueNote({ kind: 'cut', chartNo, pageNo: chartPages.get(chartNo) ?? null }, noteMode).text.length;
+  }
+  if (block.resumeChartNo) {
+    count += formatContinueNote({
+      kind: 'resume',
+      chartNo: block.resumeChartNo,
+      pageNo: chartPages.get(block.resumeChartNo) ?? null,
+      fatherName: block.resumeFatherName || block.parentName || block.name,
+    }, noteMode).text.length;
+  }
+  return count;
 }
 
 function indexNodes(roots: readonly SuBeadNode[]): Map<number, SuBeadNode> {

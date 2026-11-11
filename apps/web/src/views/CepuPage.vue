@@ -24,6 +24,7 @@ import SuChartView from '@/components/SuChartView.vue';
 import BiographyBook from '@/components/BiographyBook.vue';
 import NameIndexBook from '@/components/NameIndexBook.vue';
 import BookCatalog from '@/components/BookCatalog.vue';
+import BookCover from '@/components/BookCover.vue';
 import GenerationIndexBook from '@/components/GenerationIndexBook.vue';
 import { europeanChartsFromShilu, europeanViewFromShilu } from '@/utils/european-chart-shilu';
 import { buildBookCatalog, findCatalogVolume, isLadiesVolume, type BookProfile, type CatalogEntry } from '@/utils/book-catalog';
@@ -75,6 +76,8 @@ const editMode = ref(false);
 const tempLayout = ref<'su' | 'ou' | 'ou_chart' | 'shixi_table' | 'biography'>('su');
 const bookScript = ref<'horizontal' | 'antique'>('horizontal');
 const titleVertical = ref(false);
+/** 苏谱版本B默认图题竖排靠右。欧式仍用 titleVertical，默认横排。 */
+const suTitleVertical = ref(true);
 const chartPack = ref<'exclusive' | 'share'>('exclusive');
 const bookZoom = ref(1);
 const bookContinuous = ref(false);
@@ -128,6 +131,13 @@ const isSuChart = computed(() => (
   && effectiveLayout.value === 'su'
 ));
 const isLineageChart = computed(() => isOuChart.value || isSuChart.value);
+const antiqueTitleOn = computed({
+  get: () => (isSuChart.value ? suTitleVertical.value : titleVertical.value),
+  set: (value: boolean) => {
+    if (isSuChart.value) suTitleVertical.value = value;
+    else titleVertical.value = value;
+  },
+});
 const isLadies = computed(() => {
   const volume = volumeContent.value;
   if (!volume) return false;
@@ -135,7 +145,15 @@ const isLadies = computed(() => {
 });
 const isBiography = computed(() => volumeContent.value?.config?.layout === 'biography' && !isLadies.value);
 const bookProfile = ref<BookProfile>('compact');
-const viewingCatalog = ref(true);
+const bookCover = ref<{ name: string; hall: string; volume: string; year: string; place: string }>({
+  name: '族谱',
+  hall: '',
+  volume: '全卷',
+  year: '',
+  place: '',
+});
+const viewingCover = ref(true);
+const viewingCatalog = ref(false);
 const viewingIndex = ref(false);
 const viewingGeneration = ref(false);
 const placeholderEntry = ref<CatalogEntry | null>(null);
@@ -255,8 +273,17 @@ async function loadVolumes() {
     ]);
     volumes.value = (data || []) as BookVolume[];
     bookProfile.value = profile?.profile === 'standard' ? 'standard' : 'compact';
-    if (!activeVolumeId.value && !viewingIndex.value && !viewingGeneration.value) {
-      openCatalog();
+    if (profile?.cover?.name) {
+      bookCover.value = {
+        name: profile.cover.name,
+        hall: profile.cover.hall,
+        volume: profile.cover.volume,
+        year: profile.cover.year,
+        place: profile.cover.place || '',
+      };
+    }
+    if (!activeVolumeId.value && !viewingIndex.value && !viewingGeneration.value && !viewingCover.value && !viewingCatalog.value) {
+      openCover();
     }
   } catch (err: any) {
     const status = err?.status || err?.response?.status;
@@ -275,10 +302,18 @@ async function loadVolumes() {
 let volumeReqSeq = 0;
 
 function clearBookView() {
+  viewingCover.value = false;
   viewingCatalog.value = false;
   viewingIndex.value = false;
   viewingGeneration.value = false;
   placeholderEntry.value = null;
+}
+
+function openCover() {
+  clearBookView();
+  viewingCover.value = true;
+  activeVolumeId.value = null;
+  volumeContent.value = null;
 }
 
 function openCatalog() {
@@ -539,6 +574,22 @@ const exportOpts = ref({
   edition: 'electronic' as 'electronic' | 'print',
 });
 
+function exportTitleVertical(): boolean {
+  const layout = exportOpts.value.layout;
+  if (layout === 'su') return suTitleVertical.value;
+  if (layout === 'ou_chart' || layout === 'ou') return titleVertical.value;
+  return isSuChart.value ? suTitleVertical.value : titleVertical.value;
+}
+
+const exportTitleOn = computed({
+  get: () => exportTitleVertical(),
+  set: (value: boolean) => {
+    const layout = exportOpts.value.layout;
+    if (layout === 'su' || (layout == null && isSuChart.value)) suTitleVertical.value = value;
+    else titleVertical.value = value;
+  },
+});
+
 function openExportDialog() {
   const layout = effectiveLayout.value;
   exportOpts.value.layout = layout === 'ou' || layout === 'ou_chart'
@@ -561,7 +612,7 @@ async function doExportPdf() {
         layout: exportOpts.value.layout,
         edition: exportOpts.value.edition,
         script: bookScript.value,
-        titleVertical: bookScript.value === 'antique' && titleVertical.value,
+        titleVertical: bookScript.value === 'antique' && exportTitleVertical(),
         pack: chartPack.value,
         profile: bookProfile.value,
         beadLines: suBeadLines.value,
@@ -596,7 +647,7 @@ async function doExportWord() {
           withAnnotations: exportOpts.value.withAnnotations,
           layout: exportOpts.value.layout,
           script: bookScript.value,
-          titleVertical: bookScript.value === 'antique' && titleVertical.value,
+          titleVertical: bookScript.value === 'antique' && exportTitleVertical(),
           pack: chartPack.value,
           profile: bookProfile.value,
           beadLines: suBeadLines.value,
@@ -1025,6 +1076,12 @@ onMounted(async () => {
           </el-radio-group>
         </div>
         <div v-loading="loading" class="sidebar-list">
+          <div class="sidebar-item" :class="{ active: viewingCover }" @click="openCover">
+            <div class="sidebar-item-main">
+              <el-tag size="small" effect="plain">封面</el-tag>
+              <span class="sidebar-item-title">封面</span>
+            </div>
+          </div>
           <div class="sidebar-item" :class="{ active: viewingCatalog }" @click="openCatalog">
             <div class="sidebar-item-main">
               <el-tag size="small" effect="plain">目录</el-tag>
@@ -1068,7 +1125,7 @@ onMounted(async () => {
       </aside>
 
       <!-- 主内容区（书本式阅读） -->
-      <main class="cepu-main" :class="{ 'is-book-page': isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry }">
+      <main class="cepu-main" :class="{ 'is-book-page': isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || viewingCover || placeholderEntry }">
         <div v-if="(isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry) && !loading && !volumeLoading && !accessError" class="book-script-bar">
           <el-radio-group v-model="bookScript" size="small">
             <el-radio-button value="horizontal">横排简体（版本A）</el-radio-button>
@@ -1108,7 +1165,7 @@ onMounted(async () => {
             <el-radio-button value="brief">古式简注</el-radio-button>
             <el-radio-button value="full">新式详注</el-radio-button>
           </el-radio-group>
-          <el-checkbox v-if="bookScript === 'antique'" v-model="titleVertical" size="small">标题竖排居右</el-checkbox>
+          <el-checkbox v-if="bookScript === 'antique'" v-model="antiqueTitleOn" size="small">标题竖排居右</el-checkbox>
           <el-radio-group v-if="isLineageChart" v-model="chartPack" size="small">
             <el-radio-button value="exclusive">一图独占一页</el-radio-button>
             <el-radio-button value="share">同页排布短图</el-radio-button>
@@ -1135,6 +1192,14 @@ onMounted(async () => {
             <el-button v-else @click="loadVolumes">重试</el-button>
           </div>
         </div>
+        <BookCover
+          v-else-if="viewingCover"
+          :name="bookCover.name"
+          :hall="bookCover.hall"
+          :volume="bookCover.volume"
+          :year="bookCover.year"
+          :place="bookCover.place"
+        />
         <BookCatalog
           v-else-if="viewingCatalog"
           :entries="catalog"
@@ -1257,7 +1322,7 @@ onMounted(async () => {
                 :captions="lineageModel.captions"
                 :selected-id="personPanel?.person_id ?? null"
                 :script="bookScript"
-                :title-vertical="titleVertical"
+                :title-vertical="suTitleVertical"
                 :pack="chartPack"
                 :zoom="bookZoom"
                 :continuous="bookContinuous"
@@ -1481,8 +1546,8 @@ onMounted(async () => {
           <div class="form-hint">选定后，总目录、欧式五世表、人物传、闺秀录、人名索引整本使用同一文字方向。重新导出才会换成另一种。</div>
         </el-form-item>
         <el-form-item v-if="bookScript === 'antique'" label="图题">
-          <el-checkbox v-model="titleVertical">标题竖排居右</el-checkbox>
-          <div class="form-hint">默认仍是页面顶部横排居中。勾选后，图题改为竖排，靠版心右侧。</div>
+          <el-checkbox v-model="exportTitleOn">标题竖排居右</el-checkbox>
+          <div class="form-hint">苏谱仿古版默认图题竖排靠右，欧式默认仍是横排。取消勾选后图题改回横排，仍留在版框内。</div>
         </el-form-item>
         <el-form-item label="欧式分页">
           <el-radio-group v-model="chartPack">

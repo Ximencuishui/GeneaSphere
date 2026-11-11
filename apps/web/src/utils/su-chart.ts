@@ -6,7 +6,7 @@
  * 板太宽、超出 A4，把放不下的支另起一图，本图标「支另见图，见第X图」。
  * 一板向下超出一页，本图标「支另见图」，下页标「接上：【父名】，见第X图」。
  * 版本A：竖向 A4，文字横排，长房在左。父节点下拉竖线，再以横线分给诸子；珠圈圆心落在交叉点上。
- * 版本B：横向 A4，文字竖排，长房在右。只画各支向下的垂线，不画兄弟横线。欧式不走这里。
+ * 版本B：横向 A4，文字竖排，长房在右。珠圈圆心落在各支垂线节点上，不画兄弟横线，也不画斜线。欧式不走这里。
  */
 import type { EuropeanLinkInput, EuropeanPersonInput, EuropeanSpouseInput } from '@/utils/european-chart';
 
@@ -29,8 +29,24 @@ export const SU_STAGE_MM = 164;
 /** 圆圈中心距本行上沿，挨着姓名。 */
 export const SU_BEAD_TOP_MM = 6;
 
-/** 空心珠半径 1.2mm，直径 2.4mm。版本A圆心在节点交叉点，版本B圆在世代线上方。 */
+/** 空心珠半径 1.2mm，直径 2.4mm。两版圆心都落在垂线节点上。 */
 export const SU_BEAD_RADIUS_MM = 1.2;
+
+/** 版本B版框。上下横边 4pt，左右竖边 2pt，严格 2:1，纯黑，无圆角。 */
+export const SU_ANTIQUE_FRAME_TOP_PT = 4;
+export const SU_ANTIQUE_FRAME_SIDE_PT = 2;
+
+/** 版本B内部分隔竖线：标题与世代栏、世代栏左右、世代栏与正文。 */
+export const SU_ANTIQUE_DIVIDER_PT = 1;
+/** 垂珠父子竖线、空心珠圈描边。 */
+export const SU_ANTIQUE_BEAD_PT = 1;
+/** 人物正文下方的短横线。 */
+export const SU_ANTIQUE_PERSON_RULE_PT = 0.5;
+
+/** 版本B世代墨块宽度。一列 8pt 阴文，窄于 9pt 生平小字，左右留出对称空隙。 */
+const SU_ANTIQUE_GEN_W_MM = 4.2;
+/** 墨块到左右竖线的空隙，两边相同，墨块不压线。 */
+const SU_ANTIQUE_GEN_GAP_MM = 1.35;
 
 /** 版本A版框可选线宽。默认 4pt，最宽 10pt，四边同一数值。 */
 export const SU_FRAME_WEIGHTS_PT = [0.6, 1, 2, 4, 6, 10] as const;
@@ -46,11 +62,45 @@ export function suFrameWeightPt(value: unknown): SuFrameWeightPt {
 /** 珠圈上方的页眉空隙，避免首行圆被裁掉。 */
 const SU_HEAD_MM = 4;
 
-/** 仿古横版一行的高度。七行仍放得进横向 A4。 */
-const SU_ANTIQUE_ROW_MM = 24;
+/** 仿古横版一行的高度。六世仍落在横向 A4 版框内。 */
+const SU_ANTIQUE_ROW_MM = 26;
 
-/** 仿古横版版心宽度，右侧留给竖排图题。 */
-const SU_ANTIQUE_STAGE_MM = 250;
+/** 仿古横版版心宽度。右侧版框内边距另留给竖排图题，版心本身不含图题。 */
+const SU_ANTIQUE_STAGE_MM = 244;
+
+/** 版心四周留白。文字、珠圈、世代块都不得越过。 */
+const SU_ANTIQUE_INSET_MM = 2;
+
+/** 仿古页眉，让首行珠圈离开版心上沿。 */
+const SU_ANTIQUE_HEAD_MM = 3.6;
+
+/** 竖排一个生平小字占的高度。9pt 长仿宋，渲染前用来估算要几列。 */
+const SU_ANTIQUE_CHAR_MM = 3.4;
+
+/** 竖排一列的宽度，按 14pt 姓名。 */
+const SU_ANTIQUE_COL_MM = 5.6;
+
+/** 仿古世代栏：左右两条竖线，墨块夹在中间，左右边距相同。 */
+export function suAntiqueColumn(width = SU_ANTIQUE_STAGE_MM): {
+  left: number;
+  right: number;
+  blockX: number;
+  blockW: number;
+  leftFromRight: number;
+  rightFromRight: number;
+} {
+  const right = round(width - SU_ANTIQUE_INSET_MM - 1.2);
+  const left = round(right - SU_ANTIQUE_GEN_GAP_MM * 2 - SU_ANTIQUE_GEN_W_MM);
+  const blockX = round(left + SU_ANTIQUE_GEN_GAP_MM);
+  return {
+    left,
+    right,
+    blockX,
+    blockW: SU_ANTIQUE_GEN_W_MM,
+    leftFromRight: round(width - left),
+    rightFromRight: round(width - right),
+  };
+}
 
 /** 竖线和文字之间的空档，接上、接下写在这里。 */
 export const SU_STRIP_MM = 6.8;
@@ -295,6 +345,8 @@ export interface SuPlacedPerson {
   textY: number;
   textW: number;
   textH: number;
+  /** 仿古竖排塞进版心时的字号比例。版本A恒为 1。 */
+  textScale: number;
 }
 
 export interface SuGenerationBand {
@@ -305,6 +357,20 @@ export interface SuGenerationBand {
   w: number;
   h: number;
   boxed: boolean;
+}
+
+export interface SuColumnRails {
+  /** 世代栏左竖线，版心坐标。 */
+  left: number;
+  /** 世代栏右竖线，版心坐标。 */
+  right: number;
+}
+
+export interface SuTextUnderline {
+  index: number;
+  x: number;
+  y: number;
+  w: number;
 }
 
 export interface SuChartPlace {
@@ -318,10 +384,20 @@ export interface SuChartPlace {
   lines: SuRule[];
   beads: SuBeadMark[];
   seams: SuMarkBox[];
-  /** 世代栏与正文之间的细竖线。仿古才有。 */
+  /** 世代栏左竖线。仿古才有，和 rails.left 相同。 */
   railX: number | null;
-  /** 保留字段。仿古不再画通栏横线，避免圆落在线下面。 */
+  /** 世代栏左右两条通天竖线。仿古才有。 */
+  rails: SuColumnRails | null;
+  /** 每个人物正文下方的短横线。仿古才有，不穿过文字。 */
+  underlines: SuTextUnderline[];
+  /** 版本A不使用。仿古的人物分隔改走 underlines。 */
   bands: number[];
+}
+
+/** 仿古竖排在落笔前量过的字数。index 对应 SuBeadNode.index。 */
+export interface SuAntiqueMeasure {
+  index: number;
+  chars: number;
 }
 
 const CN_DIGIT = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
@@ -380,11 +456,15 @@ export function layoutSuPlates(roots: readonly SuBeadNode[]): SuPlateLayout {
 
 /**
  * 把一页排成垂珠坐标。
- * horizontal：长房在左，文字在竖线右侧、横线下面。兄弟横线贴着诸子圆圈的下沿。
- * antique：长房在右，文字竖排在竖线左侧。同父诸子各自向下垂线，不画兄弟横线。
- * 圆圈始终在它那条世代线的上方，线从圆的下沿起笔。
+ * horizontal：长房在左，文字在竖线右侧、横线下面。兄弟横线贴着诸子圆圈的下沿。圆心在交叉点上。
+ * antique：长房在右，文字竖排在竖线左侧。同父诸子各自向下垂线，不画兄弟横线，也不画斜线。
+ * 版本B的珠圈圆心落在该支垂线节点上。落笔前按字数收文字列，并校验版心边界。
  */
-export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' | 'antique'): SuChartPlace {
+export function placeSuChart(
+  roots: readonly SuBeadNode[],
+  script: 'horizontal' | 'antique',
+  measures?: readonly SuAntiqueMeasure[],
+): SuChartPlace {
   const antique = script === 'antique';
   const reading = antique ? 'rtl' : 'ltr';
   const layout = layoutSuPlates(roots);
@@ -404,59 +484,72 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
       beads: [],
       seams: [],
       railX: null,
+      rails: null,
+      underlines: [],
       bands: [],
     };
   }
 
+  const head = antique ? SU_ANTIQUE_HEAD_MM : SU_HEAD_MM;
+  const height = round(head + layout.rows * rowPitch + (antique ? 2.4 : 1.2));
   const colWidth = (width - SU_RAIL_MM) / layout.columns;
   const textW = round(Math.min(SU_TEXT_MAX_MM, Math.max(12, colWidth - SU_STRIP_MM - 2)));
-  const textH = antique ? Math.max(10, rowPitch - 5) : SU_TEXT_H_MM;
-  const rowLineY = (row: number) => SU_HEAD_MM + row * rowPitch;
-  // 版本A：圆心就是父子竖线与兄弟横线的交叉点。版本B：圆仍在世代线上方。
-  const beadYOf = (row: number) => (
-    antique ? rowLineY(row) - SU_BEAD_RADIUS_MM - 0.35 : rowLineY(row)
-  );
-  const textYOf = (row: number) => (
-    antique ? beadYOf(row) - 0.2 : beadYOf(row) + SU_BEAD_RADIUS_MM + 1.6
-  );
+  const textH = SU_TEXT_H_MM;
+  const rowLineY = (row: number) => head + row * rowPitch;
+  const beadYOf = (row: number) => (antique ? rowLineY(row) + 3.4 : rowLineY(row));
+  const textYOf = (row: number) => beadYOf(row) + SU_BEAD_RADIUS_MM + 1.6;
   const beadXOf = (col: number) => (
     reading === 'ltr'
       ? SU_RAIL_MM + col * colWidth + 3.2
-      : width - SU_RAIL_MM - col * colWidth - 3.2
+      : width - SU_RAIL_MM - col * colWidth - SU_BEAD_RADIUS_MM - 1.6
   );
-  const textXOf = (beadX: number) => (
-    reading === 'ltr' ? beadX + SU_STRIP_MM : beadX - SU_STRIP_MM - textW
-  );
+  const textXOf = (beadX: number) => beadX + SU_STRIP_MM;
+  const charsOf = new Map<number, number>();
+  for (const item of measures ?? []) {
+    if (Number.isFinite(item.chars)) charsOf.set(item.index, Math.max(1, Math.round(item.chars)));
+  }
+  const fallbackChars = new Map<number, number>();
+  for (const node of walkNodes(roots)) {
+    fallbackChars.set(node.index, Math.max(2, node.block.name.length + node.block.spouseText.length + node.block.mark.length + 8));
+  }
 
   const people: SuPlacedPerson[] = layout.slots.map((slot) => {
-    const beadX = beadXOf(slot.col);
-    const beadY = beadYOf(slot.row);
+    const bead = clampBead(beadXOf(slot.col), beadYOf(slot.row), antique, width, height);
+    if (!antique) {
+      return {
+        index: slot.index,
+        personId: slot.personId,
+        col: slot.col,
+        row: slot.row,
+        generation: slot.generation,
+        beadX: bead.x,
+        beadY: bead.y,
+        textX: round(textXOf(bead.x)),
+        textY: round(textYOf(slot.row)),
+        textW,
+        textH,
+        textScale: 1,
+      };
+    }
+    const fitted = fitAntiqueText(slot.index, bead.x, bead.y, colWidth, height, rowPitch, charsOf, fallbackChars);
     return {
       index: slot.index,
       personId: slot.personId,
       col: slot.col,
       row: slot.row,
       generation: slot.generation,
-      beadX: round(beadX),
-      beadY: round(beadY),
-      textX: round(textXOf(beadX)),
-      textY: round(textYOf(slot.row)),
-      textW,
-      textH,
+      beadX: bead.x,
+      beadY: bead.y,
+      textX: fitted.textX,
+      textY: fitted.textY,
+      textW: fitted.textW,
+      textH: fitted.textH,
+      textScale: fitted.textScale,
     };
   });
+  const placed = new Map(people.map((person) => [person.index, person]));
 
   const lines: SuRule[] = [];
-  const beadMap = new Map<number, SuBeadMark>();
-  const addBead = (slot: SuPlateSlot) => {
-    if (beadMap.has(slot.index)) return;
-    beadMap.set(slot.index, {
-      personId: slot.personId,
-      index: slot.index,
-      x: round(beadXOf(slot.col)),
-      y: round(beadYOf(slot.row)),
-    });
-  };
   const pushV = (parentId: string, x: number, y0: number, y1: number) => {
     if (y1 - y0 < 0.2) return;
     lines.push({
@@ -477,7 +570,6 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
       length: round(Math.abs(x1 - x0)),
     });
   };
-  for (const slot of layout.slots) addBead(slot);
   const walk = (node: SuBeadNode) => {
     const slot = byIndex.get(node.index);
     if (slot && node.children.length > 0) {
@@ -485,16 +577,19 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
         .map((child) => byIndex.get(child.index))
         .filter((child): child is SuPlateSlot => !!child && child.row > slot.row);
       if (kids.length > 0) {
-        const y0 = antique ? rowLineY(slot.row) : beadYOf(slot.row);
-        const y1 = antique ? rowLineY(kids[0].row) : beadYOf(kids[0].row);
-        const sameCol = kids.filter((kid) => kid.col === slot.col);
+        const from = placed.get(slot.index)!;
+        const first = placed.get(kids[0].index)!;
         if (antique) {
-          for (const kid of sameCol) pushV(node.block.personId, beadXOf(kid.col), y0, y1);
+          for (const kid of kids) {
+            if (kid.col !== slot.col) continue;
+            const to = placed.get(kid.index)!;
+            pushV(node.block.personId, to.beadX, from.beadY, to.beadY);
+          }
         } else {
-          pushV(node.block.personId, beadXOf(slot.col), y0, y1);
+          pushV(node.block.personId, from.beadX, from.beadY, first.beadY);
           if (kids.length > 1 || kids[0].col !== slot.col) {
-            const xs = kids.map((kid) => beadXOf(kid.col));
-            pushH(node.block.personId, Math.min(...xs), Math.max(...xs), y1);
+            const xs = kids.map((kid) => placed.get(kid.index)!.beadX);
+            pushH(node.block.personId, Math.min(...xs), Math.max(...xs), first.beadY);
           }
         }
       }
@@ -502,17 +597,25 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
     node.children.forEach(walk);
   };
   roots.forEach(walk);
+  if (antique) {
+    for (const person of people) {
+      const onLine = lines.some((rule) => rule.axis === 'v' && beadSitsOn(rule, person.beadX, person.beadY));
+      if (onLine) continue;
+      const stem = Math.min(7.5, rowPitch * 0.36);
+      const y1 = Math.min(person.beadY + stem, height - SU_ANTIQUE_INSET_MM);
+      pushV(person.personId, person.beadX, person.beadY, y1);
+    }
+  }
 
   const seams: SuMarkBox[] = [];
   const upright = antique;
   for (const node of walkNodes(roots)) {
     const slot = byIndex.get(node.index);
-    if (!slot) continue;
-    const beadX = beadXOf(slot.col);
-    const beadY = beadYOf(slot.row);
+    const person = slot ? placed.get(slot.index) : undefined;
+    if (!slot || !person) continue;
     const boxW = upright ? 4.2 : 4.6;
     const boxH = upright ? 6.4 : 3.2;
-    const x = beadX + SU_BEAD_RADIUS_MM + 0.45;
+    const x = person.beadX + SU_BEAD_RADIUS_MM + 0.45;
     const push = (kind: 'in' | 'out', y: number) => {
       seams.push({
         personId: slot.personId,
@@ -525,20 +628,19 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
       });
     };
     if (node.block.role === 'carried-in' || node.block.role === 'bridge') {
-      push('in', beadY - (upright ? 0.6 : 3.4));
+      push('in', person.beadY - (upright ? 0.6 : 3.4));
     }
     if (node.block.role === 'carried-out' || node.block.role === 'bridge') {
-      push('out', beadY + (upright ? 0.8 : 0.2));
+      push('out', person.beadY + (upright ? 0.8 : 0.2));
     }
     if (node.block.branchOff) {
-      const textX = textXOf(beadX);
       const markW = 30;
       seams.push({
         personId: slot.personId,
         index: slot.index,
         kind: 'off',
-        x: round(Math.max(0, Math.min(textX, width - markW))),
-        y: round(textYOf(slot.row) + textH + 0.4),
+        x: round(Math.max(0, Math.min(person.textX, width - markW))),
+        y: round(person.textY + person.textH + 0.4),
         w: markW,
         h: 3.8,
       });
@@ -546,34 +648,176 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
   }
 
   const generations: SuGenerationBand[] = [];
+  const column = antique ? suAntiqueColumn(width) : null;
   for (let row = 0; row < layout.rows; row += 1) {
     const label = suGenerationLabel(generationAt(layout, row), script);
     if (!label) continue;
+    if (!antique) {
+      generations.push({
+        row,
+        label,
+        x: 0.4,
+        y: round(textYOf(row)),
+        w: SU_RAIL_MM - 1.2,
+        h: 6,
+        boxed: false,
+      });
+      continue;
+    }
+    const genY = round(rowLineY(row) + 1.8);
+    const genH = round(Math.min(rowPitch - 4.2, height - SU_ANTIQUE_INSET_MM - genY));
     generations.push({
       row,
       label,
-      x: reading === 'ltr' ? 0.4 : round(width - SU_RAIL_MM + 0.9),
-      y: round(antique ? rowLineY(row) : textYOf(row)),
-      w: reading === 'ltr' ? SU_RAIL_MM - 1.2 : SU_RAIL_MM - 1.8,
-      h: reading === 'ltr' ? 6 : round(rowPitch - 1.2),
-      boxed: antique,
+      x: column!.blockX,
+      y: genY,
+      w: column!.blockW,
+      h: round(Math.max(8, genH)),
+      boxed: true,
     });
   }
+
+  const underlines: SuTextUnderline[] = antique
+    ? people.map((person) => ({
+      index: person.index,
+      x: person.textX,
+      y: round(person.textY + person.textH + 0.35),
+      w: person.textW,
+    }))
+    : [];
 
   return {
     reading,
     columns: layout.columns,
     rows: layout.rows,
     width,
-    height: round(SU_HEAD_MM + layout.rows * rowPitch + 1.2),
+    height,
     people,
     generations,
     lines,
-    beads: [...beadMap.values()],
+    beads: people.map((person) => ({
+      personId: person.personId,
+      index: person.index,
+      x: person.beadX,
+      y: person.beadY,
+    })),
     seams,
-    railX: antique ? round(width - SU_RAIL_MM) : null,
+    railX: column ? column.left : null,
+    rails: column ? { left: column.left, right: column.right } : null,
+    underlines,
     bands: [],
   };
+}
+
+/** 仿古一页有没有字、珠圈或世代块跑出版心。空数组表示收得住。 */
+export function suAntiqueOverflows(place: SuChartPlace): string[] {
+  if (place.reading !== 'rtl') return [];
+  const issues: string[] = [];
+  const inset = SU_ANTIQUE_INSET_MM;
+  const radius = SU_BEAD_RADIUS_MM;
+  const outside = (x: number, y: number, w: number, h: number) => (
+    x < inset - 0.05
+    || y < inset - 0.05
+    || x + w > place.width - inset + 0.05
+    || y + h > place.height - inset + 0.05
+  );
+  for (const person of place.people) {
+    if (outside(person.textX, person.textY, person.textW, person.textH)) issues.push(`text:${person.personId}`);
+    if (person.beadX - radius < inset - 0.05 || person.beadX + radius > place.width - inset + 0.05) issues.push(`bead-x:${person.personId}`);
+    if (person.beadY - radius < inset - 0.05 || person.beadY + radius > place.height - inset + 0.05) issues.push(`bead-y:${person.personId}`);
+    if (person.textX + person.textW > person.beadX - radius + 0.05) issues.push(`text-over-bead:${person.personId}`);
+  }
+  if (place.rails) {
+    for (const band of place.generations) {
+      if (band.x < place.rails.left + 0.2 || band.x + band.w > place.rails.right - 0.2) {
+        issues.push(`gen-rail:${band.label}`);
+      }
+    }
+  }
+  for (const line of place.underlines) {
+    const person = place.people.find((item) => item.index === line.index);
+    if (outside(line.x, line.y - 0.2, line.w, 0.8)) issues.push(`underline:${line.index}`);
+    if (person && line.x + line.w > person.beadX - radius - 0.05) issues.push(`underline-bead:${line.index}`);
+    if (person && line.y < person.textY + person.textH - 0.05) issues.push(`underline-text:${line.index}`);
+  }
+  for (const band of place.generations) {
+    if (outside(band.x, band.y, band.w, band.h)) issues.push(`gen:${band.label}`);
+    for (const person of place.people) {
+      const overlap = band.x < person.textX + person.textW - 0.2
+        && band.x + band.w > person.textX + 0.2
+        && band.y < person.textY + person.textH - 0.2
+        && band.y + band.h > person.textY + 0.2;
+      if (overlap) issues.push(`gen-over-text:${band.label}:${person.personId}`);
+    }
+  }
+  if (place.lines.some((rule) => rule.axis === 'h')) issues.push('horizontal-line');
+  for (const bead of place.beads) {
+    const onLine = place.lines.some((rule) => rule.axis === 'v' && beadSitsOn(rule, bead.x, bead.y));
+    if (!onLine) issues.push(`bead-off-line:${bead.personId}`);
+  }
+  for (const rule of place.lines) {
+    const bottom = rule.y + (rule.axis === 'v' ? rule.length : 0);
+    const right = rule.x + (rule.axis === 'h' ? rule.length : 0);
+    if (rule.x < -0.05 || rule.y < -0.05 || right > place.width + 0.05 || bottom > place.height + 0.05) issues.push('line-out');
+  }
+  return issues;
+}
+
+function clampBead(x: number, y: number, antique: boolean, width: number, height: number): { x: number; y: number } {
+  if (!antique) return { x: round(x), y: round(y) };
+  const radius = SU_BEAD_RADIUS_MM;
+  return {
+    x: round(Math.min(width - SU_ANTIQUE_INSET_MM - radius, Math.max(SU_ANTIQUE_INSET_MM + radius, x))),
+    y: round(Math.min(height - SU_ANTIQUE_INSET_MM - radius, Math.max(SU_ANTIQUE_INSET_MM + radius, y))),
+  };
+}
+
+function fitAntiqueText(
+  index: number,
+  beadX: number,
+  beadY: number,
+  colWidth: number,
+  height: number,
+  rowPitch: number,
+  charsOf: ReadonlyMap<number, number>,
+  fallbackChars: ReadonlyMap<number, number>,
+): { textX: number; textY: number; textW: number; textH: number; textScale: number } {
+  const inset = SU_ANTIQUE_INSET_MM;
+  const radius = SU_BEAD_RADIUS_MM;
+  let textH = round(Math.max(10, rowPitch - 6.4));
+  let textY = round(beadY - 1.8);
+  if (textY < inset) textY = inset;
+  if (textY + textH > height - inset - 1.8) textH = round(Math.max(8, height - inset - 1.8 - textY));
+  const chars = charsOf.get(index) ?? fallbackChars.get(index) ?? 2;
+  const perCol = Math.max(1, Math.floor((textH - 1) / SU_ANTIQUE_CHAR_MM));
+  const cols = Math.max(1, Math.ceil(chars / perCol));
+  const need = cols * SU_ANTIQUE_COL_MM;
+  const right = beadX - radius - 0.7;
+  const left = Math.max(inset, beadX - colWidth + radius + 1.5);
+  const room = Math.max(SU_ANTIQUE_COL_MM, right - left);
+  let textW = Math.min(need, room);
+  let textScale = 1;
+  if (need > room + 0.05) {
+    textScale = room / need;
+    textW = room;
+  }
+  let textX = right - textW;
+  if (textX < inset) {
+    textW = Math.max(SU_ANTIQUE_COL_MM, textW - (inset - textX));
+    textX = inset;
+  }
+  if (textX + textW > right) textW = Math.max(3.4, right - textX);
+  return {
+    textX: round(textX),
+    textY: round(textY),
+    textW: round(textW),
+    textH: round(textH),
+    textScale: round(textScale),
+  };
+}
+
+function beadSitsOn(rule: SuRule, x: number, y: number): boolean {
+  return Math.abs(rule.x - x) < 0.02 && y >= rule.y - 0.02 && y <= rule.y + rule.length + 0.02;
 }
 
 function slotFrom(node: SuBeadNode, col: number, colFrom: number, colTo: number, minDepth: number): SuPlateSlot {

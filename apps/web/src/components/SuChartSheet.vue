@@ -2,12 +2,12 @@
 /**
  * 苏谱的一页。
  * 版本A：竖向 A4，标题居中横排。
- * 版本B：横向 A4，单层版框，图题竖排在最右侧。
+ * 版本B：横向 A4。单层版框，上下 4pt、左右 2pt。内部分隔竖线 1pt。图题竖排时靠在版框内最右侧。
  * 分页、接上接下和锚点不随垂珠开关改变。
  */
 import { computed } from 'vue';
 import type { EuropeanPersonCaption } from '@/utils/european-chart-source';
-import { nestSuBlocks, suFrameWeightPt, type SuChart, type SuFrameWeightPt } from '@/utils/su-chart';
+import { SU_ANTIQUE_BEAD_PT, SU_ANTIQUE_DIVIDER_PT, SU_ANTIQUE_FRAME_SIDE_PT, SU_ANTIQUE_FRAME_TOP_PT, SU_ANTIQUE_PERSON_RULE_PT, nestSuBlocks, suAntiqueColumn, suFrameWeightPt, type SuChart, type SuFrameWeightPt } from '@/utils/su-chart';
 import type { ContinueNoteMode } from '@/utils/continue-note';
 import SuChartNodes from '@/components/SuChartNodes.vue';
 
@@ -50,10 +50,19 @@ const trees = computed(() => props.charts.map((chart) => ({
 })));
 
 const frameWeight = computed(() => suFrameWeightPt(props.framePt));
+const antiqueRails = suAntiqueColumn();
 const frameStyle = computed(() => (
-  props.script !== 'antique' && props.showFrame
-    ? { '--su-frame-pt': `${frameWeight.value}pt` }
-    : undefined
+  props.script === 'antique'
+    ? {
+      '--su-antique-top': `${SU_ANTIQUE_FRAME_TOP_PT}pt`,
+      '--su-antique-side': `${SU_ANTIQUE_FRAME_SIDE_PT}pt`,
+      '--su-divider-pt': `${SU_ANTIQUE_DIVIDER_PT}pt`,
+      '--su-bead-pt': `${SU_ANTIQUE_BEAD_PT}pt`,
+      '--su-person-rule-pt': `${SU_ANTIQUE_PERSON_RULE_PT}pt`,
+    }
+    : props.showFrame
+      ? { '--su-frame-pt': `${frameWeight.value}pt` }
+      : undefined
 ));
 
 function chartTitle(chart: SuChart): string {
@@ -73,12 +82,16 @@ function chartTitle(chart: SuChart): string {
       'is-even': !flow && !!pageNumber && pageNumber % 2 === 0,
       'is-antique': script === 'antique',
       'is-landscape': script === 'antique',
-      'is-title-vertical': script === 'antique',
+      'is-title-vertical': script === 'antique' && titleVertical,
       'is-modern-frame': script !== 'antique' && showFrame,
     }"
     :style="frameStyle"
   >
     <div class="su-stage" :class="{ 'su-frame': script === 'antique' }">
+      <template v-if="script === 'antique'">
+        <span class="su-rail su-col-line" :style="{ right: `calc(var(--su-pad-right) + ${antiqueRails.leftFromRight}mm)` }"></span>
+        <span class="su-rail su-col-line" :style="{ right: `calc(var(--su-pad-right) + ${antiqueRails.rightFromRight}mm)` }"></span>
+      </template>
       <div v-for="tree in trees" :key="tree.chart.index" class="su-branch">
         <a :id="`tree-su-${tree.chart.index + 1}`" class="su-anchor"></a>
         <h2 class="su-title">{{ chartTitle(tree.chart) }}</h2>
@@ -127,8 +140,11 @@ function chartTitle(chart: SuChart): string {
 
 .su-sheet.is-book.is-landscape {
   width: 297mm;
+  min-width: 297mm;
   height: 210mm;
-  padding: 8mm 8mm 10mm;
+  min-height: 210mm;
+  flex-shrink: 0;
+  padding: 8mm 8mm 12mm;
 }
 
 .su-sheet.is-book.is-even {
@@ -145,12 +161,14 @@ function chartTitle(chart: SuChart): string {
 
 .su-sheet.is-flow.is-landscape {
   width: 297mm;
+  min-width: 297mm;
+  flex-shrink: 0;
 }
 
 .su-sheet.is-antique {
   background: #fff;
   color: #000;
-  font-family: 'SimSun', 'NSimSun', 'Songti SC', serif;
+  font-family: 'FangSong', 'STFangsong', 'FangSong_GB2312', 'Songti SC', 'SimSun', serif;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -158,16 +176,53 @@ function chartTitle(chart: SuChart): string {
 .su-frame {
   position: relative;
   box-sizing: border-box;
-  height: 100%;
-  padding: 3mm 16mm 3mm 3mm;
-  border-top: 1.2pt solid #000;
-  border-bottom: 1.2pt solid #000;
-  border-left: 0.6pt solid #000;
-  border-right: 0.6pt solid #000;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  --su-pad-right: 15mm;
+  padding: 4mm var(--su-pad-right) 4mm 4mm;
+  overflow: hidden;
+  background: #fff;
+  border-style: solid;
+  border-color: #000;
+  border-radius: 0;
+  border-top-width: var(--su-antique-top, 4pt);
+  border-bottom-width: var(--su-antique-top, 4pt);
+  border-left-width: var(--su-antique-side, 2pt);
+  border-right-width: var(--su-antique-side, 2pt);
+}
+
+/* 1x 屏幕把 4pt、2pt 取成 5px、2px，比例不再是 2:1。屏幕用最接近的整像素 6px/3px，打印与 PDF 仍是 4pt/2pt。 */
+@media screen {
+  .su-frame {
+    border-top-width: 6px;
+    border-bottom-width: 6px;
+    border-left-width: 3px;
+    border-right-width: 3px;
+  }
+}
+
+.su-col-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  width: var(--su-divider-pt, 1pt);
+  background: #000;
+  transform: translateX(0.5pt);
+  pointer-events: none;
 }
 
 .su-sheet.is-flow .su-frame {
   height: auto;
+}
+
+.su-sheet.is-antique .su-branch {
+  position: relative;
+}
+
+.su-sheet.is-antique .su-branch + .su-branch {
+  margin-top: 4mm;
 }
 
 .su-sheet.is-modern-frame::before {
@@ -214,24 +269,51 @@ function chartTitle(chart: SuChart): string {
 .is-antique .su-title,
 .is-antique .su-foot {
   color: #000;
+  background: transparent;
+}
+
+.is-antique .su-foot {
+  font-size: 8pt;
+  font-weight: 400;
+  letter-spacing: 0.12em;
 }
 
 .is-antique .su-title {
-  position: absolute;
-  top: 4mm;
-  right: 3mm;
-  z-index: 5;
-  width: 10mm;
-  max-height: 160mm;
-  margin: 0;
+  position: relative;
+  width: auto;
+  max-height: none;
+  margin: 0 0 3mm;
   overflow: hidden;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  text-align: right;
+  letter-spacing: 0.12em;
+  line-height: 1.15;
+  font-size: 18pt;
+  font-weight: 500;
+  background: transparent;
+  color: #000;
+  border: 0;
+}
+
+.is-antique.is-title-vertical .su-title {
+  position: absolute;
+  top: 2mm;
+  right: -12.4mm;
+  bottom: 2mm;
+  z-index: 5;
+  width: 7.2mm;
+  max-height: none;
+  margin: 0;
   writing-mode: vertical-rl;
   text-orientation: upright;
   text-align: start;
-  letter-spacing: 0.16em;
-  line-height: 1.15;
-  font-size: 14px;
-  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  font-size: 18pt;
+  font-weight: 500;
+  background: transparent;
+  border: 0;
 }
 
 .su-foot {

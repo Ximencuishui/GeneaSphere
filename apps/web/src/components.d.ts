@@ -15,6 +15,7 @@ declare module 'vue' {
     BadgeDisplay: typeof import('./components/memory/BadgeDisplay.vue')['default']
     BiographyBook: typeof import('./components/BiographyBook.vue')['default']
     BookCatalog: typeof import('./components/BookCatalog.vue')['default']
+    BookCover: typeof import('./components/BookCover.vue')['default']
     BranchSelector: typeof import('./components/migration/BranchSelector.vue')['default']
     CountdownBar: typeof import('./components/CountdownBar.vue')['default']
     CreateQuizDialog: typeof import('./components/memory/CreateQuizDialog.vue')['default']
