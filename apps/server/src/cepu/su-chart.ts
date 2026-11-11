@@ -1,26 +1,24 @@
 /**
  * 苏式垂珠谱。
- * 一祖为一支。垂珠主线竖直，父子上下相承；同父兄弟横向分板，先排完长房整支再排次房。
- * 一支能放进一页就整支挪到下一页；只有一支比一页还长，才在该人处接下、下页接上。
- * 版面坐标由 placeSuChart 算出：版本A长房在左，版本B长房在右。人物文字始终横排。
+ * 一祖为一支。垂珠主线竖直，父子上下相承。
+ * 同父诸子各开一块垂珠板，横向并排，每块板再向下垂自己的后裔。
+ * 儿子再生多子，就在这块板里面继续横向分出子板。
+ * 板太宽、超出 A4，把放不下的支另起一图，本图标「支另见图，见第X图」。
+ * 一板向下超出一页，本图标「支另见图」，下页标「接上：【父名】，见第X图」。
+ * 版本A：竖向 A4，文字横排，长房在左。父节点下拉竖线，再以横线分给诸子；珠圈圆心落在交叉点上。
+ * 版本B：横向 A4，文字竖排，长房在右。只画各支向下的垂线，不画兄弟横线。欧式不走这里。
  */
 import type { EuropeanLinkInput, EuropeanPersonInput, EuropeanSpouseInput } from './european-chart';
 
-/** 一页 A4 在姓名、生卒、配葬这几行下大约放得下的人数。 */
-export const SU_BLOCKS_PER_PAGE = 7;
+/** 一页 A4 垂珠板放得下的世代行数。一行是一代，不是一个人。行高要能放下接续注，故为六世。 */
+export const SU_BLOCKS_PER_PAGE = 6;
 
-/**
- * 换页后弟弟沿用长兄的世代深度，但最多从这一级起算。
- * 这只决定横行落在第几世，不做成向右缩进。
- */
-export const SU_INDENT_LEVEL_INHERIT = 6;
+/** 垂珠板一横行的高度。一代一行。文字留在行内，不压到下一世的圆和姓名。 */
+export const SU_ROW_MM = 42;
 
-/** 垂珠板一横行的高度。一代一行。文字留在行的上半，横线走在行缝。 */
-export const SU_ROW_MM = 34;
-
-/** 人物文字距本行上沿、以及文字块高度。横线画在文字下面。 */
+/** 人物文字距本行上沿、以及文字块高度。横线画在文字下面。要放下姓名、生卒、配葬、简述、两行接续注和详见人物传。 */
 export const SU_TEXT_TOP_MM = 1;
-export const SU_TEXT_H_MM = 22;
+export const SU_TEXT_H_MM = 36;
 
 /** 世代标注占的边栏。版本A在左，版本B在右。 */
 export const SU_RAIL_MM = 14;
@@ -31,38 +29,65 @@ export const SU_STAGE_MM = 164;
 /** 圆圈中心距本行上沿，挨着姓名。 */
 export const SU_BEAD_TOP_MM = 6;
 
+/** 空心珠半径 1.2mm，直径 2.4mm。版本A圆心在节点交叉点，版本B圆在世代线上方。 */
+export const SU_BEAD_RADIUS_MM = 1.2;
+
+/** 版本A版框可选线宽。默认 4pt，最宽 10pt，四边同一数值。 */
+export const SU_FRAME_WEIGHTS_PT = [0.6, 1, 2, 4, 6, 10] as const;
+export type SuFrameWeightPt = (typeof SU_FRAME_WEIGHTS_PT)[number];
+
+export function suFrameWeightPt(value: unknown): SuFrameWeightPt {
+  const number = typeof value === 'number' ? value : Number(value);
+  return (SU_FRAME_WEIGHTS_PT as readonly number[]).includes(number)
+    ? (number as SuFrameWeightPt)
+    : 4;
+}
+
+/** 珠圈上方的页眉空隙，避免首行圆被裁掉。 */
+const SU_HEAD_MM = 4;
+
+/** 仿古横版一行的高度。七行仍放得进横向 A4。 */
+const SU_ANTIQUE_ROW_MM = 24;
+
+/** 仿古横版版心宽度，右侧留给竖排图题。 */
+const SU_ANTIQUE_STAGE_MM = 250;
+
 /** 竖线和文字之间的空档，接上、接下写在这里。 */
 export const SU_STRIP_MM = 6.8;
 
 /** 人物信息块最宽。窄板再收。 */
 export const SU_TEXT_MAX_MM = 46;
 
-/** 同父子息达到这个人数，继续画全套垂珠会挤在一起，只略去这一组。 */
-export const SU_BEAD_CROWD_CHILDREN = 6;
-
 /**
- * 同父诸子从长房到幼房、连同夹在中间的后裔，所占块数达到这个跨度。
- * 兄弟之间的连线会拉得很长，只略去这一组。
+ * 一块垂珠板至少要这么宽，姓名和配葬才读得清。
+ * 并排板数超过这个宽度，就拆到下一图，不把字挤成一条缝。
  */
-export const SU_BEAD_CROWD_SPAN = 8;
-
-/** 同父兄弟的后裔纵深相差达到这么多代，垂珠会一边很长一边很短，只略去这一组。 */
-export const SU_BEAD_CROWD_DEPTH = 4;
+export const SU_MIN_COL_MM = 36;
 
 export type SuRole = 'origin' | 'carried-in' | 'carried-out' | 'bridge';
 
 export interface SuBlock {
   personId: string;
   name: string;
-  /** 相对本图所从出之祖的世代深度。头人是 0，其子是 1。同一深度画在同一横行。 */
+  /** 相对本页支头的世代深度。支头是 0，其子是 1。同一深度画在同一横行。 */
   depth: number;
   role: SuRole;
   spouseText: string;
   mark: string;
-  /** 父亲 id。父亲不在本页时，嵌套对不上，这个人就是本页支头，不往页外连线。 */
+  /** 父亲 id。父亲不在本页时，这个人就是本页支头，不往页外连线。 */
   parentId: string | null;
+  /** 接上时写的父名。没有父亲时为空。 */
+  parentName: string;
   /** 家族世代，从 1 起。材料里没有时为空，画世代栏时再按深度推。 */
   generation: number | null;
+  /** 还有兄弟或子板没排进本图。 */
+  branchOff: boolean;
+  /** 本图截断后要去的图号，从 1 起。 */
+  cutChartNos: number[];
+  /** 本图由哪一张图接上来，从 1 起。 */
+  resumeChartNo: number | null;
+  /** 接上括号里的父名。 */
+  resumeFatherName: string;
 }
 
 export interface SuChart {
@@ -83,8 +108,6 @@ export interface SuBeadNode {
   block: SuBlock;
   index: number;
   children: SuBeadNode[];
-  /** 这一组人太多或拉得太长，打开垂珠时也不画，改在父卡片上标「支繁，略垂珠线」。 */
-  omitBeads: boolean;
 }
 
 interface PersonNode {
@@ -97,15 +120,35 @@ interface PersonNode {
   childIds: string[];
 }
 
-interface FlatNode {
+interface TreePerson {
   id: string;
   name: string;
-  depth: number;
   parentId: string | null;
-  span: number;
+  parentName: string;
   spouseText: string;
   mark: string;
   generation: number | null;
+  children: TreePerson[];
+}
+
+interface FitResult {
+  node: TreePerson;
+  nested: TreePerson[][];
+  direct: TreePerson[];
+}
+
+interface BuildCtx {
+  rows: number;
+  cols: number;
+  charts: SuChart[];
+  guard: number;
+}
+
+const VIRTUAL_ID = '\0su-pack';
+
+/** 版心去掉世代栏后，横着最多并排几块板。 */
+export function suMaxColumns(): number {
+  return Math.max(1, Math.floor((SU_STAGE_MM - SU_RAIL_MM) / SU_MIN_COL_MM));
 }
 
 export function suBranchName(name: string): string {
@@ -117,64 +160,19 @@ export function suBranchName(name: string): string {
 export function buildSuCharts(
   people: readonly EuropeanPersonInput[],
   links: readonly EuropeanLinkInput[],
-  options?: { blocksPerPage?: number },
+  options?: { blocksPerPage?: number; maxColumns?: number },
 ): SuChart[] {
-  const cap = clampCapacity(options?.blocksPerPage);
-  const flat = flatten(people, links);
-  if (flat.length === 0) return [];
-  const byId = new Map(flat.map((node) => [node.id, node]));
-  const charts: SuChart[] = [];
-  let cursor = 0;
-  let carry: FlatNode | null = null;
-  // 同一父亲的儿子共用第一次排到父亲身边时的那一级，换页后的弟弟不再被压回最左边。
-  const siblingDepth = new Map<string, number>();
-
-  while (cursor < flat.length && charts.length <= flat.length) {
-    const started = cursor;
-    const blocks: SuBlock[] = [];
-    const placed = new Map<string, number>();
-    const push = (node: FlatNode, role: SuRole) => {
-      const parentDepth = node.parentId != null ? placed.get(node.parentId) : undefined;
-      let depth = 0;
-      if (role !== 'carried-in' && parentDepth != null) depth = parentDepth + 1;
-      else if (role !== 'carried-in' && node.parentId != null && siblingDepth.has(node.parentId)) {
-        depth = Math.min(siblingDepth.get(node.parentId)!, SU_INDENT_LEVEL_INHERIT);
-      }
-      blocks.push(blockFrom(node, depth, role));
-      placed.set(node.id, depth);
-      if (node.parentId != null && parentDepth != null && !siblingDepth.has(node.parentId)) {
-        siblingDepth.set(node.parentId, depth);
-      }
-    };
-    if (carry) push(carry, 'carried-in');
-    while (cursor < flat.length && blocks.length < cap) {
-      const node = flat[cursor];
-      const room = cap - blocks.length;
-      if (blocks.length > 0 && node.span > room && node.span <= cap) break;
-      push(node, 'origin');
-      cursor += 1;
-    }
-    if (cursor === started && !carry) {
-      push(flat[cursor], 'origin');
-      cursor += 1;
-    }
-    const next = cursor < flat.length ? flat[cursor] : undefined;
-    const continued = next && next.span > cap ? ancestorOnChart(next, blocks, byId, cap) : null;
-    if (continued) {
-      const seam = blocks.find((block) => block.personId === continued.id);
-      if (seam) seam.role = seam.role === 'carried-in' ? 'bridge' : 'carried-out';
-    }
-    const head = blocks[0];
-    charts.push({
-      index: charts.length,
-      branchPersonId: head?.personId || '',
-      branchName: suBranchName(head?.name || ''),
-      blocks,
-    });
-    carry = continued;
-    if (cursor === started && !continued) break;
-  }
-  return charts;
+  const forest = buildForest(people, links);
+  if (forest.byId.size === 0) return [];
+  const ctx: BuildCtx = {
+    rows: clampCapacity(options?.blocksPerPage),
+    cols: clampColumns(options?.maxColumns),
+    charts: [],
+    guard: forest.byId.size * 2 + 4,
+  };
+  for (const root of forest.roots) emitSiblings([toTree(root, null, '', forest.byId)], ctx);
+  linkSuContinuations(ctx.charts);
+  return ctx.charts;
 }
 
 export function groupSuCharts(
@@ -188,7 +186,7 @@ export function groupSuCharts(
   let bucket: SuChart[] = [];
   let used = 0;
   for (const chart of charts) {
-    const need = Math.max(1, chart.blocks.length);
+    const need = chartRows(chart);
     if (bucket.length && used + need > limit) {
       groups.push(bucket);
       bucket = [];
@@ -220,35 +218,15 @@ export function indexSuAppearances(charts: readonly SuChart[]): Map<string, SuAp
   return seen;
 }
 
-function clampCapacity(value: number | undefined): number {
-  const size = value == null || !Number.isFinite(value) ? SU_BLOCKS_PER_PAGE : Math.floor(value);
-  if (size < 2) return 2;
-  return size;
-}
-
-function blockFrom(node: FlatNode, depth: number, role: SuRole): SuBlock {
-  return {
-    personId: node.id,
-    name: node.name,
-    depth,
-    role,
-    spouseText: node.spouseText,
-    mark: node.mark,
-    parentId: node.parentId,
-    generation: node.generation,
-  };
-}
-
 /**
- * 按本页块嵌成父子树，并标出哪一组该略去垂珠。
- * 长幼和缩进都不改。父亲不在本页的人成为本页支头，避免把线画到上一页。
+ * 按本页块嵌成父子树。
+ * 父亲不在本页的人成为本页支头，避免把线画到上一页。
  */
 export function nestSuBlocks(blocks: readonly SuBlock[]): SuBeadNode[] {
   const nodes: SuBeadNode[] = blocks.map((block, index) => ({
     block,
     index,
     children: [],
-    omitBeads: false,
   }));
   const roots: SuBeadNode[] = [];
   const seen = new Map<string, SuBeadNode>();
@@ -258,7 +236,6 @@ export function nestSuBlocks(blocks: readonly SuBlock[]): SuBeadNode[] {
     else roots.push(node);
     seen.set(node.block.personId, node);
   }
-  for (const node of nodes) node.omitBeads = beadCrowd(node);
   return roots;
 }
 
@@ -272,7 +249,6 @@ export interface SuPlateSlot {
   row: number;
   depth: number;
   generation: number | null;
-  omitBeads: boolean;
 }
 
 export interface SuPlateLayout {
@@ -300,7 +276,7 @@ export interface SuBeadMark {
 export interface SuMarkBox {
   personId: string;
   index: number;
-  kind: 'in' | 'out';
+  kind: 'in' | 'out' | 'off';
   x: number;
   y: number;
   w: number;
@@ -342,7 +318,9 @@ export interface SuChartPlace {
   lines: SuRule[];
   beads: SuBeadMark[];
   seams: SuMarkBox[];
-  /** 仿古板的横栏线，单位毫米，相对板顶。 */
+  /** 世代栏与正文之间的细竖线。仿古才有。 */
+  railX: number | null;
+  /** 保留字段。仿古不再画通栏横线，避免圆落在线下面。 */
   bands: number[];
 }
 
@@ -402,13 +380,16 @@ export function layoutSuPlates(roots: readonly SuBeadNode[]): SuPlateLayout {
 
 /**
  * 把一页排成垂珠坐标。
- * horizontal：长房在左，文字在竖线右侧。
- * antique：长房在右，文字在竖线左侧。线只走横竖，圆圈落在竖线上。
+ * horizontal：长房在左，文字在竖线右侧、横线下面。兄弟横线贴着诸子圆圈的下沿。
+ * antique：长房在右，文字竖排在竖线左侧。同父诸子各自向下垂线，不画兄弟横线。
+ * 圆圈始终在它那条世代线的上方，线从圆的下沿起笔。
  */
 export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' | 'antique'): SuChartPlace {
-  const reading = script === 'antique' ? 'rtl' : 'ltr';
+  const antique = script === 'antique';
+  const reading = antique ? 'rtl' : 'ltr';
   const layout = layoutSuPlates(roots);
-  const width = SU_STAGE_MM;
+  const rowPitch = antique ? SU_ANTIQUE_ROW_MM : SU_ROW_MM;
+  const width = antique ? SU_ANTIQUE_STAGE_MM : SU_STAGE_MM;
   const byIndex = new Map(layout.slots.map((slot) => [slot.index, slot]));
   if (layout.slots.length === 0) {
     return {
@@ -422,18 +403,27 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
       lines: [],
       beads: [],
       seams: [],
+      railX: null,
       bands: [],
     };
   }
 
   const colWidth = (width - SU_RAIL_MM) / layout.columns;
-  const textW = round(Math.min(SU_TEXT_MAX_MM, Math.max(10, colWidth - 3.2 - SU_STRIP_MM - 1.2)));
+  const textW = round(Math.min(SU_TEXT_MAX_MM, Math.max(12, colWidth - SU_STRIP_MM - 2)));
+  const textH = antique ? Math.max(10, rowPitch - 5) : SU_TEXT_H_MM;
+  const rowLineY = (row: number) => SU_HEAD_MM + row * rowPitch;
+  // 版本A：圆心就是父子竖线与兄弟横线的交叉点。版本B：圆仍在世代线上方。
+  const beadYOf = (row: number) => (
+    antique ? rowLineY(row) - SU_BEAD_RADIUS_MM - 0.35 : rowLineY(row)
+  );
+  const textYOf = (row: number) => (
+    antique ? beadYOf(row) - 0.2 : beadYOf(row) + SU_BEAD_RADIUS_MM + 1.6
+  );
   const beadXOf = (col: number) => (
     reading === 'ltr'
       ? SU_RAIL_MM + col * colWidth + 3.2
       : width - SU_RAIL_MM - col * colWidth - 3.2
   );
-  const beadYOf = (row: number) => row * SU_ROW_MM + SU_BEAD_TOP_MM;
   const textXOf = (beadX: number) => (
     reading === 'ltr' ? beadX + SU_STRIP_MM : beadX - SU_STRIP_MM - textW
   );
@@ -450,9 +440,9 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
       beadX: round(beadX),
       beadY: round(beadY),
       textX: round(textXOf(beadX)),
-      textY: round(slot.row * SU_ROW_MM + SU_TEXT_TOP_MM),
+      textY: round(textYOf(slot.row)),
       textW,
-      textH: SU_TEXT_H_MM,
+      textH,
     };
   });
 
@@ -467,53 +457,45 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
       y: round(beadYOf(slot.row)),
     });
   };
+  const pushV = (parentId: string, x: number, y0: number, y1: number) => {
+    if (y1 - y0 < 0.2) return;
+    lines.push({
+      parentId,
+      axis: 'v',
+      x: round(x),
+      y: round(y0),
+      length: round(y1 - y0),
+    });
+  };
+  const pushH = (parentId: string, x0: number, x1: number, y: number) => {
+    if (x1 - x0 < 0.2) return;
+    lines.push({
+      parentId,
+      axis: 'h',
+      x: round(Math.min(x0, x1)),
+      y: round(y),
+      length: round(Math.abs(x1 - x0)),
+    });
+  };
+  for (const slot of layout.slots) addBead(slot);
   const walk = (node: SuBeadNode) => {
     const slot = byIndex.get(node.index);
-    if (slot && !node.omitBeads && node.children.length > 0) {
+    if (slot && node.children.length > 0) {
       const kids = node.children
         .map((child) => byIndex.get(child.index))
         .filter((child): child is SuPlateSlot => !!child && child.row > slot.row);
-      if (kids.length === 1 && kids[0].col === slot.col) {
-        addBead(slot);
-        addBead(kids[0]);
-        lines.push({
-          parentId: node.block.personId,
-          axis: 'v',
-          x: round(beadXOf(slot.col)),
-          y: round(beadYOf(slot.row)),
-          length: round(beadYOf(kids[0].row) - beadYOf(slot.row)),
-        });
-      } else if (kids.length > 0) {
-        const parentY = beadYOf(slot.row);
-        const childY = beadYOf(kids[0].row);
-        const parentTextBottom = slot.row * SU_ROW_MM + SU_TEXT_TOP_MM + SU_TEXT_H_MM + 1.2;
-        const aboveChild = kids[0].row * SU_ROW_MM - 2.2;
-        const barY = Math.min(childY - 3, Math.max(parentTextBottom, aboveChild));
-        const xs = kids.map((kid) => beadXOf(kid.col));
-        addBead(slot);
-        lines.push({
-          parentId: node.block.personId,
-          axis: 'v',
-          x: round(beadXOf(slot.col)),
-          y: round(parentY),
-          length: round(barY - parentY),
-        });
-        lines.push({
-          parentId: node.block.personId,
-          axis: 'h',
-          x: round(Math.min(...xs)),
-          y: round(barY),
-          length: round(Math.max(...xs) - Math.min(...xs)),
-        });
-        for (const kid of kids) {
-          addBead(kid);
-          lines.push({
-            parentId: node.block.personId,
-            axis: 'v',
-            x: round(beadXOf(kid.col)),
-            y: round(barY),
-            length: round(beadYOf(kid.row) - barY),
-          });
+      if (kids.length > 0) {
+        const y0 = antique ? rowLineY(slot.row) : beadYOf(slot.row);
+        const y1 = antique ? rowLineY(kids[0].row) : beadYOf(kids[0].row);
+        const sameCol = kids.filter((kid) => kid.col === slot.col);
+        if (antique) {
+          for (const kid of sameCol) pushV(node.block.personId, beadXOf(kid.col), y0, y1);
+        } else {
+          pushV(node.block.personId, beadXOf(slot.col), y0, y1);
+          if (kids.length > 1 || kids[0].col !== slot.col) {
+            const xs = kids.map((kid) => beadXOf(kid.col));
+            pushH(node.block.personId, Math.min(...xs), Math.max(...xs), y1);
+          }
         }
       }
     }
@@ -522,30 +504,44 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
   roots.forEach(walk);
 
   const seams: SuMarkBox[] = [];
-  const upright = reading === 'rtl';
+  const upright = antique;
   for (const node of walkNodes(roots)) {
     const slot = byIndex.get(node.index);
     if (!slot) continue;
     const beadX = beadXOf(slot.col);
-    const boxW = upright ? 4.2 : SU_STRIP_MM - 1;
-    const boxH = upright ? 7.2 : 4;
-    const x = reading === 'ltr' ? beadX + 0.5 : beadX - SU_STRIP_MM + 0.6;
+    const beadY = beadYOf(slot.row);
+    const boxW = upright ? 4.2 : 4.6;
+    const boxH = upright ? 6.4 : 3.2;
+    const x = beadX + SU_BEAD_RADIUS_MM + 0.45;
     const push = (kind: 'in' | 'out', y: number) => {
       seams.push({
         personId: slot.personId,
         index: slot.index,
         kind,
         x: round(x),
-        y: round(y),
+        y: round(Math.max(0.2, y)),
         w: boxW,
         h: boxH,
       });
     };
     if (node.block.role === 'carried-in' || node.block.role === 'bridge') {
-      push('in', slot.row * SU_ROW_MM + 0.4);
+      push('in', beadY - (upright ? 0.6 : 3.4));
     }
     if (node.block.role === 'carried-out' || node.block.role === 'bridge') {
-      push('out', beadYOf(slot.row) + (upright ? 2.4 : 3));
+      push('out', beadY + (upright ? 0.8 : 0.2));
+    }
+    if (node.block.branchOff) {
+      const textX = textXOf(beadX);
+      const markW = 30;
+      seams.push({
+        personId: slot.personId,
+        index: slot.index,
+        kind: 'off',
+        x: round(Math.max(0, Math.min(textX, width - markW))),
+        y: round(textYOf(slot.row) + textH + 0.4),
+        w: markW,
+        h: 3.8,
+      });
     }
   }
 
@@ -556,30 +552,27 @@ export function placeSuChart(roots: readonly SuBeadNode[], script: 'horizontal' 
     generations.push({
       row,
       label,
-      x: reading === 'ltr' ? 0.4 : round(width - SU_RAIL_MM + 0.8),
-      y: round(row * SU_ROW_MM + (reading === 'ltr' ? 1.4 : 0.8)),
+      x: reading === 'ltr' ? 0.4 : round(width - SU_RAIL_MM + 0.9),
+      y: round(antique ? rowLineY(row) : textYOf(row)),
       w: reading === 'ltr' ? SU_RAIL_MM - 1.2 : SU_RAIL_MM - 1.8,
-      h: reading === 'ltr' ? 6 : round(SU_ROW_MM - 1.6),
-      boxed: reading === 'rtl',
+      h: reading === 'ltr' ? 6 : round(rowPitch - 1.2),
+      boxed: antique,
     });
   }
-
-  const bands = reading === 'rtl'
-    ? Array.from({ length: Math.max(0, layout.rows - 1) }, (_, index) => round((index + 1) * SU_ROW_MM))
-    : [];
 
   return {
     reading,
     columns: layout.columns,
     rows: layout.rows,
     width,
-    height: round(layout.rows * SU_ROW_MM),
+    height: round(SU_HEAD_MM + layout.rows * rowPitch + 1.2),
     people,
     generations,
     lines,
     beads: [...beadMap.values()],
     seams,
-    bands,
+    railX: antique ? round(width - SU_RAIL_MM) : null,
+    bands: [],
   };
 }
 
@@ -593,7 +586,6 @@ function slotFrom(node: SuBeadNode, col: number, colFrom: number, colTo: number,
     row: node.block.depth - minDepth,
     depth: node.block.depth,
     generation: node.block.generation,
-    omitBeads: node.omitBeads,
   };
 }
 
@@ -632,75 +624,208 @@ function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function beadCrowd(node: SuBeadNode): boolean {
-  const kids = node.children;
-  if (kids.length >= SU_BEAD_CROWD_CHILDREN) return true;
-  if (kids.length < 2) return false;
-  const first = kids[0].index;
-  const end = subtreeLastIndex(kids[kids.length - 1]);
-  if (end - first + 1 >= SU_BEAD_CROWD_SPAN) return true;
-  const depths = kids.map(subtreeDepth);
-  return Math.max(...depths) - Math.min(...depths) >= SU_BEAD_CROWD_DEPTH;
+function clampCapacity(value: number | undefined): number {
+  const size = value == null || !Number.isFinite(value) ? SU_BLOCKS_PER_PAGE : Math.floor(value);
+  if (size < 2) return 2;
+  return size;
 }
 
-function subtreeDepth(node: SuBeadNode): number {
+function clampColumns(value: number | undefined): number {
+  const size = value == null || !Number.isFinite(value) ? suMaxColumns() : Math.floor(value);
+  if (size < 1) return 1;
+  return size;
+}
+
+function chartRows(chart: SuChart): number {
+  if (!chart.blocks.length) return 1;
+  let min = Number.POSITIVE_INFINITY;
+  let max = 0;
+  for (const block of chart.blocks) {
+    min = Math.min(min, block.depth);
+    max = Math.max(max, block.depth);
+  }
+  return Math.max(1, max - min + 1);
+}
+
+/**
+ * 同父的几块板尽量排进同一图。
+ * 给后面的兄弟各留一列，当前这块不够宽时，多出来的子板另见图。
+ */
+function emitSiblings(siblings: readonly TreePerson[], ctx: BuildCtx) {
+  if (!siblings.length || ctx.charts.length > ctx.guard) return;
+  const off = new Set<string>();
+  const fitted = fit(virtualParent(siblings), ctx.cols, off);
+  off.delete(VIRTUAL_ID);
+  if (fitted.node.children.length) pushPages(fitted.node.children, off, ctx);
+  for (const group of fitted.nested) emitSiblings(group, ctx);
+  if (fitted.direct.length) emitSiblings(fitted.direct, ctx);
+}
+
+function pushPages(roots: readonly TreePerson[], off: Set<string>, ctx: BuildCtx) {
+  if (!roots.length || ctx.charts.length > ctx.guard) return;
+  const maxDepth = roots.reduce((max, root) => Math.max(max, depthOf(root)), 0);
+  let start = 0;
+  while (start <= maxDepth && ctx.charts.length <= ctx.guard) {
+    const end = start + ctx.rows - 1;
+    const blocks: SuBlock[] = [];
+    for (const root of roots) collect(root, 0, start, end, blocks, off);
+    if (!blocks.length) break;
+    const head = blocks[0];
+    ctx.charts.push({
+      index: ctx.charts.length,
+      branchPersonId: head.personId,
+      branchName: suBranchName(head.name),
+      blocks,
+    });
+    if (!blocks.some((block) => block.role === 'carried-out' || block.role === 'bridge')) break;
+    start = end;
+  }
+}
+
+function collect(
+  node: TreePerson,
+  depth: number,
+  start: number,
+  end: number,
+  blocks: SuBlock[],
+  off: Set<string>,
+) {
+  if (depth > end) return;
+  if (depth >= start) {
+    const carriedIn = start > 0 && depth === start;
+    const carriedOut = depth === end && node.children.length > 0;
+    let role: SuRole = 'origin';
+    if (carriedIn && carriedOut) role = 'bridge';
+    else if (carriedIn) role = 'carried-in';
+    else if (carriedOut) role = 'carried-out';
+    blocks.push({
+      personId: node.id,
+      name: node.name,
+      depth: depth - start,
+      role,
+      spouseText: node.spouseText,
+      mark: node.mark,
+      parentId: node.parentId,
+      parentName: node.parentName,
+      generation: node.generation,
+      branchOff: off.has(node.id) && !carriedIn,
+      cutChartNos: [],
+      resumeChartNo: null,
+      resumeFatherName: '',
+    });
+  }
+  if (depth >= end) return;
+  for (const child of node.children) collect(child, depth + 1, start, end, blocks, off);
+}
+
+function fit(node: TreePerson, maxCols: number, off: Set<string>): FitResult {
+  const kept: TreePerson[] = [];
+  const nested: TreePerson[][] = [];
+  const direct: TreePerson[] = [];
+  let used = 0;
+  const budget = Math.max(1, maxCols);
+  node.children.forEach((child, index) => {
+    const remaining = budget - used;
+    if (remaining <= 0) {
+      direct.push(child);
+      return;
+    }
+    const later = node.children.length - index - 1;
+    const reserve = Math.min(later, remaining - 1);
+    const room = remaining - reserve;
+    const inner = fit(child, room, off);
+    kept.push(inner.node);
+    nested.push(...inner.nested);
+    if (inner.direct.length) nested.push(inner.direct);
+    used += columnNeed(inner.node);
+  });
+  if (direct.length) off.add(node.id);
+  return {
+    node: { ...node, children: kept },
+    nested,
+    direct,
+  };
+}
+
+function virtualParent(children: readonly TreePerson[]): TreePerson {
+  return {
+    id: VIRTUAL_ID,
+    name: '',
+    parentId: null,
+    parentName: '',
+    spouseText: '',
+    mark: '',
+    generation: null,
+    children: [...children],
+  };
+}
+
+function columnNeed(node: TreePerson): number {
+  if (node.children.length === 0) return 1;
+  return node.children.reduce((sum, child) => sum + columnNeed(child), 0);
+}
+
+function depthOf(node: TreePerson): number {
   let depth = 0;
-  for (const child of node.children) depth = Math.max(depth, 1 + subtreeDepth(child));
+  for (const child of node.children) depth = Math.max(depth, 1 + depthOf(child));
   return depth;
 }
 
-function subtreeLastIndex(node: SuBeadNode): number {
-  let last = node.index;
-  for (const child of node.children) last = Math.max(last, subtreeLastIndex(child));
-  return last;
-}
-
-function ancestorOnChart(
-  next: FlatNode,
-  blocks: readonly SuBlock[],
-  byId: Map<string, FlatNode>,
-  cap: number,
-): FlatNode | null {
-  const placed = new Set(blocks.map((block) => block.personId));
-  let parentId = next.parentId;
-  while (parentId) {
-    if (placed.has(parentId)) {
-      const node = byId.get(parentId);
-      return node && node.span > cap ? node : null;
-    }
-    parentId = byId.get(parentId)?.parentId ?? null;
-  }
-  return null;
-}
-
-function flatten(
-  people: readonly EuropeanPersonInput[],
-  links: readonly EuropeanLinkInput[],
-): FlatNode[] {
-  const forest = buildForest(people, links);
-  const flat: FlatNode[] = [];
-  const walk = (id: string, depth: number, parentId: string | null, stack: Set<string>) => {
-    if (stack.has(id)) return;
-    const node = forest.byId.get(id);
-    if (!node) return;
-    stack.add(id);
-    const start = flat.length;
-    flat.push({
-      id: node.id,
-      name: node.name,
-      depth,
-      parentId,
-      span: 1,
-      spouseText: node.spouseText,
-      mark: node.mark,
-      generation: Number.isFinite(node.generation) ? node.generation : null,
-    });
-    for (const childId of node.childIds) walk(childId, depth + 1, id, stack);
-    flat[start].span = flat.length - start;
-    stack.delete(id);
+function toTree(node: PersonNode, parentId: string | null, parentName: string, byId: Map<string, PersonNode>): TreePerson {
+  return {
+    id: node.id,
+    name: node.name,
+    parentId,
+    parentName,
+    spouseText: node.spouseText,
+    mark: node.mark,
+    generation: Number.isFinite(node.generation) ? node.generation : null,
+    children: node.childIds.map((id) => toTree(byId.get(id)!, node.id, node.name, byId)),
   };
-  for (const root of forest.roots) walk(root.id, 0, null, new Set());
-  return flat;
+}
+
+/** 截断和接上成对。图号从 1 起。接上写父亲的名字。 */
+function linkSuContinuations(charts: SuChart[]) {
+  const laterCut = (chart: SuChart, personId: string, roles: SuRole[]) => charts.find((item) => (
+    item.index > chart.index && item.blocks.some((block) => block.personId === personId && roles.includes(block.role))
+  ));
+  const earlierCut = (chart: SuChart, personId: string, roles: SuRole[]) => [...charts].reverse().find((item) => (
+    item.index < chart.index && item.blocks.some((block) => block.personId === personId && roles.includes(block.role))
+  ));
+  for (const chart of charts) {
+    for (const block of chart.blocks) {
+      if (block.role === 'carried-out' || block.role === 'bridge') {
+        const next = laterCut(chart, block.personId, ['carried-in', 'bridge']);
+        if (next) block.cutChartNos.push(next.index + 1);
+      }
+      if (block.role === 'carried-in' || block.role === 'bridge') {
+        const prev = earlierCut(chart, block.personId, ['carried-out', 'bridge']);
+        if (prev) {
+          block.resumeChartNo = prev.index + 1;
+          block.resumeFatherName = block.parentName || block.name;
+        }
+      }
+    }
+  }
+  for (const chart of charts) {
+    for (const block of chart.blocks) {
+      if (!block.branchOff) continue;
+      const targets = charts.filter((item) => {
+        if (item.index <= chart.index) return false;
+        const head = item.blocks[0];
+        return !!head && head.personId !== block.personId && head.parentId === block.personId;
+      });
+      for (const target of targets) {
+        const chartNo = target.index + 1;
+        if (!block.cutChartNos.includes(chartNo)) block.cutChartNos.push(chartNo);
+        const head = target.blocks[0];
+        if (head.resumeChartNo == null) {
+          head.resumeChartNo = chart.index + 1;
+          head.resumeFatherName = block.name;
+        }
+      }
+    }
+  }
 }
 
 function buildForest(

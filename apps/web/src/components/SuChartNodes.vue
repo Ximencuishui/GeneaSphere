@@ -1,22 +1,23 @@
 <script setup lang="ts">
 /**
  * 苏式垂珠的一板。
- * 父子用竖线串联，同父兄弟横向分列，每个兄弟再向下拉自己的垂珠。
- * 版本A长房在左、文字在线右；版本B长房在右、文字在线左。人物文字一律横排。
- * 关掉垂珠时只拿掉竖线、横线和圆圈，板位与文字不动。
+ * 版本A：文字横排在线右，兄弟横线贴在诸子圆圈下沿。
+ * 版本B：文字竖排在线左，只留各支向下的垂线，不画兄弟横线。
+ * 圆圈在世代线上方。关掉垂珠时只拿掉竖线、横线和圆圈，板位与文字不动。
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import {
   placeSuChart,
   type SuBeadNode,
   type SuChart,
   type SuGenerationBand,
-  type SuMarkBox,
   type SuPlacedPerson,
   type SuRule,
 } from '@/utils/su-chart';
 import type { EuropeanPersonCaption } from '@/utils/european-chart-source';
 import { formatLifeYears } from '@/utils/genealogy-card';
+import { continueNoteMode, formatContinueNote, type ContinueNote, type ContinueNoteMode } from '@/utils/continue-note';
+import { chartPortraitUrl } from '@/utils/chart-portrait';
 
 const props = withDefaults(defineProps<{
   nodes: SuBeadNode[];
@@ -25,9 +26,16 @@ const props = withDefaults(defineProps<{
   captions?: Record<string, EuropeanPersonCaption>;
   selectedId?: string | number | null;
   chart: SuChart;
+  /** 图号 → 页码。新式详注用来补「第Y页」。 */
+  chartPages?: Record<number, number>;
+  continueNote?: ContinueNoteMode | null;
+  /** 版本A才画头像。仿古版即使传入也不渲染。 */
+  showAvatars?: boolean;
 }>(), {
   beadLines: false,
   antique: false,
+  continueNote: null,
+  showAvatars: true,
 });
 
 const emit = defineEmits<{
@@ -38,6 +46,20 @@ const emit = defineEmits<{
 const BRIEF_LIMIT = 18;
 
 const place = computed(() => placeSuChart(props.nodes, props.antique ? 'antique' : 'horizontal'));
+const noteMode = computed(() => continueNoteMode(props.continueNote, props.antique ? 'antique' : 'horizontal'));
+const hiddenPortraits = ref(new Set<string>());
+
+function portraitUrl(node: SuBeadNode): string {
+  if (props.antique || props.showAvatars === false) return '';
+  if (hiddenPortraits.value.has(node.block.personId)) return '';
+  return chartPortraitUrl(props.captions?.[node.block.personId]?.avatarUrl);
+}
+
+function hidePortrait(personId: string) {
+  const next = new Set(hiddenPortraits.value);
+  next.add(personId);
+  hiddenPortraits.value = next;
+}
 const byIndex = computed(() => {
   const map = new Map<number, SuBeadNode>();
   const visit = (node: SuBeadNode) => {
@@ -66,7 +88,8 @@ function personStyle(person: SuPlacedPerson): Record<string, string> {
     top: `${person.textY}mm`,
     width: `${person.textW}mm`,
     height: `${person.textH}mm`,
-    writingMode: 'horizontal-tb',
+    writingMode: props.antique ? 'vertical-rl' : 'horizontal-tb',
+    textOrientation: props.antique ? 'upright' : 'mixed',
   };
 }
 
@@ -96,15 +119,24 @@ function genStyle(band: SuGenerationBand): Record<string, string> {
   };
 }
 
-function seamStyle(seam: SuMarkBox): Record<string, string> {
-  return {
-    left: `${seam.x}mm`,
-    top: `${seam.y}mm`,
-    width: `${seam.w}mm`,
-    height: `${seam.h}mm`,
-    writingMode: props.antique ? 'vertical-rl' : 'horizontal-tb',
-    textOrientation: props.antique ? 'upright' : 'mixed',
-  };
+function personNotes(node: SuBeadNode): Array<ReturnType<typeof formatContinueNote> & { href: string }> {
+  const block = node.block;
+  const notes: ContinueNote[] = [];
+  for (const chartNo of block.cutChartNos ?? []) {
+    notes.push({ kind: 'cut', chartNo, pageNo: props.chartPages?.[chartNo] ?? null });
+  }
+  if (block.resumeChartNo) {
+    notes.push({
+      kind: 'resume',
+      chartNo: block.resumeChartNo,
+      pageNo: props.chartPages?.[block.resumeChartNo] ?? null,
+      fatherName: block.resumeFatherName || block.parentName || block.name,
+    });
+  }
+  return notes.map((note) => ({
+    ...formatContinueNote(note, noteMode.value),
+    href: `#tree-su-${note.chartNo}`,
+  }));
 }
 
 function courtesyText(node: SuBeadNode): string {
@@ -113,6 +145,22 @@ function courtesyText(node: SuBeadNode): string {
   if (caption?.courtesyName) parts.push(`字${caption.courtesyName}`);
   if (caption?.artName) parts.push(`号${caption.artName}`);
   return parts.join('，');
+}
+
+function antiqueFields(node: SuBeadNode): string[] {
+  const caption = props.captions?.[node.block.personId];
+  const fields: string[] = [];
+  if (caption?.courtesyName) fields.push(`字${caption.courtesyName}`);
+  if (caption?.artName) fields.push(`号${caption.artName}`);
+  const years = yearsText(node);
+  if (years) fields.push(years);
+  if (node.block.spouseText) fields.push(node.block.spouseText);
+  const children = node.children.map((child) => child.block.name).filter((name) => name.length > 0);
+  if (children.length) fields.push(`子${children.join('、')}`);
+  const burial = burialText(node);
+  if (burial) fields.push(burial);
+  if (node.block.mark) fields.push(node.block.mark);
+  return fields;
 }
 
 function yearsText(node: SuBeadNode): string {
@@ -171,6 +219,11 @@ function isSelected(personId: string): boolean {
     :style="plateStyle()"
   >
     <span
+      v-if="place.railX != null"
+      class="su-rail"
+      :style="{ left: `${place.railX}mm` }"
+    ></span>
+    <span
       v-for="y in place.bands"
       :key="`band-${y}`"
       class="su-band"
@@ -200,13 +253,6 @@ function isSelected(personId: string): boolean {
         :style="beadStyle(bead)"
       ></span>
     </template>
-    <span
-      v-for="seam in place.seams"
-      :key="`seam-${seam.index}-${seam.kind}`"
-      class="su-seam"
-      :class="seam.kind === 'in' ? 'is-in' : 'is-out'"
-      :style="seamStyle(seam)"
-    >{{ seam.kind === 'in' ? '接上' : '接下' }}</span>
     <article
       v-for="person in place.people"
       :key="`${person.index}-${person.personId}`"
@@ -224,15 +270,14 @@ function isSelected(personId: string): boolean {
       @click="emit('select', person.personId)"
     >
       <template v-if="nodeOf(person.index)">
-        <div class="su-body">
-          <div class="su-name-row">
-            <span class="su-name">{{ nodeOf(person.index)!.block.name }}</span>
-            <span v-if="courtesyText(nodeOf(person.index)!)" class="su-courtesy">（{{ courtesyText(nodeOf(person.index)!) }}）</span>
-          </div>
-          <p v-if="yearsText(nodeOf(person.index)!)" class="su-years">{{ yearsText(nodeOf(person.index)!) }}</p>
-          <p v-if="nodeOf(person.index)!.block.spouseText" class="su-kin">{{ nodeOf(person.index)!.block.spouseText }}</p>
-          <p v-if="burialText(nodeOf(person.index)!)" class="su-kin">{{ burialText(nodeOf(person.index)!) }}</p>
-          <p v-if="nodeOf(person.index)!.block.mark" class="su-mark">{{ nodeOf(person.index)!.block.mark }}</p>
+        <div v-if="antique" class="su-vrun">
+          <span class="su-name">{{ nodeOf(person.index)!.block.name }}</span>
+          <span v-for="(field, fieldIndex) in antiqueFields(nodeOf(person.index)!)" :key="fieldIndex" class="su-meta">{{ field }}</span>
+          <span v-if="personNotes(nodeOf(person.index)!).length" class="su-seam">
+            <span v-for="(note, noteIndex) in personNotes(nodeOf(person.index)!)" :key="noteIndex" class="su-continue">
+              {{ note.lead }}<a class="su-continue-link" :href="note.href" @click.stop>{{ note.linkText }}</a>{{ note.tail }}
+            </span>
+          </span>
           <a
             v-if="hasBiography(nodeOf(person.index)!)"
             class="su-jump"
@@ -240,9 +285,38 @@ function isSelected(personId: string): boolean {
             :title="`跳转到${citeBook(nodeOf(person.index)!)}：${nodeOf(person.index)!.block.name}`"
             @click.stop.prevent="openBiography(nodeOf(person.index)!)"
           >详见人物传</a>
-          <p v-if="briefText(nodeOf(person.index)!)" class="su-brief">{{ briefText(nodeOf(person.index)!) }}</p>
         </div>
-        <span v-if="beadLines && nodeOf(person.index)!.omitBeads" class="su-omit">支繁，略垂珠线</span>
+        <div v-else class="su-body">
+          <div class="su-name-row">
+            <img
+              v-if="portraitUrl(nodeOf(person.index)!)"
+              class="su-avatar"
+              :src="portraitUrl(nodeOf(person.index)!)"
+              alt=""
+              @error="hidePortrait(nodeOf(person.index)!.block.personId)"
+              @click.stop
+            />
+            <span class="su-name">{{ nodeOf(person.index)!.block.name }}</span>
+            <span v-if="courtesyText(nodeOf(person.index)!)" class="su-courtesy">（{{ courtesyText(nodeOf(person.index)!) }}）</span>
+          </div>
+          <p v-if="yearsText(nodeOf(person.index)!)" class="su-years">{{ yearsText(nodeOf(person.index)!) }}</p>
+          <p v-if="nodeOf(person.index)!.block.spouseText" class="su-kin">{{ nodeOf(person.index)!.block.spouseText }}</p>
+          <p v-if="burialText(nodeOf(person.index)!)" class="su-kin">{{ burialText(nodeOf(person.index)!) }}</p>
+          <p v-if="nodeOf(person.index)!.block.mark" class="su-mark">{{ nodeOf(person.index)!.block.mark }}</p>
+          <p v-if="briefText(nodeOf(person.index)!)" class="su-brief">{{ briefText(nodeOf(person.index)!) }}</p>
+          <p v-if="personNotes(nodeOf(person.index)!).length" class="su-seam">
+            <span v-for="(note, noteIndex) in personNotes(nodeOf(person.index)!)" :key="noteIndex" class="su-continue">
+              {{ note.lead }}<a class="su-continue-link" :href="note.href" @click.stop>{{ note.linkText }}</a>{{ note.tail }}
+            </span>
+          </p>
+          <a
+            v-if="hasBiography(nodeOf(person.index)!)"
+            class="su-jump"
+            :href="`#${bioAnchor(nodeOf(person.index)!)}`"
+            :title="`跳转到${citeBook(nodeOf(person.index)!)}：${nodeOf(person.index)!.block.name}`"
+            @click.stop.prevent="openBiography(nodeOf(person.index)!)"
+          >详见人物传</a>
+        </div>
       </template>
     </article>
   </div>
@@ -259,9 +333,20 @@ function isSelected(personId: string): boolean {
 .su-plate.is-antique {
   margin-right: 0;
   margin-left: auto;
-  border: 0.7px solid #1c140c;
+  border: none;
   background: transparent;
+  color: #000;
   font-family: 'SimSun', 'NSimSun', 'Songti SC', serif;
+}
+
+.su-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 0.4pt;
+  background: #000;
+  pointer-events: none;
 }
 
 .su-band {
@@ -270,7 +355,7 @@ function isSelected(personId: string): boolean {
   right: 14mm;
   z-index: 1;
   height: 0;
-  border-top: 0.6px solid #1c140c;
+  border-top: 0.3pt solid #000;
   pointer-events: none;
 }
 
@@ -287,49 +372,79 @@ function isSelected(personId: string): boolean {
 
 .su-gen.is-boxed {
   box-sizing: border-box;
-  border: 1px solid #1a1208;
-  background: #f4e7c8;
-  color: #1a1208;
-  font-size: 13px;
-  line-height: 1;
-  letter-spacing: 0.14em;
+  border: none;
+  background: #000;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.15;
+  letter-spacing: 0.16em;
   text-align: center;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .su-rule {
   position: absolute;
   z-index: 1;
   pointer-events: none;
-  background: #2a241c;
+  background: #000;
 }
 
 .su-rule.is-v {
-  width: 0.7px;
+  width: 0.4pt;
+  transform: translateX(-0.2pt);
 }
 
 .su-rule.is-h {
-  height: 0.7px;
-}
-
-.su-plate.is-antique .su-rule {
-  background: #1a1208;
+  height: 0.4pt;
+  transform: translateY(-0.2pt);
 }
 
 .su-bead {
   position: absolute;
   z-index: 2;
   box-sizing: border-box;
-  width: 2.6mm;
-  height: 2.6mm;
-  margin-left: -1.3mm;
-  margin-top: -1.3mm;
-  border: 0.8px solid #1a1208;
+  width: 2.4mm;
+  height: 2.4mm;
+  margin-left: -1.2mm;
+  margin-top: -1.2mm;
+  border: 0.4pt solid #000;
   border-radius: 50%;
-  background: transparent;
+  background: #fff;
   pointer-events: none;
 }
 
-.su-seam {
+.su-person .su-seam {
+  position: static;
+  z-index: 3;
+  display: block;
+  margin: 0.4mm 0 0;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  color: #c0392b;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  white-space: normal;
+}
+
+.su-vrun .su-seam {
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+}
+
+.su-continue {
+  display: block;
+}
+
+.su-continue-link {
+  color: #c0392b;
+  text-decoration: underline;
+}
+
+.su-seam-legacy {
   position: absolute;
   z-index: 4;
   overflow: hidden;
@@ -339,6 +454,11 @@ function isSelected(personId: string): boolean {
   line-height: 1.15;
   letter-spacing: 0.04em;
   pointer-events: none;
+}
+
+.su-seam.is-off {
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .su-person {
@@ -352,16 +472,30 @@ function isSelected(personId: string): boolean {
   cursor: pointer;
 }
 
-.su-person.is-selected {
-  background: rgba(138, 100, 22, 0.08);
-  box-shadow: inset 0 0 0 1px #8a6416;
+.su-person.is-selected .su-name {
+  color: #8a6416;
+}
+
+.su-vrun {
+  margin: 0;
+  line-height: 1.15;
 }
 
 .su-name-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 2px;
+}
+
+.su-avatar {
+  flex: 0 0 auto;
+  width: 6.4mm;
+  height: 6.4mm;
+  margin: 0 1.2mm 0 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: transparent;
 }
 
 .su-name {
@@ -414,18 +548,24 @@ function isSelected(personId: string): boolean {
 }
 
 .su-plate.is-antique .su-name,
+.su-plate.is-antique .su-meta,
 .su-plate.is-antique .su-courtesy,
 .su-plate.is-antique .su-years,
 .su-plate.is-antique .su-kin,
 .su-plate.is-antique .su-mark,
 .su-plate.is-antique .su-brief {
-  color: #1a1208;
+  color: #000;
+}
+
+.su-meta {
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .su-plate.is-antique .su-jump {
-  color: #1a1208;
+  color: #000;
   text-decoration: none;
-  border-bottom: 0.4px solid #1a1208;
+  border-bottom: 0.4pt solid #000;
 }
 
 @media print {

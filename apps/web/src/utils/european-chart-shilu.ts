@@ -9,6 +9,7 @@ import {
   type EuropeanPersonInput,
 } from '@/utils/european-chart';
 import type { EuropeanPersonCaption, EuropeanViewModel } from '@/utils/european-chart-source';
+import { chartPortraitUrl } from '@/utils/chart-portrait';
 
 export interface ShiluChartChild {
   person_id?: string;
@@ -38,6 +39,7 @@ export interface ShiluChartEntry {
   child_type?: string;
   spouses?: { name: string; marriage_order?: number }[];
   children?: ShiluChartChild[];
+  avatar_url?: string;
 }
 
 export function europeanViewFromShilu(entries: readonly ShiluChartEntry[]): EuropeanViewModel {
@@ -81,6 +83,7 @@ export function europeanViewFromShilu(entries: readonly ShiluChartEntry[]): Euro
       biography: text(entry.biography),
       citeBook: entry.gender === 'female' ? '闺秀录' : '人物传',
       adoptionNote: text(entry.adoption_note),
+      avatarUrl: chartPortraitUrl(entry.avatar_url) || undefined,
     };
   }
 

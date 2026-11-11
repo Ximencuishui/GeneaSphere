@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { CepuService } from './cepu.service';
+import { suFrameWeightPt } from './su-chart';
 import { ShareAccessGuard } from './share-access.guard';
 import { ClanResolverService } from '../common/clan-resolver.service';
 import { AdminService } from '../admin/admin.service';
@@ -269,6 +270,10 @@ export class CepuController {
     @Query('chartPack') chartPack: string | undefined,
     @Query('profile') profile: string | undefined,
     @Query('beadLines') beadLines: string | undefined,
+    @Query('showFrame') showFrame: string | undefined,
+    @Query('framePt') framePt: string | undefined,
+    @Query('continueNote') continueNote: string | undefined,
+    @Query('showAvatars') showAvatars: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
@@ -288,6 +293,10 @@ export class CepuController {
         pack: chartPack === 'share' ? 'share' : 'exclusive',
         profile: profile === 'standard' ? 'standard' : profile === 'compact' ? 'compact' : undefined,
         beadLines: beadLines === '1' || beadLines === 'true',
+        showFrame: showFrame === '1' || showFrame === 'true',
+        framePt: suFrameWeightPt(framePt),
+        continueNote: continueNote === 'brief' || continueNote === 'full' ? continueNote : undefined,
+        showAvatars: showAvatars === '0' || showAvatars === 'false' ? false : showAvatars === '1' || showAvatars === 'true' ? true : undefined,
       });
       res.set({
         'Content-Type': 'application/pdf',
@@ -317,6 +326,10 @@ export class CepuController {
     @Query('chartPack') chartPack: string | undefined,
     @Query('profile') profile: string | undefined,
     @Query('beadLines') beadLines: string | undefined,
+    @Query('showFrame') showFrame: string | undefined,
+    @Query('framePt') framePt: string | undefined,
+    @Query('continueNote') continueNote: string | undefined,
+    @Query('showAvatars') showAvatars: string | undefined,
     @Res() res: Response,
   ) {
     const clanId = await this.resolveClanId(clanSlug);
@@ -332,6 +345,10 @@ export class CepuController {
         pack: chartPack === 'share' ? 'share' : 'exclusive',
         profile: profile === 'standard' ? 'standard' : profile === 'compact' ? 'compact' : undefined,
         beadLines: beadLines === '1' || beadLines === 'true',
+        showFrame: showFrame === '1' || showFrame === 'true',
+        framePt: suFrameWeightPt(framePt),
+        continueNote: continueNote === 'brief' || continueNote === 'full' ? continueNote : undefined,
+        showAvatars: showAvatars === '0' || showAvatars === 'false' ? false : showAvatars === '1' || showAvatars === 'true' ? true : undefined,
       });
       res.set({
         'Content-Type': 'application/msword',

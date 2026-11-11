@@ -7,6 +7,7 @@ import { EUROPEAN_GENERATIONS_PER_CHART, type EuropeanCell, type EuropeanChart }
 import { biographyAnchorId } from '@/utils/biography-index';
 import type { EuropeanPersonCaption } from '@/utils/european-chart-source';
 import { formatLifeYears } from '@/utils/genealogy-card';
+import { continueNoteMode, formatContinueNote, type ContinueNote, type ContinueNoteMode } from '@/utils/continue-note';
 
 const props = withDefaults(defineProps<{
   chart: EuropeanChart;
@@ -26,6 +27,8 @@ const props = withDefaults(defineProps<{
   script?: 'horizontal' | 'antique';
   /** 仿古时标题改为竖排居右。默认仍是横排居中。 */
   titleVertical?: boolean;
+  chartPages?: Record<number, number>;
+  continueNote?: ContinueNoteMode | null;
 }>(), {
   variant: 'canvas',
   showTitle: true,
@@ -33,6 +36,7 @@ const props = withDefaults(defineProps<{
   center: false,
   script: 'horizontal',
   titleVertical: false,
+  continueNote: null,
 });
 
 const emit = defineEmits<{
@@ -188,10 +192,20 @@ function openBiography(cell: EuropeanCell, chart: EuropeanChart) {
   });
 }
 
-function seamLabel(cell: EuropeanCell): string {
-  if (cell.role === 'carried-in') return '接上';
-  if (cell.role === 'carried-out') return '接下';
-  return '';
+function continueNotes(cell: EuropeanCell) {
+  const mode = continueNoteMode(props.continueNote, props.script);
+  const notes: ContinueNote[] = [];
+  for (const chartNo of cell.cutChartNos ?? []) notes.push({ kind: 'cut', chartNo, pageNo: props.chartPages?.[chartNo] ?? null });
+  const resumeNo = cell.resumeChartNo ?? null;
+  if (resumeNo) {
+    notes.push({
+      kind: 'resume',
+      chartNo: resumeNo,
+      pageNo: props.chartPages?.[resumeNo] ?? null,
+      fatherName: cell.resumeFatherName || cell.parentName || cell.name,
+    });
+  }
+  return notes.map((note) => ({ ...formatContinueNote(note, mode), href: `#tree-${note.chartNo}` }));
 }
 
 function linePieces(line: string): Array<{ text: string; kind: 'text' | 'num' | 'dash' }> {
@@ -273,13 +287,17 @@ function anchorId(cell: EuropeanCell): string | undefined {
                   :data-person-id="entry.cell.personId"
                   @click="emit('select', entry.cell.personId)"
                 >
-                  <span v-if="seamLabel(entry.cell)" class="ou-seam">{{ seamLabel(entry.cell) }}</span>
                   <span v-if="variant === 'book' && script === 'antique'" class="ou-flow ou-flow-antique">
                     <span class="ou-name">{{ entry.cell.name }}</span>
                     <span v-if="courtesyText(entry.cell)" class="ou-courtesy">{{ courtesyText(entry.cell) }}</span>
                     <span v-if="yearsText(entry.cell)" class="ou-years">{{ yearsText(entry.cell) }}</span>
                     <span v-if="kinText(entry.cell)" class="ou-kin">{{ kinText(entry.cell) }}</span>
                     <span v-if="recordText(entry.cell)" class="ou-bio">{{ recordText(entry.cell) }}</span>
+                    <span v-if="continueNotes(entry.cell).length" class="ou-seam" @click.stop>
+                      <span v-for="(note, noteIndex) in continueNotes(entry.cell)" :key="noteIndex">
+                        {{ note.lead }}<a class="ou-continue-link" :href="note.href">{{ note.linkText }}</a>{{ note.tail }}
+                      </span>
+                    </span>
                     <a
                       v-if="xrefLabel(entry.cell, sheet)"
                       class="ou-jump"
@@ -296,6 +314,11 @@ function anchorId(cell: EuropeanCell): string | undefined {
                       <span v-if="burialLine(entry.cell)" class="ou-kin">{{ burialLine(entry.cell) }}</span>
                       <span v-if="courtesyText(entry.cell)" class="ou-courtesy">{{ courtesyText(entry.cell) }}</span>
                       <span v-if="recordText(entry.cell)" class="ou-bio">{{ recordText(entry.cell) }}</span>
+                      <span v-if="continueNotes(entry.cell).length" class="ou-seam" @click.stop>
+                        <span v-for="(note, noteIndex) in continueNotes(entry.cell)" :key="noteIndex">
+                          {{ note.lead }}<a class="ou-continue-link" :href="note.href">{{ note.linkText }}</a>{{ note.tail }}
+                        </span>
+                      </span>
                       <a
                         v-if="xrefLabel(entry.cell, sheet)"
                         class="ou-jump"
@@ -310,6 +333,11 @@ function anchorId(cell: EuropeanCell): string | undefined {
                         :key="lineIndex"
                         class="ou-meta"
                       ><template v-for="(piece, pieceIndex) in linePieces(line)" :key="pieceIndex"><span v-if="piece.kind === 'num'" class="ou-num">{{ piece.text }}</span><span v-else-if="piece.kind === 'dash'" class="ou-dash">{{ piece.text }}</span><span v-else>{{ piece.text }}</span></template></span>
+                    </span>
+                    <span v-if="variant !== 'book' && continueNotes(entry.cell).length" class="ou-seam" @click.stop>
+                      <span v-for="(note, noteIndex) in continueNotes(entry.cell)" :key="noteIndex">
+                        {{ note.lead }}<a class="ou-continue-link" :href="note.href">{{ note.linkText }}</a>{{ note.tail }}
+                      </span>
                     </span>
                   </span>
                 </component>
@@ -722,15 +750,21 @@ function anchorId(cell: EuropeanCell): string | undefined {
 }
 
 .is-book .ou-seam {
-  position: absolute;
-  top: 3px;
-  left: 4px;
+  position: static;
+  display: block;
+  margin-top: 1mm;
   align-self: auto;
   color: #c0392b;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  writing-mode: horizontal-tb;
+}
+
+.is-book .ou-continue-link {
+  color: #c0392b;
+  text-decoration: underline;
 }
 
 .is-book.is-antique,
@@ -814,10 +848,8 @@ function anchorId(cell: EuropeanCell): string | undefined {
 }
 
 .is-book.is-antique .ou-seam {
-  writing-mode: vertical-rl;
-  text-orientation: upright;
-  top: 1px;
-  left: 1px;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
 }
 
 .is-book.is-antique .ou-sheet-foot {

@@ -156,6 +156,10 @@ export const cepuApi = {
       pack?: 'exclusive' | 'share';
       profile?: 'compact' | 'standard';
       beadLines?: boolean;
+      showFrame?: boolean;
+      framePt?: number;
+      continueNote?: 'brief' | 'full';
+      showAvatars?: boolean;
     } = {},
     share?: string,
   ) => {
@@ -170,6 +174,10 @@ export const cepuApi = {
     if (opts.pack === 'share') qs.set('chartPack', 'share');
     if (opts.profile) qs.set('profile', opts.profile);
     if (opts.beadLines) qs.set('beadLines', '1');
+    if (opts.showFrame) qs.set('showFrame', '1');
+    if (opts.showFrame && opts.framePt != null) qs.set('framePt', String(opts.framePt));
+    if (opts.continueNote) qs.set('continueNote', opts.continueNote);
+    if (opts.showAvatars != null) qs.set('showAvatars', opts.showAvatars ? '1' : '0');
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-pdf${q ? `?${q}` : ''}`;
@@ -186,6 +194,10 @@ export const cepuApi = {
       pack?: 'exclusive' | 'share';
       profile?: 'compact' | 'standard';
       beadLines?: boolean;
+      showFrame?: boolean;
+      framePt?: number;
+      continueNote?: 'brief' | 'full';
+      showAvatars?: boolean;
     } = {},
     share?: string,
   ) => {
@@ -197,6 +209,10 @@ export const cepuApi = {
     if (opts.pack === 'share') qs.set('chartPack', 'share');
     if (opts.profile) qs.set('profile', opts.profile);
     if (opts.beadLines) qs.set('beadLines', '1');
+    if (opts.showFrame) qs.set('showFrame', '1');
+    if (opts.showFrame && opts.framePt != null) qs.set('framePt', String(opts.framePt));
+    if (opts.continueNote) qs.set('continueNote', opts.continueNote);
+    if (opts.showAvatars != null) qs.set('showAvatars', opts.showAvatars ? '1' : '0');
     if (share) qs.set('share', share);
     const q = qs.toString();
     return `/api/cepu/${clanId}/export-word${q ? `?${q}` : ''}`;

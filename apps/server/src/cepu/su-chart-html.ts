@@ -1,7 +1,7 @@
 /**
  * 册谱苏谱的印刷 HTML。
- * 版本A横排简体：长房在左，文字在垂珠线右侧。
- * 版本B仿古线装：长房在右，文字横排在垂珠线左侧，世代栏竖排在右缘。
+ * 版本A横排简体：竖向 A4，长房在左，文字在垂珠线右侧，珠圈圆心在交叉点上。
+ * 版本B仿古横版：横向 A4，长房在右，文字竖排，不画兄弟横线。
  * 欧式不走这里。
  */
 import type { ShiluEntry } from './cepu.service';
@@ -11,9 +11,13 @@ import {
   groupSuCharts,
   nestSuBlocks,
   placeSuChart,
+  suFrameWeightPt,
   type SuBeadNode,
+  type SuBlock,
   type SuChart,
 } from './su-chart';
+import { continueNoteMode, formatContinueNote, type ContinueNote, type ContinueNoteMode } from './continue-note';
+import { chartPortraitUrl } from './chart-portrait';
 
 export interface SuBookOptions {
   electronic?: boolean;
@@ -21,6 +25,14 @@ export interface SuBookOptions {
   titleVertical?: boolean;
   pack?: 'exclusive' | 'share';
   beadLines?: boolean;
+  /** 版本A四边等粗的细线版框。仿古版不使用。 */
+  showFrame?: boolean;
+  /** 版本A版框线宽，四边同一数值。 */
+  framePt?: number;
+  /** 古式简注 brief，新式详注 full。 */
+  continueNote?: ContinueNoteMode;
+  /** 版本A人物头像。仿古版忽略。 */
+  showAvatars?: boolean;
 }
 
 interface Caption {
@@ -33,6 +45,7 @@ interface Caption {
   achievements?: string;
   biography?: string;
   citeBook?: '人物传' | '闺秀录';
+  avatarUrl?: string;
 }
 
 export function renderSuChartBook(entries: ShiluEntry[], options: SuBookOptions = {}): string {
@@ -41,14 +54,24 @@ export function renderSuChartBook(entries: ShiluEntry[], options: SuBookOptions 
   const titleVertical = script === 'antique' && options.titleVertical === true;
   const pack = options.pack === 'share' ? 'share' : 'exclusive';
   const beadLines = options.beadLines === true;
+  const showFrame = script !== 'antique' && options.showFrame === true;
+  const framePt = suFrameWeightPt(options.framePt);
+  const noteMode = continueNoteMode(options.continueNote, script);
+  const showAvatars = script !== 'antique' && options.showAvatars !== false;
   const { charts, captions } = chartsFromEntries(entries);
   const pages = groupSuCharts(charts, pack);
   if (pages.length === 0) return '<p class="vol-content">（该卷暂无世录条目）</p>';
-  return `<div class="su-book">${pages.map((group, index) => renderSheet(group, captions, index + 1, pages.length, electronic, script, titleVertical, beadLines)).join('')}</div>`;
+  const chartPages = new Map<number, number>();
+  pages.forEach((group, index) => {
+    for (const chart of group) chartPages.set(chart.index + 1, index + 1);
+  });
+  const bookClass = script === 'antique' ? 'su-book is-antique' : 'su-book';
+  return `<div class="${bookClass}">${pages.map((group, index) => renderSheet(group, captions, index + 1, pages.length, electronic, script, titleVertical, beadLines, showFrame, framePt, noteMode, chartPages, showAvatars)).join('')}</div>`;
 }
 
 export function suChartCss(): string {
   return `
+    @page su-landscape { size: A4 landscape; margin: 0; }
     .su-book { margin: -24mm -20mm 0; background: #fff; }
     .su-sheet {
       position: relative;
@@ -70,7 +93,7 @@ export function suChartCss(): string {
       writing-mode: horizontal-tb;
     }
     .su-sheet.is-even { padding: 18mm 14mm 16mm 12mm; }
-    .su-stage { flex: 1 1 auto; min-height: 0; width: 100%; }
+    .su-stage { flex: 1 1 auto; min-height: 0; width: 100%; position: relative; }
     .su-branch + .su-branch { margin-top: 8mm; }
     .su-anchor { display: block; width: 0; height: 0; overflow: hidden; }
     .su-title {
@@ -78,28 +101,40 @@ export function suChartCss(): string {
       letter-spacing: 0.28em; writing-mode: horizontal-tb;
     }
     .su-plate { position: relative; margin: 0 auto; writing-mode: horizontal-tb; }
-    .su-plate.is-antique { margin-left: auto; margin-right: 0; border: 0.7px solid #1c140c; }
-    .su-band { position: absolute; left: 0; right: 14mm; z-index: 1; height: 0; border-top: 0.6px solid #1c140c; }
+    .su-rail { position: absolute; top: 0; bottom: 0; z-index: 1; width: 0.4pt; background: #000; }
+    .su-band { position: absolute; left: 0; right: 14mm; z-index: 1; height: 0; border-top: 0.3pt solid #000; }
     .su-gen { position: absolute; z-index: 3; overflow: hidden; color: #5c564c; font-size: 11px; line-height: 1.2; letter-spacing: 0.06em; }
     .su-gen.is-boxed {
-      box-sizing: border-box; border: 1px solid #1a1208; background: #f4e7c8; color: #1a1208;
-      font-size: 13px; line-height: 1; letter-spacing: 0.14em; text-align: center;
+      box-sizing: border-box; border: none; background: #000; color: #fff;
+      font-size: 12px; line-height: 1.15; letter-spacing: 0.16em; text-align: center;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .su-rule { position: absolute; z-index: 1; background: #2a241c; }
-    .su-rule.is-v { width: 0.7px; }
-    .su-rule.is-h { height: 0.7px; }
+    .su-rule { position: absolute; z-index: 1; background: #000; }
+    .su-rule.is-v { width: 0.4pt; transform: translateX(-0.2pt); }
+    .su-rule.is-h { height: 0.4pt; transform: translateY(-0.2pt); }
     .su-bead {
-      position: absolute; z-index: 2; box-sizing: border-box; width: 2.6mm; height: 2.6mm;
-      margin-left: -1.3mm; margin-top: -1.3mm; border: 0.8px solid #1a1208; border-radius: 50%;
-      background: transparent;
+      position: absolute; z-index: 2; box-sizing: border-box; width: 2.4mm; height: 2.4mm;
+      margin-left: -1.2mm; margin-top: -1.2mm; border: 0.4pt solid #000; border-radius: 50%;
+      background: #fff;
     }
-    .su-seam {
-      position: absolute; z-index: 4; overflow: hidden; color: #c0392b;
-      font-size: 10px; font-weight: 700; line-height: 1.15; letter-spacing: 0.04em;
+    .su-person .su-seam {
+      position: static; display: block; margin: 0.4mm 0 0; color: #c0392b;
+      font-size: 10px; font-weight: 700; line-height: 1.3; letter-spacing: 0.02em;
+      white-space: normal;
     }
+    .su-continue { display: block; }
+    .su-vrun .su-seam { writing-mode: horizontal-tb; text-orientation: mixed; }
+    .su-continue-link, .su-person .su-seam a { color: #c0392b; text-decoration: underline; }
+    .su-seam.is-off { letter-spacing: 0; white-space: nowrap; }
     .su-person { position: absolute; z-index: 3; box-sizing: border-box; margin: 0; padding: 0; overflow: hidden; background: transparent; }
+    .su-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1mm; }
     .su-name { font-size: 15px; font-weight: 700; letter-spacing: 0.08em; line-height: 1.25; }
+    .su-avatar {
+      flex: 0 0 auto; width: 6.4mm; height: 6.4mm; margin: 0 1.2mm 0 0;
+      border-radius: 50%; object-fit: cover; background: transparent;
+    }
     .su-courtesy { font-size: 12px; font-weight: 600; line-height: 1.3; }
+    .su-meta { font-size: 11px; line-height: 1.2; }
     .su-years, .su-kin, .su-mark, .su-brief, .su-jump, .su-omit { margin: 0; line-height: 1.35; }
     .su-years, .su-kin, .su-mark { font-size: 11px; }
     .su-brief, .su-omit, a.su-jump, .su-jump { font-size: 10px; color: #555; }
@@ -109,27 +144,47 @@ export function suChartCss(): string {
       text-align: center; font-size: 12px; letter-spacing: 0.14em; color: #666;
       writing-mode: horizontal-tb;
     }
+    .su-sheet.is-modern-frame::before {
+      content: '';
+      position: absolute;
+      z-index: 6;
+      top: 10mm;
+      right: 8mm;
+      bottom: 12mm;
+      left: 8mm;
+      border-style: solid;
+      border-color: #000;
+      border-width: var(--su-frame-pt, 4pt);
+      pointer-events: none;
+    }
     .su-sheet.is-antique {
-      background: #f4e7c8; color: #1a1208;
+      width: 297mm; height: 210mm; padding: 8mm 8mm 10mm;
+      background: #fff; color: #000;
       font-family: 'SimSun', 'NSimSun', 'Songti SC', serif;
+      page: su-landscape;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .su-sheet.is-antique.is-title-vertical { padding-right: 22mm; }
-    .su-sheet.is-antique.is-title-vertical.is-even { padding-right: 24mm; padding-left: 12mm; }
-    .su-sheet.is-antique.is-title-vertical .su-title {
-      position: absolute; top: 16mm; right: 5mm; z-index: 5; width: 8mm; max-height: 78mm; margin: 0;
-      overflow: hidden; writing-mode: vertical-rl; text-orientation: upright; text-align: start;
-      letter-spacing: 0.18em; line-height: 1.15; font-size: 15px;
+    .su-sheet.is-antique .su-frame {
+      position: relative; box-sizing: border-box; height: 100%;
+      padding: 3mm 16mm 3mm 3mm;
+      border-top: 1.2pt solid #000; border-bottom: 1.2pt solid #000;
+      border-left: 0.6pt solid #000; border-right: 0.6pt solid #000;
     }
-    .su-sheet.is-antique .su-rule { background: #1a1208; }
+    .su-sheet.is-antique .su-title {
+      position: absolute; top: 4mm; right: 3mm; z-index: 5; width: 10mm; max-height: 160mm; margin: 0;
+      overflow: hidden; writing-mode: vertical-rl; text-orientation: upright; text-align: start;
+      letter-spacing: 0.16em; line-height: 1.15; font-size: 14px; font-weight: 600; color: #000;
+    }
     .su-sheet.is-antique .su-name,
+    .su-sheet.is-antique .su-meta,
     .su-sheet.is-antique .su-courtesy,
     .su-sheet.is-antique .su-years,
     .su-sheet.is-antique .su-kin,
     .su-sheet.is-antique .su-mark,
     .su-sheet.is-antique .su-brief,
-    .su-sheet.is-antique .su-foot { color: #1a1208; }
-    .su-sheet.is-antique a.su-jump { color: #1a1208; text-decoration: none; border-bottom: 0.4px solid #1a1208; }
+    .su-sheet.is-antique .su-foot { color: #000; }
+    .su-sheet.is-antique a.su-jump { color: #000; text-decoration: none; border-bottom: 0.4pt solid #000; }
+    .su-plate.is-antique { margin-left: auto; margin-right: 0; border: none; }
   `;
 }
 
@@ -142,13 +197,21 @@ function renderSheet(
   script: 'horizontal' | 'antique',
   titleVertical: boolean,
   beadLines: boolean,
+  showFrame: boolean,
+  framePt: number,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
+  showAvatars: boolean,
 ): string {
   const antique = script === 'antique';
   const classes = ['su-sheet', pageNumber % 2 === 0 ? 'is-even' : 'is-odd'];
-  if (antique) classes.push('is-antique');
-  if (titleVertical) classes.push('is-title-vertical');
-  const body = charts.map((chart) => renderBranch(chart, captions, electronic, script, beadLines)).join('');
-  return `<section class="${classes.join(' ')}"><div class="su-stage">${body}</div><p class="su-foot">第 ${pageNumber} 页 / 共 ${pageCount} 页</p></section>`;
+  if (antique) classes.push('is-antique', 'is-landscape', 'is-title-vertical');
+  else if (titleVertical) classes.push('is-title-vertical');
+  if (!antique && showFrame) classes.push('is-modern-frame');
+  const frameStyle = !antique && showFrame ? ` style="--su-frame-pt:${framePt}pt"` : '';
+  const body = charts.map((chart) => renderBranch(chart, captions, electronic, script, beadLines, noteMode, chartPages, showAvatars)).join('');
+  const stage = antique ? `<div class="su-stage su-frame">${body}</div>` : `<div class="su-stage">${body}</div>`;
+  return `<section class="${classes.join(' ')}"${frameStyle}>${stage}<p class="su-foot">第 ${pageNumber} 页 / 共 ${pageCount} 页</p></section>`;
 }
 
 function renderBranch(
@@ -157,11 +220,15 @@ function renderBranch(
   electronic: boolean,
   script: 'horizontal' | 'antique',
   beadLines: boolean,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
+  showAvatars: boolean,
 ): string {
   const nodes = nestSuBlocks(chart.blocks);
   const place = placeSuChart(nodes, script);
   const byIndex = indexNodes(nodes);
   const antique = script === 'antique';
+  const rail = place.railX == null ? '' : `<span class="su-rail" style="left:${place.railX}mm"></span>`;
   const bands = place.bands.map((y) => `<span class="su-band" style="top:${y}mm"></span>`).join('');
   const gens = place.generations.map((band) => {
     const mode = band.boxed ? 'vertical-rl' : 'horizontal-tb';
@@ -179,17 +246,13 @@ function renderBranch(
   const beads = beadLines
     ? place.beads.map((bead) => `<span class="su-bead" data-person-id="${esc(bead.personId)}" style="left:${bead.x}mm;top:${bead.y}mm"></span>`).join('')
     : '';
-  const seams = place.seams.map((seam) => {
-    const mode = antique ? 'vertical-rl' : 'horizontal-tb';
-    const orient = antique ? 'upright' : 'mixed';
-    return `<span class="su-seam is-${seam.kind === 'in' ? 'in' : 'out'}" style="left:${seam.x}mm;top:${seam.y}mm;width:${seam.w}mm;height:${seam.h}mm;writing-mode:${mode};text-orientation:${orient}">${seam.kind === 'in' ? '接上' : '接下'}</span>`;
-  }).join('');
   const people = place.people.map((person) => {
     const node = byIndex.get(person.index);
     if (!node) return '';
-    return renderPerson(node, person, chart, captions, electronic, beadLines);
+    return renderPerson(node, person, chart, captions, electronic, antique, noteMode, chartPages, showAvatars);
   }).join('');
-  return `<div class="su-branch"><a id="tree-su-${chart.index + 1}" class="su-anchor"></a><h2 class="su-title">第${chart.index + 1}图 · ${esc(chart.branchName)}</h2><div class="su-plate${antique ? ' is-antique' : ''}" data-reading="${place.reading}" style="width:${place.width}mm;height:${place.height}mm;writing-mode:horizontal-tb">${bands}${gens}${rules}${beads}${seams}${people}</div></div>`;
+  const titleName = antique ? chart.branchName.replace(/支世系$/, '支派') : chart.branchName;
+  return `<div class="su-branch"><a id="tree-su-${chart.index + 1}" class="su-anchor"></a><h2 class="su-title">第${chart.index + 1}图 · ${esc(titleName)}</h2><div class="su-plate${antique ? ' is-antique' : ''}" data-reading="${place.reading}" style="width:${place.width}mm;height:${place.height}mm;writing-mode:horizontal-tb">${rail}${bands}${gens}${rules}${beads}${people}</div></div>`;
 }
 
 function renderPerson(
@@ -198,7 +261,10 @@ function renderPerson(
   chart: SuChart,
   captions: Record<string, Caption>,
   electronic: boolean,
-  beadLines: boolean,
+  antique: boolean,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
+  showAvatars: boolean,
 ): string {
   const block = node.block;
   const caption = captions[block.personId];
@@ -211,9 +277,29 @@ function renderPerson(
   const jump = caption?.biography
     ? renderJump(block.name, chart.index + 1, caption.citeBook || '人物传', electronic)
     : '';
-  const omit = beadLines && node.omitBeads ? '<span class="su-omit">支繁，略垂珠线</span>' : '';
-  const style = `left:${person.textX}mm;top:${person.textY}mm;width:${person.textW}mm;height:${person.textH}mm;writing-mode:horizontal-tb`;
-  return `<article class="su-person${person.row === 0 ? ' is-head' : ''}"${anchor} data-person-id="${esc(block.personId)}" data-col="${person.col}" data-row="${person.row}" data-depth="${block.depth}" style="${style}"><div class="su-body"><div class="su-name-row"><span class="su-name">${esc(block.name)}</span>${courtesy ? `<span class="su-courtesy">（${esc(courtesy)}）</span>` : ''}</div>${years ? `<p class="su-years">${esc(years)}</p>` : ''}${block.spouseText ? `<p class="su-kin">${esc(block.spouseText)}</p>` : ''}${burial ? `<p class="su-kin">${esc(burial)}</p>` : ''}${block.mark ? `<p class="su-mark">${esc(block.mark)}</p>` : ''}</div>${jump}${brief ? `<p class="su-brief">${esc(brief)}</p>` : ''}${omit}</article>`;
+  const note = renderContinue(block, electronic, noteMode, chartPages);
+  const mode = antique ? 'vertical-rl' : 'horizontal-tb';
+  const orient = antique ? 'upright' : 'mixed';
+  const style = `left:${person.textX}mm;top:${person.textY}mm;width:${person.textW}mm;height:${person.textH}mm;writing-mode:${mode};text-orientation:${orient}`;
+  const avatar = !antique && showAvatars ? renderAvatar(caption?.avatarUrl) : '';
+  const body = antique
+    ? `<div class="su-vrun"><span class="su-name">${esc(block.name)}</span>${antiqueFields(node, caption).map((field) => `<span class="su-meta">${esc(field)}</span>`).join('')}${note}</div>${jump}`
+    : `<div class="su-body"><div class="su-name-row">${avatar}<span class="su-name">${esc(block.name)}</span>${courtesy ? `<span class="su-courtesy">（${esc(courtesy)}）</span>` : ''}</div>${years ? `<p class="su-years">${esc(years)}</p>` : ''}${block.spouseText ? `<p class="su-kin">${esc(block.spouseText)}</p>` : ''}${burial ? `<p class="su-kin">${esc(burial)}</p>` : ''}${block.mark ? `<p class="su-mark">${esc(block.mark)}</p>` : ''}${brief ? `<p class="su-brief">${esc(brief)}</p>` : ''}${note}</div>${jump}`;
+  return `<article class="su-person${person.row === 0 ? ' is-head' : ''}"${anchor} data-person-id="${esc(block.personId)}" data-col="${person.col}" data-row="${person.row}" data-depth="${block.depth}" style="${style}">${body}</article>`;
+}
+
+function antiqueFields(node: SuBeadNode, caption: Caption | undefined): string[] {
+  const fields: string[] = [];
+  if (caption?.courtesyName) fields.push(`字${caption.courtesyName}`);
+  if (caption?.artName) fields.push(`号${caption.artName}`);
+  const years = lifeYears(caption);
+  if (years) fields.push(years);
+  if (node.block.spouseText) fields.push(node.block.spouseText);
+  const children = node.children.map((child) => child.block.name).filter((name) => name.length > 0);
+  if (children.length) fields.push(`子${children.join('、')}`);
+  if (caption?.burialPlace) fields.push(`葬${caption.burialPlace}`);
+  if (node.block.mark) fields.push(node.block.mark);
+  return fields;
 }
 
 function indexNodes(roots: readonly SuBeadNode[]): Map<number, SuBeadNode> {
@@ -224,6 +310,42 @@ function indexNodes(roots: readonly SuBeadNode[]): Map<number, SuBeadNode> {
   };
   roots.forEach(visit);
   return map;
+}
+
+function renderContinue(
+  block: SuBlock,
+  electronic: boolean,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
+): string {
+  const notes: ContinueNote[] = [];
+  for (const chartNo of block.cutChartNos ?? []) {
+    notes.push({ kind: 'cut', chartNo, pageNo: chartPages.get(chartNo) ?? null });
+  }
+  if (block.resumeChartNo) {
+    notes.push({
+      kind: 'resume',
+      chartNo: block.resumeChartNo,
+      pageNo: chartPages.get(block.resumeChartNo) ?? null,
+      fatherName: block.resumeFatherName || block.parentName || block.name,
+    });
+  }
+  if (!notes.length) return '';
+  const lines = notes.map((note) => {
+    const parts = formatContinueNote(note, noteMode);
+    const href = `#tree-su-${note.chartNo}`;
+    const link = electronic
+      ? `<a class="su-continue-link" href="${esc(href)}">${esc(parts.linkText)}</a>`
+      : esc(parts.linkText);
+    return `<span class="su-continue">${esc(parts.lead)}${link}${esc(parts.tail)}</span>`;
+  }).join('');
+  return `<p class="su-seam">${lines}</p>`;
+}
+
+function renderAvatar(value: string | undefined): string {
+  const src = chartPortraitUrl(value);
+  if (!src) return '';
+  return `<img class="su-avatar" src="${esc(src)}" alt="" onerror="this.remove()" />`;
 }
 
 function renderJump(name: string, chartNo: number, book: string, electronic: boolean): string {
@@ -285,6 +407,7 @@ function chartsFromEntries(entries: ShiluEntry[]): { charts: SuChart[]; captions
       achievements: text(entry.achievements),
       biography: text(entry.biography),
       citeBook: entry.gender === 'female' ? '闺秀录' : '人物传',
+      avatarUrl: chartPortraitUrl(entry.avatar_url) || undefined,
     };
   }
   const linked = new Set<string>();

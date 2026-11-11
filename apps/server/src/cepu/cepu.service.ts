@@ -4,6 +4,7 @@ import { Gender } from '@prisma/client';
 import * as puppeteer from 'puppeteer-core';
 import { ouChartCss, renderOuChartBook } from './ou-chart-html';
 import { renderSuChartBook, suChartCss } from './su-chart-html';
+import { chartPortraitUrl } from './chart-portrait';
 import { biographyCss, renderBiographyBook } from './biography-html';
 import { nameIndexCss, renderNameIndexBook } from './name-index-html';
 import { catalogCss, renderCatalogBook, renderGenerationIndex, renderPlaceholder } from './catalog-html';
@@ -48,6 +49,8 @@ export interface ShiluEntry {
   children: { person_id?: string; name: string; gender: string; rank?: number; child_type?: string }[];
   /** 人物传右侧配图。没有照片就是空数组，文字占满行宽。 */
   figures?: { url: string; caption: string }[];
+  /** 真实头像地址。没有、或只是生成占位图时不设。 */
+  avatar_url?: string;
   premature: boolean;
 }
 
@@ -480,7 +483,16 @@ export class CepuService {
   private async buildShiluEntries(clanId: bigint, config: ShiluConfig): Promise<ShiluEntry[]> {
     const persons = await this.prisma.person.findMany({
       where: { clan_id: clanId, deleted_at: null },
-      select: { id: true, full_name: true, gender: true, birth_date: true, death_date: true, is_living: true },
+      select: {
+        id: true,
+        full_name: true,
+        gender: true,
+        birth_date: true,
+        death_date: true,
+        is_living: true,
+        avatar_url: true,
+        thumbnail_url: true,
+      },
     });
     if (persons.length === 0) return [];
 
@@ -595,6 +607,7 @@ export class CepuService {
 
     const bioById = new Map(bios.map((b) => [idStr(b.person_id), b]));
     const mediaByPerson = new Map<string, { url: string; caption: string; rank: number }[]>();
+    const portraitByPerson = new Map<string, string>();
     for (const link of mediaLinks) {
       const pid = idStr(link.person_id);
       const url = String(link.media.display_url || link.media.file_url || '').trim();
@@ -602,6 +615,10 @@ export class CepuService {
       const caption = String(link.media.description || link.media.category || '照片').trim();
       if (!mediaByPerson.has(pid)) mediaByPerson.set(pid, []);
       mediaByPerson.get(pid)!.push({ url, caption, rank: this.figureRank(link.media.category) });
+      if (!portraitByPerson.has(pid) && /人像|肖像|头像|标准照/.test(String(link.media.category || ''))) {
+        const portrait = chartPortraitUrl(url);
+        if (portrait) portraitByPerson.set(pid, portrait);
+      }
     }
     for (const figures of mediaByPerson.values()) {
       figures.sort((a, b) => a.rank - b.rank);
@@ -736,6 +753,7 @@ export class CepuService {
         children: uniqueChildren,
         premature,
         figures: (mediaByPerson.get(d) || []).map(({ url, caption }) => ({ url, caption })),
+        avatar_url: chartPortraitUrl(p.thumbnail_url) || chartPortraitUrl(p.avatar_url) || portraitByPerson.get(d) || undefined,
       });
     }
 
@@ -942,6 +960,10 @@ export class CepuService {
       pack?: 'exclusive' | 'share';
       profile?: BookProfile;
       beadLines?: boolean;
+      showFrame?: boolean;
+      framePt?: number;
+      continueNote?: 'brief' | 'full';
+      showAvatars?: boolean;
     } = {},
   ): Promise<Buffer> {
     const [clan, volumes] = await Promise.all([
@@ -961,6 +983,10 @@ export class CepuService {
       pack: opts.pack,
       profile: opts.profile ?? await this.getBookProfile(clanId),
       beadLines: opts.beadLines,
+      showFrame: opts.script === 'antique' ? false : opts.showFrame,
+      framePt: opts.framePt,
+      continueNote: opts.continueNote,
+      showAvatars: opts.script === 'antique' ? false : opts.showAvatars !== false,
     });
 
     const headerText = this.esc(opts.header || `${clan.name} · ${new Date().toLocaleDateString('zh-CN')}`);
@@ -1006,6 +1032,7 @@ export class CepuService {
       const pdf = await page.pdf({
         format: 'A4',
         printBackground: true,
+        preferCSSPageSize: opts.script === 'antique',
         // 欧式页自己留天头地脚和装订边，不再叠一层浏览器页边。
         margin: ouEdition
           ? { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' }
@@ -1036,6 +1063,10 @@ export class CepuService {
       pack?: 'exclusive' | 'share';
       profile?: BookProfile;
       beadLines?: boolean;
+      showFrame?: boolean;
+      framePt?: number;
+      continueNote?: 'brief' | 'full';
+      showAvatars?: boolean;
     } = {},
   ): Promise<Buffer> {
     const [clan, volumes] = await Promise.all([
@@ -1055,6 +1086,10 @@ export class CepuService {
       pack: opts.pack,
       profile: opts.profile ?? await this.getBookProfile(clanId),
       beadLines: opts.beadLines,
+      showFrame: opts.script === 'antique' ? false : opts.showFrame,
+      framePt: opts.framePt,
+      continueNote: opts.continueNote,
+      showAvatars: opts.script === 'antique' ? false : opts.showAvatars !== false,
     });
 
     // 是否启用世系表开本(强制 > 卷配置),决定是否走中式开本页面尺寸
@@ -1397,6 +1432,10 @@ ${sections.join('')}
       pack?: 'exclusive' | 'share';
       profile?: BookProfile;
       beadLines?: boolean;
+      showFrame?: boolean;
+      framePt?: number;
+      continueNote?: 'brief' | 'full';
+      showAvatars?: boolean;
     } = {},
   ): Promise<string[]> {
     const profile = options.profile ?? 'compact';
@@ -1470,6 +1509,10 @@ ${sections.join('')}
       titleVertical?: boolean;
       pack?: 'exclusive' | 'share';
       beadLines?: boolean;
+      showFrame?: boolean;
+      framePt?: number;
+      continueNote?: 'brief' | 'full';
+      showAvatars?: boolean;
     },
     lineageEntries: () => Promise<ShiluEntry[]>,
   ): Promise<string> {
@@ -1517,6 +1560,7 @@ ${sections.join('')}
         script: options.script,
         titleVertical: options.titleVertical,
         pack: options.pack,
+        continueNote: options.continueNote,
       });
       const bookHtml = `<div id="${this.esc(entry.anchor)}">${book}</div>`;
       return options.script === 'antique' ? `<div class="book-prose is-antique">${title}</div>${bookHtml}` : `<div id="${this.esc(entry.anchor)}">${title}${book}</div>`;
@@ -1544,6 +1588,10 @@ ${sections.join('')}
       titleVertical: options.titleVertical,
       pack: options.pack,
       beadLines: options.beadLines,
+      showFrame: options.script === 'antique' ? false : options.showFrame,
+      framePt: options.framePt,
+      continueNote: options.continueNote,
+      showAvatars: options.script === 'antique' ? false : options.showAvatars !== false,
     });
     const bookHtml = `<div id="${this.esc(entry.anchor)}">${book}</div>`;
     return options.script === 'antique' ? `<div class="book-prose is-antique">${title}</div>${bookHtml}` : `<div id="${this.esc(entry.anchor)}">${title}${book}</div>`;

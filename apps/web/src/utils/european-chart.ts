@@ -60,6 +60,13 @@ export interface EuropeanCell {
   spouseText: string;
   /** 过继、出继等。亲子是空串。不占行。 */
   mark: string;
+  /** 父亲姓名。接上时写入括号。 */
+  parentName?: string;
+  /** 本格截断后要去的图号，从 1 起。 */
+  cutChartNos?: number[];
+  /** 本格由哪一张图接上来。 */
+  resumeChartNo?: number | null;
+  resumeFatherName?: string;
 }
 
 export interface EuropeanChart {
@@ -116,6 +123,7 @@ export function buildEuropeanCharts(
     if (end >= maxGen) break;
     start = end;
   }
+  linkEuropeanContinuations(charts);
   return charts;
 }
 
@@ -369,6 +377,7 @@ function buildChart(
     let role: EuropeanCellRole = 'origin';
     if (index > 0 && person.generation === windowFrom) role = 'carried-in';
     else if (person.generation === windowTo && continuesPast(id)) role = 'carried-out';
+    const parentId = prepared.primaryParent.get(id);
     cells.push({
       personId: person.id,
       name: person.name,
@@ -378,6 +387,10 @@ function buildChart(
       role,
       spouseText: person.spouseText,
       mark: person.mark,
+      parentName: parentId ? prepared.byId.get(parentId)?.name ?? '' : '',
+      cutChartNos: [],
+      resumeChartNo: null,
+      resumeFatherName: '',
     });
 
     let cursor = row;
@@ -414,6 +427,35 @@ function buildChart(
     rowCount,
     cells,
   };
+}
+
+function linkEuropeanContinuations(charts: EuropeanChart[]) {
+  for (const chart of charts) {
+    for (const cell of chart.cells) {
+      cell.cutChartNos = [];
+      cell.resumeChartNo = null;
+      cell.resumeFatherName = '';
+    }
+  }
+  for (const chart of charts) {
+    for (const cell of chart.cells) {
+      if (cell.role === 'carried-out') {
+        const targets = charts.filter((item) => item.index > chart.index && item.cells.some((other) => (
+          other.personId === cell.personId && other.role === 'carried-in'
+        )));
+        cell.cutChartNos = [...new Set(targets.map((item) => item.index + 1))];
+      }
+      if (cell.role === 'carried-in') {
+        const prev = charts.find((item) => item.index < chart.index && item.cells.some((other) => (
+          other.personId === cell.personId && other.role === 'carried-out'
+        )));
+        if (prev) {
+          cell.resumeChartNo = prev.index + 1;
+          cell.resumeFatherName = cell.parentName || cell.name;
+        }
+      }
+    }
+  }
 }
 
 function localRoots(
@@ -475,7 +517,9 @@ export function fitEuropeanChartsToPages(
   for (const chart of charts) {
     for (const piece of splitChartToRows(chart, limit)) pieces.push(piece);
   }
-  return pieces.map((chart, index) => ({ ...chart, index }));
+  const pages = pieces.map((chart, index) => ({ ...chart, index }));
+  linkEuropeanContinuations(pages);
+  return pages;
 }
 
 function splitChartToRows(chart: EuropeanChart, maxRows: number): EuropeanChart[] {

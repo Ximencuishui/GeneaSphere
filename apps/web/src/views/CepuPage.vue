@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -27,6 +27,8 @@ import BookCatalog from '@/components/BookCatalog.vue';
 import GenerationIndexBook from '@/components/GenerationIndexBook.vue';
 import { europeanChartsFromShilu, europeanViewFromShilu } from '@/utils/european-chart-shilu';
 import { buildBookCatalog, findCatalogVolume, isLadiesVolume, type BookProfile, type CatalogEntry } from '@/utils/book-catalog';
+import { SU_FRAME_WEIGHTS_PT, suFrameWeightPt } from '@/utils/su-chart';
+import type { ContinueNoteMode } from '@/utils/continue-note';
 
 /**
  * 册谱页面（《册谱模块需求文档》一期核心闭环）
@@ -76,8 +78,20 @@ const titleVertical = ref(false);
 const chartPack = ref<'exclusive' | 'share'>('exclusive');
 const bookZoom = ref(1);
 const bookContinuous = ref(false);
-/** 只作用于苏式。切到欧式时按钮隐藏，状态留着，切回来还是上次的选择。 */
-const suBeadLines = ref(false);
+/** 只作用于苏式。切到欧式时按钮隐藏，状态留着，切回来还是上次的选择。默认画出垂珠。 */
+const suBeadLines = ref(true);
+/** 版本A页面外围的均匀细线版框。仿古版不使用。默认显示。 */
+const suShowFrame = ref(true);
+/** 版本A版框线宽，四边同一数值，默认 4pt。 */
+const suFramePt = ref(4);
+/** 版本A人物头像。仿古版不使用。默认显示已有头像。 */
+const suShowAvatars = ref(true);
+/** 接续标注。版本A默认新式详注，版本B默认古式简注。欧式跟同一个开关。 */
+const continueNote = ref<ContinueNoteMode>('full');
+watch(bookScript, (script) => {
+  continueNote.value = script === 'antique' ? 'brief' : 'full';
+});
+const suFrameWeights = SU_FRAME_WEIGHTS_PT;
 const bookZoomLabel = computed(() => `${Math.round(bookZoom.value * 100)}%`);
 
 function zoomBook(delta: number) {
@@ -551,6 +565,10 @@ async function doExportPdf() {
         pack: chartPack.value,
         profile: bookProfile.value,
         beadLines: suBeadLines.value,
+        showFrame: bookScript.value === 'horizontal' && suShowFrame.value,
+        framePt: suFrameWeightPt(suFramePt.value),
+        continueNote: continueNote.value,
+        showAvatars: bookScript.value === 'horizontal' && suShowAvatars.value,
       },
       shareToken.value,
     );
@@ -582,6 +600,10 @@ async function doExportWord() {
           pack: chartPack.value,
           profile: bookProfile.value,
           beadLines: suBeadLines.value,
+          showFrame: bookScript.value === 'horizontal' && suShowFrame.value,
+          framePt: suFrameWeightPt(suFramePt.value),
+          continueNote: continueNote.value,
+          showAvatars: bookScript.value === 'horizontal' && suShowAvatars.value,
         },
         shareToken.value,
       ),
@@ -1060,6 +1082,32 @@ onMounted(async () => {
             :aria-pressed="suBeadLines"
             @click="suBeadLines = !suBeadLines"
           >{{ suBeadLines ? '隐藏垂珠连线' : '显示垂珠连线' }}</button>
+          <button
+            v-if="isSuChart && bookScript === 'horizontal'"
+            type="button"
+            class="su-bead-toggle su-frame-toggle"
+            :class="{ 'is-active': suShowFrame }"
+            :aria-pressed="suShowFrame"
+            @click="suShowFrame = !suShowFrame"
+          >{{ suShowFrame ? '隐藏版框' : '显示版框' }}</button>
+          <label v-if="isSuChart && bookScript === 'horizontal' && suShowFrame" class="su-frame-weight">
+            版框
+            <select v-model.number="suFramePt" aria-label="版框线宽">
+              <option v-for="weight in suFrameWeights" :key="weight" :value="weight">{{ weight }}pt</option>
+            </select>
+          </label>
+          <button
+            v-if="isSuChart && bookScript === 'horizontal'"
+            type="button"
+            class="su-bead-toggle su-avatar-toggle"
+            :class="{ 'is-active': suShowAvatars }"
+            :aria-pressed="suShowAvatars"
+            @click="suShowAvatars = !suShowAvatars"
+          >{{ suShowAvatars ? '隐藏人物头像' : '显示人物头像' }}</button>
+          <el-radio-group v-if="isLineageChart" v-model="continueNote" class="continue-note-toggle" size="small">
+            <el-radio-button value="brief">古式简注</el-radio-button>
+            <el-radio-button value="full">新式详注</el-radio-button>
+          </el-radio-group>
           <el-checkbox v-if="bookScript === 'antique'" v-model="titleVertical" size="small">标题竖排居右</el-checkbox>
           <el-radio-group v-if="isLineageChart" v-model="chartPack" size="small">
             <el-radio-button value="exclusive">一图独占一页</el-radio-button>
@@ -1214,6 +1262,10 @@ onMounted(async () => {
                 :zoom="bookZoom"
                 :continuous="bookContinuous"
                 :bead-lines="suBeadLines"
+                :show-frame="bookScript === 'horizontal' && suShowFrame"
+                :frame-pt="suFramePt"
+                :continue-note="continueNote"
+                :show-avatars="bookScript === 'horizontal' && suShowAvatars"
                 :show-toolbar="false"
                 @select="openChartPerson"
                 @open-bio="openBiographyFromChart"
@@ -1301,6 +1353,7 @@ onMounted(async () => {
                 :pack="chartPack"
                 :zoom="bookZoom"
                 :continuous="bookContinuous"
+                :continue-note="continueNote"
                 :show-toolbar="false"
                 @select="openChartPerson"
                 @open-bio="openBiographyFromChart"
@@ -1417,7 +1470,7 @@ onMounted(async () => {
           <div class="form-hint">
             选择"世系表开本"时，PDF / Word 均按传统中式开本输出（双层边框、世代竖列、姓名红色楷体、左下角竖排标题）；
             欧式按五世一表输出表格，一图接一图，末世回到下一图首列。
-            苏式是否带垂珠连线，跟页面上的开关一致。
+            苏式是否带垂珠连线、版本A是否带均匀细线版框及其线宽，跟页面上的开关一致。
           </div>
         </el-form-item>
         <el-form-item label="欧式文字">
@@ -1532,6 +1585,22 @@ onMounted(async () => {
   padding: 4px 10px;
   cursor: pointer;
 }
+.su-frame-weight {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #3e3a35;
+}
+.su-frame-weight select {
+  font-family: inherit;
+  font-size: 13px;
+  color: #3e3a35;
+  background: #fff;
+  border: 1px solid #d2c6b2;
+  border-radius: 4px;
+  padding: 3px 6px;
+}
 .book-zoom-bar span {
   min-width: 48px;
   text-align: center;
@@ -1540,7 +1609,7 @@ onMounted(async () => {
   font-size: 13px;
 }
 @media print {
-  .book-zoom-bar, .su-bead-toggle { display: none; }
+  .book-zoom-bar, .su-bead-toggle, .su-frame-weight, .su-avatar-toggle, .continue-note-toggle { display: none; }
 }
 .cepu-header {
   display: flex;

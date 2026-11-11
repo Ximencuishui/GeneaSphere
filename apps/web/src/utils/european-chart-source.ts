@@ -27,6 +27,8 @@ export interface EuropeanPersonCaption {
   biographyChartNo?: number;
   /** 行传所在卷。女子指向闺秀录，其余指向人物传。 */
   citeBook?: '人物传' | '闺秀录';
+  /** 真实头像。空则世系图不画头像。 */
+  avatarUrl?: string;
 }
 
 export interface EuropeanViewModel {

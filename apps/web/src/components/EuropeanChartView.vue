@@ -8,6 +8,7 @@ import { EUROPEAN_ROWS_PER_PAGE, fitEuropeanChartsToPages, type EuropeanChart } 
 import type { EuropeanPersonCaption } from '@/utils/european-chart-source';
 import { indexChartAppearances } from '@/utils/biography-index';
 import EuropeanChartSheet from '@/components/EuropeanChartSheet.vue';
+import { continueNoteMode, type ContinueNoteMode } from '@/utils/continue-note';
 
 const props = withDefaults(defineProps<{
   charts: EuropeanChart[];
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<{
   /** 传入时由册谱顶部记住。开启后取消分页隔离。缺省 null，沿用组件内部状态。 */
   continuous?: boolean | null;
   showToolbar?: boolean;
+  continueNote?: ContinueNoteMode | null;
 }>(), {
   variant: 'canvas',
   script: 'horizontal',
@@ -31,6 +33,7 @@ const props = withDefaults(defineProps<{
   pack: 'exclusive',
   continuous: null,
   showToolbar: true,
+  continueNote: null,
 });
 
 const emit = defineEmits<{
@@ -62,6 +65,14 @@ function groupSheets(charts: EuropeanChart[], pack: 'exclusive' | 'share'): Euro
 }
 
 const sheetGroups = computed(() => groupSheets(bookCharts.value, props.pack));
+const noteMode = computed(() => continueNoteMode(props.continueNote, props.script));
+const chartPages = computed(() => {
+  const map: Record<number, number> = {};
+  sheetGroups.value.forEach((group, index) => {
+    for (const chart of group) map[chart.index + 1] = index + 1;
+  });
+  return map;
+});
 
 const sheetCaptions = computed(() => {
   if (props.variant !== 'book' || !props.captions) return props.captions;
@@ -124,6 +135,8 @@ function onSelect(personId: string) {
         :center="variant === 'book' && continuous && !flow"
         :script="script"
         :title-vertical="titleVertical"
+        :chart-pages="chartPages"
+        :continue-note="noteMode"
         @select="onSelect"
         @open-bio="emit('open-bio', $event)"
       />

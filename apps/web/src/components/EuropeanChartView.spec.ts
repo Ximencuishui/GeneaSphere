@@ -42,6 +42,7 @@ function chartFixture(): EuropeanChart[] {
         role: 'carried-out',
         spouseText: '',
         mark: '过继',
+        cutChartNos: [2],
       },
     ],
   }];
@@ -65,7 +66,8 @@ describe('EuropeanChartView', () => {
     expect(wrapper.get('td[rowspan="2"]').text()).toContain('1480-1542');
     expect(wrapper.get('td[rowspan="2"]').text()).toContain('配王氏');
     expect(wrapper.text()).toContain('过继');
-    expect(wrapper.text()).toContain('接下');
+    expect(wrapper.text()).toContain('支另见图，见第2图');
+    expect(wrapper.text()).not.toContain('接下');
     expect(wrapper.get('.ou-name').classes()).toContain('ou-name');
     expect(wrapper.get('.ou-meta').classes()).toContain('ou-meta');
     expect(wrapper.findAll('tbody tr')).toHaveLength(2);
@@ -137,7 +139,7 @@ describe('EuropeanChartView', () => {
     expect(wrapper.get('.ou-sheet').classes()).toContain('is-title-vertical');
     expect(wrapper.findAll('th').map((node) => node.text())).toEqual(['第五世', '第四世', '第三世', '第二世', '第一世']);
     expect(wrapper.text()).toContain('第1图 · 第一世至第五世');
-    expect(wrapper.text()).toContain('接下');
+    expect(wrapper.text()).not.toContain('接下');
     expect(wrapper.text()).not.toContain('不该整段印进格子');
     const flow = wrapper.get('td.is-root-gen .ou-flow');
     const text = flow.text();
@@ -189,6 +191,8 @@ describe('EuropeanChartView', () => {
             role: 'carried-in',
             spouseText: '',
             mark: '',
+            resumeChartNo: 1,
+            resumeFatherName: '第五世',
           }],
         }],
       },

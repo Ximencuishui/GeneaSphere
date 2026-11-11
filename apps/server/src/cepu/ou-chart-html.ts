@@ -10,6 +10,7 @@ import {
   type EuropeanChart,
 } from './european-chart';
 import { biographyAnchorId, treeAnchorId } from './biography-index';
+import { continueNoteMode, formatContinueNote, type ContinueNote, type ContinueNoteMode } from './continue-note';
 import type { ShiluEntry } from './cepu.service';
 
 interface ChartCaption {
@@ -34,6 +35,7 @@ export interface OuBookOptions {
   script?: 'horizontal' | 'antique';
   titleVertical?: boolean;
   pack?: 'exclusive' | 'share';
+  continueNote?: ContinueNoteMode;
 }
 
 export function renderOuChartBook(entries: ShiluEntry[], options: OuBookOptions = {}): string {
@@ -42,9 +44,14 @@ export function renderOuChartBook(entries: ShiluEntry[], options: OuBookOptions 
   const titleVertical = script === 'antique' && options.titleVertical === true;
   const pack = options.pack === 'share' ? 'share' : 'exclusive';
   const { charts, captions } = chartsFromEntries(entries);
+  const noteMode = continueNoteMode(options.continueNote, script);
   const pages = groupCharts(fitEuropeanChartsToPages(charts), pack);
   if (pages.length === 0) return '<p class="vol-content">（该卷暂无世录条目）</p>';
-  return `<div class="ou-book">${pages.map((group, index) => renderSheet(group, captions, index + 1, pages.length, electronic, script, titleVertical)).join('')}</div>`;
+  const chartPages = new Map<number, number>();
+  pages.forEach((group, index) => {
+    for (const chart of group) chartPages.set(chart.index + 1, index + 1);
+  });
+  return `<div class="ou-book">${pages.map((group, index) => renderSheet(group, captions, index + 1, pages.length, electronic, script, titleVertical, noteMode, chartPages)).join('')}</div>`;
 }
 
 function groupCharts(charts: EuropeanChart[], pack: 'exclusive' | 'share'): EuropeanChart[][] {
@@ -193,16 +200,16 @@ export function ouChartCss(): string {
       white-space: nowrap;
     }
     .ou-seam {
-      position: absolute;
-      top: 2px;
-      left: 3px;
+      display: block;
+      margin-top: 1mm;
       writing-mode: horizontal-tb;
       font-size: 8pt;
       font-weight: 700;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.02em;
       color: #c0392b;
-      line-height: 1;
+      line-height: 1.35;
     }
+    .ou-continue-link { color: #c0392b; text-decoration: underline; font-size: 8pt; font-weight: 700; }
     .ou-sheet.is-antique,
     .ou-sheet.is-antique .ou-table,
     .ou-sheet.is-antique .ou-sheet-title,
@@ -265,10 +272,8 @@ export function ouChartCss(): string {
     .ou-sheet.is-antique .ou-xref,
     .ou-sheet.is-antique a.book-jump { font-size: 10px; }
     .ou-sheet.is-antique .ou-seam {
-      writing-mode: vertical-rl;
-      text-orientation: upright;
-      top: 1px;
-      left: 1px;
+      writing-mode: horizontal-tb;
+      text-orientation: mixed;
     }
     .ou-sheet.is-antique .ou-sheet-foot { writing-mode: horizontal-tb; }
     .book-prose.is-antique {
@@ -351,12 +356,14 @@ function renderSheet(
   electronic: boolean,
   script: 'horizontal' | 'antique',
   titleVertical: boolean,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
 ): string {
   const side = pageNumber % 2 === 0 ? 'is-even' : 'is-odd';
   const antique = script === 'antique' ? ' is-antique' : '';
   const titled = titleVertical ? ' is-title-vertical' : '';
   const blocks = charts.map((chart) => {
-    const table = renderTable(chart, captions, electronic, script);
+    const table = renderTable(chart, captions, electronic, script, noteMode, chartPages);
     const heading = `<a id="${treeAnchorId(chart.index + 1)}" class="ou-tree-anchor"></a><h2 class="ou-sheet-title">${chartHeading(chart)}</h2>`;
     return { heading, table };
   });
@@ -374,6 +381,8 @@ function renderTable(
   captions: Record<string, ChartCaption>,
   electronic: boolean,
   script: 'horizontal' | 'antique',
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
 ): string {
   const colCount = EUROPEAN_GENERATIONS_PER_CHART;
   const displayCols = Array.from({ length: colCount }, (_, index) => colCount - 1 - index);
@@ -385,7 +394,7 @@ function renderTable(
     const cells: string[] = [];
     for (const col of displayCols) {
       const cell = byStart.get(`${col}:${row}`);
-      if (cell) cells.push(renderCell(cell, captions, chart, electronic, script));
+      if (cell) cells.push(renderCell(cell, captions, chart, electronic, script, noteMode, chartPages));
       else if (!covered(chart, col, row)) cells.push('<td class="ou-blank"></td>');
     }
     rows.push(`<tr>${cells.join('')}</tr>`);
@@ -405,23 +414,53 @@ function renderCell(
   chart: EuropeanChart,
   electronic: boolean,
   script: 'horizontal' | 'antique',
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
 ): string {
-  const seam = cell.role === 'carried-in' ? '接上' : cell.role === 'carried-out' ? '接下' : '';
   const caption = captions[cell.personId];
   const years = lifeYears(caption);
   const record = recordText(caption);
   const xref = crossReference(cell, caption, chart.index + 1, electronic);
   const root = cell.col === 0 ? ' is-root-gen' : '';
-  const seamHtml = seam ? `<span class="ou-seam">${seam}</span>` : '';
+  const seamHtml = renderOuContinue(cell, electronic, noteMode, chartPages);
   if (script === 'antique') {
     const courtesy = antiqueCourtesy(cell, caption);
     const kin = [cell.spouseText, caption?.burialPlace ? `葬${caption.burialPlace}` : ''].filter(Boolean).join('');
-    return `<td class="${root.trim()}" rowspan="${cell.rowSpan}"><div class="ou-person">${seamHtml}<span class="ou-flow"><span class="ou-name">${esc(cell.name)}</span>${courtesy ? `<span class="ou-courtesy">${esc(courtesy)}</span>` : ''}${years ? `<span class="ou-years">${esc(years)}</span>` : ''}${kin ? `<span class="ou-kin">${esc(kin)}</span>` : ''}${record ? `<span class="ou-bio">${esc(record)}</span>` : ''}${xref}</span></div></td>`;
+    return `<td class="${root.trim()}" rowspan="${cell.rowSpan}"><div class="ou-person"><span class="ou-flow"><span class="ou-name">${esc(cell.name)}</span>${courtesy ? `<span class="ou-courtesy">${esc(courtesy)}</span>` : ''}${years ? `<span class="ou-years">${esc(years)}</span>` : ''}${kin ? `<span class="ou-kin">${esc(kin)}</span>` : ''}${record ? `<span class="ou-bio">${esc(record)}</span>` : ''}${seamHtml}${xref}</span></div></td>`;
   }
   const courtesy = courtesyText(cell, caption);
   const spouse = cell.spouseText ? `<span class="ou-kin">${esc(cell.spouseText)}</span>` : '';
   const burial = caption?.burialPlace ? `<span class="ou-kin">${esc(`葬${caption.burialPlace}`)}</span>` : '';
-  return `<td class="${root.trim()}" rowspan="${cell.rowSpan}"><div class="ou-person">${seamHtml}<span class="ou-flow"><span class="ou-name">${esc(cell.name)}</span>${years ? `<span class="ou-years">${renderPieces(years)}</span>` : ''}${spouse}${burial}${courtesy ? `<span class="ou-courtesy">${esc(courtesy)}</span>` : ''}${record ? `<span class="ou-bio">${esc(record)}</span>` : ''}${xref}</span></div></td>`;
+  return `<td class="${root.trim()}" rowspan="${cell.rowSpan}"><div class="ou-person"><span class="ou-flow"><span class="ou-name">${esc(cell.name)}</span>${years ? `<span class="ou-years">${renderPieces(years)}</span>` : ''}${spouse}${burial}${courtesy ? `<span class="ou-courtesy">${esc(courtesy)}</span>` : ''}${record ? `<span class="ou-bio">${esc(record)}</span>` : ''}${seamHtml}${xref}</span></div></td>`;
+}
+
+function renderOuContinue(
+  cell: EuropeanCell,
+  electronic: boolean,
+  noteMode: ContinueNoteMode,
+  chartPages: Map<number, number>,
+): string {
+  const notes: ContinueNote[] = [];
+  for (const chartNo of cell.cutChartNos ?? []) notes.push({ kind: 'cut', chartNo, pageNo: chartPages.get(chartNo) ?? null });
+  const resumeNo = cell.resumeChartNo ?? null;
+  if (resumeNo) {
+    notes.push({
+      kind: 'resume',
+      chartNo: resumeNo,
+      pageNo: chartPages.get(resumeNo) ?? null,
+      fatherName: cell.resumeFatherName || cell.parentName || cell.name,
+    });
+  }
+  if (!notes.length) return '';
+  const lines = notes.map((note) => {
+    const parts = formatContinueNote(note, noteMode);
+    const href = `#tree-${note.chartNo}`;
+    const link = electronic
+      ? `<a class="ou-continue-link" href="${esc(href)}">${esc(parts.linkText)}</a>`
+      : esc(parts.linkText);
+    return `${esc(parts.lead)}${link}${esc(parts.tail)}`;
+  }).join('');
+  return `<span class="ou-seam">${lines}</span>`;
 }
 
 function antiqueCourtesy(cell: EuropeanCell, caption?: ChartCaption): string {

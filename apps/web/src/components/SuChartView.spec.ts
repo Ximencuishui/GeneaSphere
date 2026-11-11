@@ -61,35 +61,38 @@ describe('SuChartView', () => {
     expect(wrapper.get('#tree-su-1').exists()).toBe(true);
     expect(personOf(wrapper, 'a').attributes('data-col')).toBe('0');
     expect(personOf(wrapper, 'b').attributes('data-col')).toBe('1');
+    expect(personOf(wrapper, 'a').attributes('data-row')).toBe(personOf(wrapper, 'b').attributes('data-row'));
     expect(leftOf(wrapper, 'a')).toBeLessThan(leftOf(wrapper, 'b'));
     expect(personOf(wrapper, 'r').attributes('style')).toContain('writing-mode: horizontal-tb');
     expect(wrapper.get('.su-gen').attributes('style')).toContain('horizontal-tb');
     expect(wrapper.get('.su-sheet').classes()).not.toContain('is-antique');
+    expect(wrapper.get('.su-sheet').classes()).toContain('is-modern-frame');
     expect(text).not.toContain('支繁，略垂珠线');
-    expect(wrapper.findAll('.su-bead')).toHaveLength(0);
-    expect(wrapper.findAll('.su-rule')).toHaveLength(0);
+    expect(wrapper.findAll('.su-bead').length).toBeGreaterThan(0);
+    expect(wrapper.findAll('.su-rule').length).toBeGreaterThan(0);
   });
 
-  it('打开垂珠后画出竖线和圆圈，再关掉就收起，板位还在', async () => {
+  it('默认画出垂珠，关掉再打开，板位还在', async () => {
     const wrapper = mount(SuChartView, {
       props: { people, links, continuous: false },
     });
-    expect(wrapper.text()).toContain('显示垂珠连线');
-    const before = leftOf(wrapper, 'b');
-    await wrapper.get('button.su-bead-toggle').trigger('click');
     expect(wrapper.text()).toContain('隐藏垂珠连线');
     expect(wrapper.findAll('.su-bead')).toHaveLength(3);
     expect(wrapper.findAll('.su-rule.is-v').length).toBeGreaterThan(0);
     expect(wrapper.findAll('.su-rule.is-h')).toHaveLength(1);
     expect(wrapper.find('.su-rule').attributes('data-parent-id')).toBe('r');
-    expect(leftOf(wrapper, 'b')).toBe(before);
+    const before = leftOf(wrapper, 'b');
     await wrapper.get('button.su-bead-toggle').trigger('click');
+    expect(wrapper.text()).toContain('显示垂珠连线');
     expect(wrapper.findAll('.su-bead')).toHaveLength(0);
     expect(wrapper.findAll('.su-rule')).toHaveLength(0);
+    await wrapper.get('button.su-bead-toggle').trigger('click');
+    expect(wrapper.findAll('.su-bead')).toHaveLength(3);
+    expect(leftOf(wrapper, 'b')).toBe(before);
     expect(leftOf(wrapper, 'a')).toBeLessThan(leftOf(wrapper, 'b'));
   });
 
-  it('六子那一组略去垂珠，关掉开关后标记也消失', async () => {
+  it('六子排不下时先并排前几子，其余支另见图，关掉垂珠后标记还在', async () => {
     const sons = Array.from({ length: 6 }, (_, index) => ({
       id: `s${index}`,
       name: `子${index + 1}`,
@@ -113,19 +116,27 @@ describe('SuChartView', () => {
         continuous: true,
       },
     });
-    expect(wrapper.text()).toContain('支繁，略垂珠线');
-    const beaded = wrapper.findAll('.su-rule').map((node) => node.attributes('data-parent-id'));
-    expect(beaded).toContain('u');
-    expect(beaded).not.toContain('f');
-    expect(personOf(wrapper, 's0').attributes('data-col')).toBe('0');
-    expect(Number(personOf(wrapper, 'u').attributes('data-col'))).toBeGreaterThan(0);
-    await wrapper.setProps({ beadLines: false });
+    expect(wrapper.text()).toContain('支另见图，见第2图（第2页）');
+    expect(wrapper.text()).toContain('接上：【父】，见第1图（第1页）');
     expect(wrapper.text()).not.toContain('支繁，略垂珠线');
-    expect(wrapper.findAll('.su-rule')).toHaveLength(0);
+    const beaded = wrapper.findAll('.su-rule').map((node) => node.attributes('data-parent-id'));
+    expect(beaded).toContain('f');
+    expect(beaded).toContain('u');
     expect(personOf(wrapper, 's0').attributes('data-col')).toBe('0');
+    expect(personOf(wrapper, 's0').attributes('data-row')).toBe('1');
+    expect(Number(personOf(wrapper, 's3').attributes('data-col'))).toBeGreaterThan(0);
+    expect(personOf(wrapper, 's0').attributes('data-row')).toBe(personOf(wrapper, 's3').attributes('data-row'));
+    expect(wrapper.find('.su-seam').exists()).toBe(true);
+    await wrapper.setProps({ beadLines: false });
+    expect(wrapper.text()).toContain('支另见图，见第2图（第2页）');
+    expect(wrapper.text()).toContain('接上：【父】，见第1图（第1页）');
+    expect(wrapper.findAll('.su-rule')).toHaveLength(0);
+    expect(wrapper.findAll('.su-bead')).toHaveLength(0);
+    expect(personOf(wrapper, 's0').attributes('data-col')).toBe('0');
+    expect(personOf(wrapper, 's0').attributes('style')).toContain('writing-mode: horizontal-tb');
   });
 
-  it('仿古版长房靠右，文字仍横排，世代栏竖排，标题可竖排居右', () => {
+  it('仿古版长房靠右，文字竖排，世代黑块，不画兄弟横线', () => {
     const wrapper = mount(SuChartView, {
       props: {
         people,
@@ -139,16 +150,20 @@ describe('SuChartView', () => {
     });
     const sheet = wrapper.get('.su-sheet');
     expect(sheet.classes()).toContain('is-antique');
+    expect(sheet.classes()).toContain('is-landscape');
     expect(sheet.classes()).toContain('is-title-vertical');
     expect(personOf(wrapper, 'a').attributes('data-col')).toBe('0');
     expect(personOf(wrapper, 'b').attributes('data-col')).toBe('1');
     expect(leftOf(wrapper, 'a')).toBeGreaterThan(leftOf(wrapper, 'b'));
-    expect(personOf(wrapper, 'a').attributes('style')).toContain('writing-mode: horizontal-tb');
+    expect(personOf(wrapper, 'a').attributes('style')).toContain('writing-mode: vertical-rl');
     expect(wrapper.get('.su-gen').attributes('style')).toContain('vertical-rl');
+    expect(wrapper.get('.su-gen').classes()).toContain('is-boxed');
     expect(wrapper.text()).toContain('一世');
     expect(wrapper.text()).toContain('二世');
+    expect(wrapper.text()).toContain('第1图 · 朱熹公支派');
     expect(wrapper.findAll('.su-bead').length).toBeGreaterThan(0);
-    expect(wrapper.find('.su-rule.is-h').exists()).toBe(true);
+    expect(wrapper.find('.su-rule.is-h').exists()).toBe(false);
+    expect(wrapper.find('.su-rail').exists()).toBe(true);
     expect(sheet.find('.su-person').attributes('style') || '').not.toContain('margin-left');
   });
 
@@ -173,11 +188,61 @@ describe('SuChartView', () => {
         showToolbar: false,
       },
     });
-    expect(wrapper.findAll('.su-seam.is-out').length).toBeGreaterThan(0);
-    expect(wrapper.findAll('.su-seam.is-in').length).toBeGreaterThan(0);
-    expect(wrapper.get('.su-seam.is-out').attributes('style')).toContain('vertical-rl');
-    expect(wrapper.get('.su-seam.is-in').attributes('style')).toContain('vertical-rl');
-    expect(wrapper.get('.su-person').attributes('style')).toContain('horizontal-tb');
+    expect(wrapper.text()).toContain('支另见图，见第');
+    expect(wrapper.text()).toContain('接上：【');
+    expect(wrapper.text()).not.toContain('接下');
+    expect(wrapper.get('.su-person').attributes('style')).toContain('vertical-rl');
+  });
+
+  it('版本A版框默认打开，线宽可调到 10pt，关掉后外框消失', async () => {
+    const wrapper = mount(SuChartView, {
+      props: { people, links, script: 'horizontal', continuous: false, showToolbar: true },
+    });
+    expect(wrapper.get('.su-sheet').classes()).toContain('is-modern-frame');
+    expect(wrapper.get('.su-sheet').attributes('style')).toContain('--su-frame-pt: 4pt');
+    expect(wrapper.get('.su-stage').classes()).not.toContain('su-frame');
+    expect(wrapper.text()).toContain('隐藏版框');
+    await wrapper.get('select[aria-label="版框线宽"]').setValue('10');
+    expect(wrapper.get('.su-sheet').attributes('style')).toContain('--su-frame-pt: 10pt');
+    await wrapper.get('button.su-frame-toggle').trigger('click');
+    expect(wrapper.text()).toContain('显示版框');
+    expect(wrapper.get('.su-sheet').classes()).not.toContain('is-modern-frame');
+    expect(wrapper.findAll('.su-bead').length).toBeGreaterThan(0);
+  });
+
+  it('版本A显示真实头像，仿古版、关闭开关和占位图都不显示', () => {
+    const captions = { r: { avatarUrl: '/portraits/zhu-xi.jpg' }, a: { avatarUrl: 'https://picsum.photos/seed/geneasphere-male-1/200/200' } };
+    const shown = mount(SuChartView, {
+      props: { people, links, captions, showAvatars: true, showToolbar: false },
+    });
+    expect(shown.get('.su-person[data-person-id="r"] .su-avatar').attributes('src')).toBe('/portraits/zhu-xi.jpg');
+    expect(shown.find('.su-person[data-person-id="a"] .su-avatar').exists()).toBe(false);
+    expect(shown.find('.su-person[data-person-id="b"] .su-avatar').exists()).toBe(false);
+
+    const hidden = mount(SuChartView, {
+      props: { people, links, captions, showAvatars: false, showToolbar: false },
+    });
+    expect(hidden.find('.su-avatar').exists()).toBe(false);
+
+    const antique = mount(SuChartView, {
+      props: { people, links, captions, script: 'antique', showAvatars: true, showToolbar: false },
+    });
+    expect(antique.find('.su-avatar').exists()).toBe(false);
+  });
+
+  it('仿古版不使用版本A的均匀版框', () => {
+    const wrapper = mount(SuChartView, {
+      props: {
+        people,
+        links,
+        script: 'antique',
+        showFrame: true,
+        continuous: false,
+        showToolbar: false,
+      },
+    });
+    expect(wrapper.get('.su-sheet').classes()).not.toContain('is-modern-frame');
+    expect(wrapper.get('.su-stage').classes()).toContain('su-frame');
   });
 
   it('连续显示时不再按页隔离', () => {
