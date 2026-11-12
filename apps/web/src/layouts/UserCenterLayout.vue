@@ -45,7 +45,7 @@ const rawMenuGroups = computed<MenuEntry[]>(() =>
   getUserCenterMenuGroups({ clan: clanContext.value }),
 )
 
-// 角色裁剪：EDITOR 在家族事务隐藏“我的验证/我的申请”，未加入家族隐藏依赖家族上下文项
+// 角色裁剪：EDITOR 在家族事务隐藏“我的验证”，未加入家族隐藏依赖家族上下文项
 const roleFilteredGroups = computed<MenuEntry[]>(() =>
   filterMenuByRole(rawMenuGroups.value, clanContext.value),
 )

@@ -113,7 +113,7 @@ describe('filterMenuByRole（§4.3 角色矩阵）', () => {
     })
   })
 
-  it('EDITOR 在「家族事务」看不到"我的验证 / 我的申请"，但保留其它项', () => {
+  it('EDITOR 在「家族事务」看不到"我的验证"，但能看到自己的申请', () => {
     const items = filterMenuByRole(
       getUserCenterMenuGroups({ clan: ctx('EDITOR') }),
       ctx('EDITOR'),
@@ -123,7 +123,7 @@ describe('filterMenuByRole（§4.3 角色矩阵）', () => {
       .find((g) => g.title === USER_CENTER_GROUP_TITLES.familyAffairs)!
     const titles = affairs.children.map((c) => c.title)
     expect(titles).not.toContain(FAMILY_AFFAIRS_ITEMS.myVerify)
-    expect(titles).not.toContain(FAMILY_AFFAIRS_ITEMS.myApplications)
+    expect(titles).toContain(FAMILY_AFFAIRS_ITEMS.myApplications)
     expect(titles).toContain(FAMILY_AFFAIRS_ITEMS.familyRelation)
     expect(titles).toContain(FAMILY_AFFAIRS_ITEMS.announcements)
     expect(titles).toContain(FAMILY_AFFAIRS_ITEMS.orders)

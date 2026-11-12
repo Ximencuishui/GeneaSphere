@@ -5,6 +5,17 @@ import {
   ApplicationStatus,
   ModificationStatus,
   RelationChangeStatus,
+  ToolType,
+  ToolUsageStatus,
+  VideoProjectStatus,
+  OrderStatus,
+  NotificationType,
+  BuddyMatchStatus,
+  GroupMemberRole,
+  VerificationStatus,
+  VerifyMethod,
+  FamilyBookStatus,
+  FamilyBookPageType,
 } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { FAMILY_RULES_TEXT, chooseFamilyRules, htmlToRules, refreshFamilyRulesVolume, rulesToHtml } from '../cepu/clan-rules';
@@ -19,6 +30,7 @@ import {
   FAMOUS_PORTRAITS,
   ZHU_XI_AVATAR,
   ZHU_XI_PORTRAIT,
+  ZHUXIAOXIAO_GALLERY,
 } from './demo-assets';
 
 const LADY_PLACES = ['崇安五夫', '建阳考亭', '尤溪', '婺源', '建宁府'];
@@ -421,6 +433,15 @@ export class DemoSeedService implements OnModuleInit {
       await this.seedAnnouncements(demoClan.id, demoUser.id.toString());
       await this.seedReviewAndApprovalData(demoClan.id, demoUser.id.toString(), demoMemberUser.id.toString());
 
+      // 族员演示账号自己的内容：照片、小组、订单等。统计按 uploader / user_id 计算。
+      await this.seedMemberDemoExperience({
+        clanId: demoClan.id,
+        adminUserId: demoUser.id,
+        memberUserId: demoMemberUser.id,
+        memberPersonId: zhuxiaoxiao.id,
+        passwordHash: demoPasswordHash,
+      });
+
       await this.seedPlatformAdmin();
     } catch (error) {
       this.logger.error('种子数据初始化失败:', error.message);
@@ -671,7 +692,7 @@ export class DemoSeedService implements OnModuleInit {
 
   /** 标准宗谱卷二：凡例、家训、像赞、祠堂坟图。占位卷补正文，已有正文不覆盖。 */
   private async ensureRuleDocuments(clanId: bigint, adminUserId: string) {
-    const pieces: { match: (title: string) => boolean; title: string; content: string }[] = [
+    const pieces: { match: (title: string) => boolean; title: string; content: string; replaceIf?: (content: string) => boolean }[] = [
       {
         match: (title) => title.includes('凡例'),
         title: '凡例',
@@ -732,16 +753,65 @@ export class DemoSeedService implements OnModuleInit {
 
   /** 标准宗谱卷五：诗文碑记、修谱纪事、附录考据。占位卷补正文，已有正文不覆盖。 */
   private async ensureAppendixDocuments(clanId: bigint, adminUserId: string) {
-    const pieces: { match: (title: string) => boolean; title: string; content: string }[] = [
+    const pieces: { match: (title: string) => boolean; title: string; content: string; replaceIf?: (content: string) => boolean }[] = [
       {
         match: (title) => title.includes('诗文') || title.includes('碑'),
         title: '诗文碑记',
+        replaceIf: (content) => content.includes('此处作演示摘录'),
         content: `<h3 style="text-align:center;">诗文</h3>
-<p style="text-indent:2em;">文公遗诗，谱中择其与读书、寻源相关者录之，以便族人讽诵。原文为宋人所作，此处作演示摘录。</p>
+<p style="text-indent:2em;">文公遗诗，谱中择其与读书、寻源相关者录之，以便族人讽诵。题下记写作年份与地点。年次或地点不可考者书「未详」，不另补。</p>
 <h4>观书有感</h4>
-<p style="text-align:center;">半亩方塘一鉴开，天光云影共徘徊。<br/>问渠那得清如许，为有源头活水来。</p>
+<p class="poem-meta">年次未详 · 崇安五夫</p>
+<p class="poem-line">半亩方塘一鉴开，天光云影共徘徊。</p>
+<p class="poem-line">问渠那得清如许，为有源头活水来。</p>
+<h4>观书有感·其二</h4>
+<p class="poem-meta">年次未详 · 地点未详</p>
+<p class="poem-line">昨夜江边春水生，蒙冲巨舰一毛轻。</p>
+<p class="poem-line">向来枉费推移力，此日中流自在行。</p>
 <h4>春日</h4>
-<p style="text-align:center;">胜日寻芳泗水滨，无边光景一时新。<br/>等闲识得东风面，万紫千红总是春。</p>
+<p class="poem-meta">年次未详 · 诗言泗水，系怀想</p>
+<p class="poem-line">胜日寻芳泗水滨，无边光景一时新。</p>
+<p class="poem-line">等闲识得东风面，万紫千红总是春。</p>
+<h4>偶题</h4>
+<p class="poem-meta">年次未详 · 地点未详</p>
+<p class="poem-line">少年易老学难成，一寸光阴不可轻。</p>
+<p class="poem-line">未觉池塘春草梦，阶前梧叶已秋声。</p>
+<h4>水口行舟</h4>
+<p class="poem-meta">宋淳熙 · 南剑州水口</p>
+<p class="poem-line">昨夜扁舟雨一蓑，满江风浪夜如何。</p>
+<p class="poem-line">今朝试卷孤篷看，依旧青山绿树多。</p>
+<h4>水口行舟·其二</h4>
+<p class="poem-meta">宋淳熙 · 南剑州水口</p>
+<p class="poem-line">郁郁层峦夹岸青，春山绿水去无声。</p>
+<p class="poem-line">烟波一棹知何许，鶗鴂两山相对鸣。</p>
+<h4>出山道中口占</h4>
+<p class="poem-meta">年次未详 · 出山道中</p>
+<p class="poem-line">川原红绿一时新，暮雨朝晴更可人。</p>
+<p class="poem-line">书册埋头无了日，不如抛却去寻春。</p>
+<h4>鹅湖寺和陆子寿</h4>
+<p class="poem-meta">宋淳熙二年（1175） · 铅山鹅湖寺</p>
+<p class="poem-line">德义风流夙所钦，别离三载更关心。</p>
+<p class="poem-line">偶扶藜杖出寒谷，又枉篮舆度远岑。</p>
+<p class="poem-line">旧学商量加邃密，新知培养转深沉。</p>
+<p class="poem-line">却愁说到无言处，不信人间有古今。</p>
+<h4>武夷棹歌</h4>
+<p class="poem-meta">宋淳熙 · 武夷山</p>
+<p class="poem-line">一曲溪边上钓船，幔亭峰影蘸晴川。</p>
+<p class="poem-line">虹桥一断无消息，万壑千岩锁翠烟。</p>
+<h4>九日登天湖</h4>
+<p class="poem-meta">宋 · 崇安天湖</p>
+<p class="poem-line">去岁潇湘重九时，满城寒雨客思归。</p>
+<p class="poem-line">故山此日还佳节，黄菊清樽更晚晖。</p>
+<p class="poem-line">短发无多休落帽，长风不断且吹衣。</p>
+<p class="poem-line">相看下视人寰小，只合从今老翠微。</p>
+<h4>克己</h4>
+<p class="poem-meta">年次未详 · 地点未详</p>
+<p class="poem-line">宝鉴当年照胆寒，向来埋没太无端。</p>
+<p class="poem-line">只今垢尽明全见，还得当年宝鉴看。</p>
+<h4>题榴花</h4>
+<p class="poem-meta">年次未详 · 地点未详</p>
+<p class="poem-line">五月榴花照眼明，枝间时见子初成。</p>
+<p class="poem-line">可怜此地无车马，颠倒苍苔落绛英。</p>
 <h3 style="text-align:center;">碑记</h3>
 <h4>考亭朱氏宗祠碑记</h4>
 <p style="text-indent:2em;">建阳考亭，文公卜居讲学之地。后裔立祠于斯，春秋二祭。祠坐北向南，中龛奉徽国公，左昭右穆，分长房塾、次房埜、季房在。碑立于祠门之右，记建祠缘起，并诫子孙毋鬻祭田、毋荒坟茔。</p>
@@ -794,7 +864,7 @@ export class DemoSeedService implements OnModuleInit {
     clanId: bigint,
     adminUserId: string,
     label: string,
-    pieces: { match: (title: string) => boolean; title: string; content: string }[],
+    pieces: { match: (title: string) => boolean; title: string; content: string; replaceIf?: (content: string) => boolean }[],
   ) {
     for (const piece of pieces) {
       const volumes = await this.prisma.bookVolume.findMany({
@@ -822,7 +892,8 @@ export class DemoSeedService implements OnModuleInit {
       }
       const text = found.content?.trim() ?? '';
       const blank = !text || text.includes('此处录入') || text.includes('本篇尚未录入');
-      if (!blank) {
+      const refreshing = !blank;
+      if (!blank && !piece.replaceIf?.(text)) {
         this.logger.log(`  ${label}${piece.title}已有正文，跳过`);
         continue;
       }
@@ -830,7 +901,9 @@ export class DemoSeedService implements OnModuleInit {
         where: { id: found.id },
         data: { content: piece.content },
       });
-      this.logger.log(`  ✅ ${label}${found.title}占位已补为演示正文`);
+      this.logger.log(refreshing
+        ? `  ✅ ${label}${found.title}演示正文已更新`
+        : `  ✅ ${label}${found.title}占位已补为演示正文`);
     }
   }
 
@@ -1658,14 +1731,23 @@ export class DemoSeedService implements OnModuleInit {
         rejectReason: '缺少结婚证或族内证明',
       },
     ];
-    const existingRelationKeys = new Set(
-      (
-        await this.prisma.familyRelationChange.findMany({
-          where: { clan_id: clanId },
-          select: { person_id: true, change_type: true, created_at: true },
-        })
-      ).map((r) => `${r.person_id}|${r.change_type}|${r.created_at.getTime()}`),
-    );
+    // 旧版本用 created_at 当去重键，服务每重启一次就多插一条。按人物、类型、原因只留最早一条。
+    const existingRelations = await this.prisma.familyRelationChange.findMany({
+      where: { clan_id: clanId, operator_user_id: memberUserId },
+      select: { id: true, person_id: true, change_type: true, change_reason: true, created_at: true },
+      orderBy: { created_at: 'asc' },
+    });
+    const seenRelationKeys = new Set<string>();
+    const duplicateRelationIds: bigint[] = [];
+    for (const row of existingRelations) {
+      const key = `${row.person_id}|${row.change_type}|${row.change_reason ?? ''}`;
+      if (seenRelationKeys.has(key)) duplicateRelationIds.push(row.id);
+      else seenRelationKeys.add(key);
+    }
+    if (duplicateRelationIds.length > 0) {
+      await this.prisma.familyRelationChange.deleteMany({ where: { id: { in: duplicateRelationIds } } });
+      this.logger.log(`  ✅ 已清掉重复的家庭关系变更：${duplicateRelationIds.length} 条`);
+    }
     const relationChangesToCreate = relationChangeSeeds
       .filter((s) => personList[s.personIdx] && personList[s.targetPersonIdx])
       .map((s, idx) => {
@@ -1689,7 +1771,7 @@ export class DemoSeedService implements OnModuleInit {
           created_at: createdAt,
         };
       })
-      .filter((r) => !existingRelationKeys.has(`${r.person_id}|${r.change_type}|${r.created_at.getTime()}`));
+      .filter((r) => !seenRelationKeys.has(`${r.person_id}|${r.change_type}|${r.change_reason ?? ''}`));
     if (relationChangesToCreate.length > 0) {
       await this.prisma.familyRelationChange.createMany({ data: relationChangesToCreate });
       this.logger.log(`  ✅ 家庭关系变更演示数据已创建：${relationChangesToCreate.length} 条`);
@@ -2654,6 +2736,1006 @@ export class DemoSeedService implements OnModuleInit {
     }
 
     return fatherId.toString();
+  }
+
+  /**
+   * 族员演示账号（朱小小）自己名下的内容。
+   * 首页四个数字按 uploader_id / user_id / 小组成员统计，家族级影像挂在管理员名下不会算进去。
+   * 全部按稳定标题或图片地址去重，重复启动不会再插一份。
+   */
+  private async seedMemberDemoExperience(input: {
+    clanId: bigint;
+    adminUserId: string;
+    memberUserId: string;
+    memberPersonId: bigint;
+    passwordHash: string;
+  }) {
+    const { clanId, adminUserId, memberUserId, memberPersonId, passwordHash } = input;
+    await this.prisma.user.update({
+      where: { id: memberUserId },
+      data: { birth_date: new Date('2000-03-15'), gender: 'male' },
+    });
+
+    const fatherLink = await this.prisma.familyChild.findFirst({
+      where: { child_id: memberPersonId },
+      select: { family_id: true },
+    });
+    const fatherFamily = fatherLink
+      ? await this.prisma.familyUnit.findUnique({
+          where: { id: fatherLink.family_id },
+          select: { id: true, husband_id: true },
+        })
+      : null;
+    const fatherId =
+      fatherFamily?.husband_id && fatherFamily.husband_id !== memberPersonId
+        ? fatherFamily.husband_id
+        : null;
+    const father = fatherId
+      ? await this.prisma.person.findUnique({
+          where: { id: fatherId },
+          select: { id: true, full_name: true },
+        })
+      : null;
+
+    await this.prisma.person.update({
+      where: { id: memberPersonId },
+      data: {
+        birth_date: new Date('2000-03-15'),
+        birth_place: '福建武夷山',
+        is_living: true,
+        avatar_url: MEMBER_AVATAR,
+        thumbnail_url: MEMBER_AVATAR,
+      },
+    });
+    await this.prisma.personBio.upsert({
+      where: { person_id: memberPersonId },
+      create: {
+        person_id: memberPersonId,
+        native_place: '福建武夷山五夫',
+        education: '厦门大学软件工程学士',
+        alma_mater: '厦门大学',
+        occupation: '家族数字化',
+        job_title: '族谱数字化编辑',
+        achievements: '朱熹长房三十六世孙。整理旧照、世系与闺秀录，供本次演示续修使用。',
+        biography:
+          `朱小小，字未起，2000年3月15日生于福建武夷山五夫，朱熹长房三十六世孙${father ? `，父${father.full_name}` : ''}。` +
+          '2018年考入厦门大学软件工程系，2022年毕业后回乡从事家族数字化，负责旧谱扫描、人物照片标注和世系核对。' +
+          '现居武夷山，春秋随长房回建阳祭祖。',
+        source_note: '演示族员档案，与家族简介一致。',
+      },
+      update: {
+        native_place: '福建武夷山五夫',
+        education: '厦门大学软件工程学士',
+        alma_mater: '厦门大学',
+        occupation: '家族数字化',
+        job_title: '族谱数字化编辑',
+        achievements: '朱熹长房三十六世孙。整理旧照、世系与闺秀录，供本次演示续修使用。',
+        biography:
+          `朱小小，字未起，2000年3月15日生于福建武夷山五夫，朱熹长房三十六世孙${father ? `，父${father.full_name}` : ''}。` +
+          '2018年考入厦门大学软件工程系，2022年毕业后回乡从事家族数字化，负责旧谱扫描、人物照片标注和世系核对。' +
+          '现居武夷山，春秋随长房回建阳祭祖。',
+      },
+    });
+    const lifeEvents = [
+      { year: 2000, content: '生于福建武夷山五夫。', sort: 1 },
+      { year: 2018, content: '考入厦门大学软件工程系。', sort: 2 },
+      { year: 2022, content: '毕业后回乡，开始整理家族旧照与世系。', sort: 3 },
+      { year: 2024, content: '参加建阳清明祭祖，并把宗亲会合影上传族谱。', sort: 4 },
+    ];
+    for (const event of lifeEvents) {
+      const exists = await this.prisma.personEvent.findFirst({
+        where: { person_id: memberPersonId, content: event.content },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.personEvent.create({
+          data: {
+            person_id: memberPersonId,
+            event_year: event.year,
+            content: event.content,
+            sort_order: event.sort,
+          },
+        });
+      }
+    }
+
+    const cousin = await this.ensureDemoCousin({
+      clanId,
+      passwordHash,
+      fatherId,
+      familyId: fatherFamily?.id ?? null,
+      siblingPersonId: memberPersonId,
+    });
+
+    const zhuXi = await this.prisma.person.findFirst({
+      where: { clan_id: clanId, full_name: '朱熹', deleted_at: null },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+
+    const albumName = '族员随拍';
+    let shootAlbum = await this.prisma.clanAlbum.findFirst({
+      where: { clan_id: clanId, name: albumName },
+      select: { id: true },
+    });
+    if (!shootAlbum) {
+      shootAlbum = await this.prisma.clanAlbum.create({
+        data: {
+          clan_id: clanId,
+          name: albumName,
+          description: '朱小小上传的校园、祭祖与宗亲会照片',
+          cover_url: ZHUXIAOXIAO_GALLERY[0],
+          default_privacy: 'clan',
+          creator_id: memberUserId,
+        },
+        select: { id: true },
+      });
+    }
+
+    const mediaSeeds: Array<{
+      url: string;
+      year: number;
+      location: string;
+      description: string;
+      category: string;
+      people: Array<'self' | 'father' | 'zhuxi'>;
+    }> = [
+      { url: ZHUXIAOXIAO_GALLERY[0], year: 2018, location: '福建厦门', description: '厦门大学校园，入学那年在芙蓉湖边', category: '校园', people: ['self'] },
+      { url: ZHUXIAOXIAO_GALLERY[1], year: 2022, location: '福建厦门', description: '软件工程系毕业照', category: '校园', people: ['self'] },
+      { url: ZHUXIAOXIAO_GALLERY[2], year: 2024, location: '福建武夷山', description: '在五夫整理旧谱和扫描件', category: '工作', people: ['self'] },
+      { url: DEMO_MEDIA_IMAGES.wuyishanCliff, year: 2023, location: '福建武夷山', description: '回五夫故居，父亲站在崖前', category: '风景', people: ['self', 'father'] },
+      { url: DEMO_MEDIA_IMAGES.ancestorWorship1, year: 2024, location: '福建建阳', description: '清明建阳宗祠祭祖，朱小小在队列里', category: '活动', people: ['self'] },
+      { url: DEMO_MEDIA_IMAGES.familyReunion, year: 2024, location: '福建厦门', description: '海峡两岸宗亲联谊会合影', category: '活动', people: ['self'] },
+      { url: DEMO_MEDIA_IMAGES.genealogyHall, year: 2023, location: '福建建阳', description: '朱氏宗祠正殿，续修前拍下存档', category: '建筑', people: ['self'] },
+      { url: ZHU_XI_PORTRAIT, year: 2024, location: '福建建阳', description: '祭祖时翻拍的文公像', category: '肖像', people: ['zhuxi'] },
+    ];
+    const existingMedia = await this.prisma.mediaArchive.findMany({
+      where: {
+        clan_id: clanId,
+        uploader_id: memberUserId,
+        file_url: { in: mediaSeeds.map((m) => m.url) },
+      },
+      select: { id: true, file_url: true },
+    });
+    const mediaIdByUrl = new Map(existingMedia.map((m) => [m.file_url, m.id]));
+    const missingMedia = mediaSeeds.filter((m) => !mediaIdByUrl.has(m.url));
+    if (missingMedia.length > 0) {
+      const created = await this.prisma.mediaArchive.createManyAndReturn({
+        data: missingMedia.map((m) => ({
+          clan_id: clanId,
+          uploader_id: memberUserId,
+          file_url: m.url,
+          display_url: m.url,
+          thumb_url: m.url,
+          taken_year: m.year,
+          taken_location: m.location,
+          description: m.description,
+          category: m.category,
+          media_type: 'image',
+          file_size: 0n,
+          album_id: shootAlbum.id,
+          privacy_level: 'clan' as const,
+        })),
+      });
+      for (const row of created) mediaIdByUrl.set(row.file_url, row.id);
+    }
+    const shootCount = await this.prisma.mediaArchive.count({
+      where: { album_id: shootAlbum.id, deleted_at: null },
+    });
+    await this.prisma.clanAlbum.update({
+      where: { id: shootAlbum.id },
+      data: { photo_count: shootCount, cover_url: ZHUXIAOXIAO_GALLERY[0] },
+    });
+
+    const personIdByRole = new Map<string, bigint>();
+    personIdByRole.set('self', memberPersonId);
+    if (father) personIdByRole.set('father', father.id);
+    if (zhuXi) personIdByRole.set('zhuxi', zhuXi.id);
+    const linkRows = mediaSeeds.flatMap((m) => {
+      const mediaId = mediaIdByUrl.get(m.url);
+      if (!mediaId) return [];
+      return m.people
+        .map((role) => personIdByRole.get(role))
+        .filter((id): id is bigint => !!id)
+        .map((personId) => ({ media_id: mediaId, person_id: personId }));
+    });
+    if (linkRows.length > 0) {
+      await this.prisma.mediaPersonLink.createMany({ data: linkRows, skipDuplicates: true });
+    }
+
+    await this.seedMemberPersonalSpace(memberUserId, mediaSeeds);
+    await this.seedMemberMemory(memberUserId);
+    await this.seedMemberGroups({ clanId, adminUserId, memberUserId });
+    await this.seedMemberBuddies({ memberUserId, cousinUserId: cousin.userId });
+    const firstMediaId = mediaIdByUrl.get(ZHUXIAOXIAO_GALLERY[0]) ?? null;
+    await this.seedMemberProjects({
+      clanId,
+      memberUserId,
+      memberPersonId,
+      mediaId: firstMediaId,
+    });
+    await this.seedMemberOrdersAndBook({ clanId, memberUserId, memberPersonId });
+    await this.seedMemberApplications({
+      clanId,
+      memberUserId,
+      memberPersonId,
+      cousinUserId: cousin.userId,
+      cousinPersonId: cousin.personId,
+    });
+    this.logger.log('  ✅ 族员演示账号的个人数据已补齐');
+  }
+
+  private async ensureDemoCousin(input: {
+    clanId: bigint;
+    passwordHash: string;
+    fatherId: bigint | null;
+    familyId: bigint | null;
+    siblingPersonId: bigint;
+  }) {
+    const phone = '13800000002';
+    let user = await this.prisma.user.findUnique({ where: { phone } });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          phone,
+          password_hash: input.passwordHash,
+          nickname: '演示族员·朱小文',
+          email: 'xiaowen@geneasphere.com',
+          gender: 'male',
+          birth_date: new Date('2001-08-09'),
+          avatar_url: MALE_AVATAR(88001),
+        },
+      });
+    } else {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          password_hash: input.passwordHash,
+          nickname: user.nickname || '演示族员·朱小文',
+          avatar_url: user.avatar_url || MALE_AVATAR(88001),
+          birth_date: user.birth_date ?? new Date('2001-08-09'),
+        },
+      });
+    }
+    const setting = await this.prisma.userSetting.findUnique({ where: { user_id: user.id } });
+    if (!setting) await this.prisma.userSetting.create({ data: { user_id: user.id } });
+    const membership = await this.prisma.clanMember.findUnique({
+      where: { clan_id_user_id: { clan_id: input.clanId, user_id: user.id } },
+    });
+    if (!membership) {
+      await this.prisma.clanMember.create({
+        data: { clan_id: input.clanId, user_id: user.id, role: 'VIEWER' },
+      });
+    }
+
+    let person = await this.prisma.person.findFirst({
+      where: { clan_id: input.clanId, full_name: '朱小文', deleted_at: null },
+      orderBy: { id: 'asc' },
+    });
+    if (!person) {
+      person = await this.prisma.person.create({
+        data: {
+          clan_id: input.clanId,
+          full_name: '朱小文',
+          gender: 'male' as Gender,
+          birth_date: new Date('2001-08-09'),
+          is_living: true,
+          birth_place: '福建厦门',
+          migration_branch: 'A',
+          avatar_url: MALE_AVATAR(88001),
+          thumbnail_url: MALE_AVATAR(88001),
+        },
+      });
+    }
+    const selfLink = await this.prisma.personUserLink.findFirst({
+      where: { user_id: user.id, person_id: person.id, relation_role: 'self' },
+    });
+    if (!selfLink) {
+      await this.prisma.personUserLink.create({
+        data: {
+          user_id: user.id,
+          person_id: person.id,
+          relation_role: 'self',
+          verified_at: new Date(),
+        },
+      });
+    }
+    if (input.fatherId && input.familyId) {
+      const childRow = await this.prisma.familyChild.findFirst({
+        where: { family_id: input.familyId, child_id: person.id },
+        select: { id: true },
+      });
+      if (!childRow) {
+        const siblingCount = await this.prisma.familyChild.count({
+          where: { family_id: input.familyId },
+        });
+        await this.prisma.familyChild.create({
+          data: {
+            family_id: input.familyId,
+            child_id: person.id,
+            birth_order: siblingCount + 1,
+            child_type: 'BIOLOGICAL',
+          },
+        });
+      }
+      const rows: Array<{ ancestor_id: bigint; descendant_id: bigint; depth: number }> = [
+        { ancestor_id: person.id, descendant_id: person.id, depth: 0 },
+      ];
+      const fatherAncestries = await this.prisma.personAncestry.findMany({
+        where: { descendant_id: input.fatherId },
+        select: { ancestor_id: true, depth: true },
+      });
+      for (const pa of fatherAncestries) {
+        rows.push({ ancestor_id: pa.ancestor_id, descendant_id: person.id, depth: pa.depth + 1 });
+      }
+      if (!fatherAncestries.some((pa) => pa.ancestor_id === input.fatherId)) {
+        rows.push({ ancestor_id: input.fatherId, descendant_id: person.id, depth: 1 });
+      }
+      await this.prisma.personAncestry.createMany({ data: rows, skipDuplicates: true });
+    }
+    const bio = await this.prisma.personBio.findUnique({ where: { person_id: person.id } });
+    if (!bio) {
+      await this.prisma.personBio.create({
+        data: {
+          person_id: person.id,
+          native_place: '福建厦门',
+          education: '厦门大学在读',
+          alma_mater: '厦门大学',
+          biography: '朱小文，2001年生于厦门，与朱小小同为长房后辈。寒暑假回武夷山，参加过建阳祭祖。',
+          source_note: '演示小伙伴账号。',
+        },
+      });
+    }
+    return { userId: user.id, personId: person.id };
+  }
+
+  private async seedMemberPersonalSpace(
+    memberUserId: string,
+    mediaSeeds: Array<{ url: string; year: number; location: string; description: string }>,
+  ) {
+    const albumDefs = [
+      {
+        name: '武夷旧影',
+        description: '五夫、建阳祭祖和宗祠',
+        urls: mediaSeeds.filter((m) => m.location !== '福建厦门').map((m) => m.url),
+      },
+      {
+        name: '厦大与宗亲',
+        description: '大学四年和厦门宗亲会',
+        urls: mediaSeeds.filter((m) => m.location === '福建厦门').map((m) => m.url),
+      },
+    ];
+    for (const def of albumDefs) {
+      let album = await this.prisma.userAlbum.findFirst({
+        where: { user_id: memberUserId, name: def.name },
+      });
+      if (!album) {
+        album = await this.prisma.userAlbum.create({
+          data: {
+            user_id: memberUserId,
+            name: def.name,
+            description: def.description,
+            default_privacy: 'clan',
+          },
+        });
+      }
+      const existing = await this.prisma.userPhoto.findMany({
+        where: { user_id: memberUserId, album_id: album.id, file_url: { in: def.urls } },
+        select: { file_url: true },
+      });
+      const have = new Set(existing.map((p) => p.file_url));
+      const toCreate = mediaSeeds.filter((m) => def.urls.includes(m.url) && !have.has(m.url));
+      if (toCreate.length > 0) {
+        await this.prisma.userPhoto.createMany({
+          data: toCreate.map((m) => ({
+            user_id: memberUserId,
+            album_id: album.id,
+            file_url: m.url,
+            thumbnail_url: m.url,
+            location_name: m.location,
+            taken_year: m.year,
+            description: m.description.slice(0, 100),
+            privacy: 'clan' as const,
+          })),
+        });
+      }
+      const count = await this.prisma.userPhoto.count({ where: { album_id: album.id } });
+      const cover = await this.prisma.userPhoto.findFirst({
+        where: { album_id: album.id },
+        orderBy: { id: 'asc' },
+        select: { id: true },
+      });
+      await this.prisma.userAlbum.update({
+        where: { id: album.id },
+        data: { photo_count: count, cover_photo_id: cover?.id ?? null },
+      });
+    }
+
+    const messages = [
+      '今年清明在建阳宗祠见到了长房几位叔伯，合影已经放进相册。',
+      '厦大毕业后回来做族谱数字化，长辈手里的旧照片可以发给我扫描。',
+      '五夫的老房子还在，下次祭祖可以顺路去看看崖边那条路。',
+    ];
+    for (const content of messages) {
+      const exists = await this.prisma.userMessage.findFirst({
+        where: { user_id: memberUserId, content },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.userMessage.create({
+          data: { user_id: memberUserId, content, privacy: 'clan' },
+        });
+      }
+    }
+  }
+
+  private async seedMemberMemory(memberUserId: string) {
+    const badges = [
+      {
+        badge_type: '地方记忆守护者',
+        location: '福建武夷山',
+        description: '五夫童年的街巷、宗祠和崖边小路被族人核对过',
+      },
+      {
+        badge_type: '寻根引路人',
+        location: '福建厦门',
+        description: '把武夷山和厦门两段成长轨迹写进了族谱',
+      },
+    ];
+    for (const badge of badges) {
+      const exists = await this.prisma.memoryBadge.findFirst({
+        where: { user_id: memberUserId, badge_type: badge.badge_type },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.memoryBadge.create({ data: { user_id: memberUserId, ...badge } });
+      }
+    }
+    const places = [
+      { location: '福建武夷山', decade: 2000 },
+      { location: '福建厦门', decade: 2010 },
+    ];
+    for (const place of places) {
+      await this.prisma.userVerifiedLocation.upsert({
+        where: {
+          user_id_location_decade: {
+            user_id: memberUserId,
+            location: place.location,
+            decade: place.decade,
+          },
+        },
+        create: { user_id: memberUserId, ...place },
+        update: {},
+      });
+    }
+  }
+
+  private async seedMemberGroups(input: {
+    clanId: bigint;
+    adminUserId: string;
+    memberUserId: string;
+  }) {
+    const { adminUserId, memberUserId } = input;
+    const defs = [
+      {
+        name: '修谱志愿者',
+        description: '核对旧谱、扫描照片、补录世系的志愿者小组',
+        cover_url: DEMO_MEDIA_IMAGES.genealogyHall,
+        creatorId: memberUserId,
+        members: [
+          { userId: memberUserId, role: GroupMemberRole.CREATOR },
+          { userId: adminUserId, role: GroupMemberRole.ADMIN },
+        ],
+        topics: [
+          {
+            title: '旧谱扫描进度',
+            content: '建阳宗祠那批旧谱已经扫了两箱，还差五夫带回来的手抄本。这周我先把人物页裁好。',
+            authorId: memberUserId,
+            pinned: true,
+            replies: [
+              { authorId: adminUserId, content: '手抄本我放在理事会，周六可以一起对字辈。' },
+            ],
+          },
+          {
+            title: '清明祭祖谁值班',
+            content: '四月四日上午九点建阳宗祠，需要两个人负责签到和合影。我可以早到。',
+            authorId: memberUserId,
+            pinned: false,
+            replies: [
+              { authorId: adminUserId, content: '签到我来，合影交给小小。绶带在祠堂东厢。' },
+            ],
+          },
+        ],
+      },
+      {
+        name: '长房青年',
+        description: '长房年轻一辈交流祭祖、学业和回乡的事',
+        cover_url: DEMO_MEDIA_IMAGES.familyReunion,
+        creatorId: adminUserId,
+        members: [
+          { userId: adminUserId, role: GroupMemberRole.CREATOR },
+          { userId: memberUserId, role: GroupMemberRole.MEMBER },
+        ],
+        topics: [
+          {
+            title: '厦门宗亲会见闻',
+            content: '今年联谊会在厦门，见到几位从台湾回来的宗亲。合影我传到了家族相册。',
+            authorId: memberUserId,
+            pinned: false,
+            replies: [
+              { authorId: adminUserId, content: '照片已看到，记得给朱铨那一支也标上人名。' },
+            ],
+          },
+        ],
+      },
+    ];
+
+    for (const def of defs) {
+      let group = await this.prisma.discussionGroup.findFirst({
+        where: { name: def.name, creator_id: def.creatorId, deleted_at: null },
+      });
+      if (!group) {
+        group = await this.prisma.discussionGroup.create({
+          data: {
+            name: def.name,
+            description: def.description,
+            cover_url: def.cover_url,
+            creator_id: def.creatorId,
+            is_public: true,
+          },
+        });
+      }
+      for (const member of def.members) {
+        await this.prisma.groupMember.upsert({
+          where: { group_id_user_id: { group_id: group.id, user_id: member.userId } },
+          create: { group_id: group.id, user_id: member.userId, role: member.role },
+          update: {},
+        });
+      }
+      for (const topic of def.topics) {
+        let row = await this.prisma.groupTopic.findFirst({
+          where: { group_id: group.id, title: topic.title, deleted_at: null },
+        });
+        if (!row) {
+          row = await this.prisma.groupTopic.create({
+            data: {
+              group_id: group.id,
+              author_id: topic.authorId,
+              title: topic.title,
+              content: topic.content,
+              is_pinned: topic.pinned,
+            },
+          });
+        }
+        for (const reply of topic.replies) {
+          const exists = await this.prisma.topicReply.findFirst({
+            where: { topic_id: row.id, author_id: reply.authorId, content: reply.content },
+            select: { id: true },
+          });
+          if (!exists) {
+            await this.prisma.topicReply.create({
+              data: { topic_id: row.id, author_id: reply.authorId, content: reply.content },
+            });
+          }
+        }
+      }
+    }
+  }
+
+  private async seedMemberBuddies(input: { memberUserId: string; cousinUserId: string }) {
+    const places = [
+      {
+        userId: input.memberUserId,
+        location_name: '福建武夷山',
+        lat: 27.7566,
+        lng: 118.0353,
+        start_age: 6,
+        end_age: 15,
+        period_description: '小学到初中都在五夫，夏天常去崖边玩',
+      },
+      {
+        userId: input.memberUserId,
+        location_name: '福建厦门',
+        lat: 24.4798,
+        lng: 118.0894,
+        start_age: 18,
+        end_age: 22,
+        period_description: '大学四年住在思明，寒暑假回武夷山',
+      },
+      {
+        userId: input.cousinUserId,
+        location_name: '福建厦门',
+        lat: 24.4798,
+        lng: 118.0894,
+        start_age: 6,
+        end_age: 18,
+        period_description: '从小在厦门长大，过年回武夷山祭祖',
+      },
+    ];
+    for (const place of places) {
+      const exists = await this.prisma.childhoodPlace.findFirst({
+        where: { user_id: place.userId, location_name: place.location_name },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.childhoodPlace.create({
+          data: {
+            user_id: place.userId,
+            location_name: place.location_name,
+            lat: place.lat,
+            lng: place.lng,
+            start_age: place.start_age,
+            end_age: place.end_age,
+            period_description: place.period_description,
+          },
+        });
+      }
+    }
+
+    const matches = [
+      {
+        requester_id: input.cousinUserId,
+        matched_user_id: input.memberUserId,
+        status: BuddyMatchStatus.PENDING,
+        greeting_message: '小小，我是长房的朱小文，也在厦门。祭祖时见过你，要不要对一下小时候的五夫？',
+        match_reasons: ['都在厦门待过', '同属朱熹长房'],
+      },
+      {
+        requester_id: input.memberUserId,
+        matched_user_id: input.cousinUserId,
+        status: BuddyMatchStatus.ACCEPTED,
+        greeting_message: '小文，宗亲会那张合影里有你。武夷山的崖边路你还记得吗？',
+        match_reasons: ['宗亲会合影', '童年都回过武夷山'],
+      },
+    ];
+    for (const match of matches) {
+      const exists = await this.prisma.buddyMatchRecord.findFirst({
+        where: {
+          requester_id: match.requester_id,
+          matched_user_id: match.matched_user_id,
+          status: match.status,
+        },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.buddyMatchRecord.create({
+          data: {
+            requester_id: match.requester_id,
+            matched_user_id: match.matched_user_id,
+            match_score: 86,
+            match_reasons: match.match_reasons,
+            status: match.status,
+            greeting_message: match.greeting_message,
+            contacted_at: new Date(),
+            responded_at: match.status === BuddyMatchStatus.ACCEPTED ? new Date() : null,
+          },
+        });
+      }
+    }
+  }
+
+  private async seedMemberProjects(input: {
+    clanId: bigint;
+    memberUserId: string;
+    memberPersonId: bigint;
+    mediaId: bigint | null;
+  }) {
+    const toolSeeds = [
+      {
+        tool_type: ToolType.restore,
+        status: ToolUsageStatus.completed,
+        input_url: DEMO_MEDIA_IMAGES.genealogyHall,
+        output_url: DEMO_MEDIA_IMAGES.genealogyHall,
+      },
+      {
+        tool_type: ToolType.color,
+        status: ToolUsageStatus.completed,
+        input_url: ZHU_XI_PORTRAIT,
+        output_url: ZHU_XI_PORTRAIT,
+      },
+    ];
+    for (const tool of toolSeeds) {
+      const exists = await this.prisma.toolUsageLog.findFirst({
+        where: { user_id: input.memberUserId, tool_type: tool.tool_type, input_url: tool.input_url },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.toolUsageLog.create({
+          data: {
+            user_id: input.memberUserId,
+            tool_type: tool.tool_type,
+            credits_used: 1,
+            estimated_cost: '0.0100',
+            status: tool.status,
+            input_url: tool.input_url,
+            output_url: tool.output_url,
+            completed_at: new Date(),
+          },
+        });
+      }
+    }
+
+    let video = await this.prisma.videoProject.findFirst({
+      where: {
+        requester_id: input.memberUserId,
+        target_person_id: input.memberPersonId,
+        style: 'nostalgic',
+      },
+    });
+    if (!video) {
+      video = await this.prisma.videoProject.create({
+        data: {
+          clan_id: input.clanId,
+          requester_id: input.memberUserId,
+          target_person_id: input.memberPersonId,
+          status: VideoProjectStatus.queued,
+          queue_position: 1,
+          style: 'nostalgic',
+          paid_amount: '0.00',
+        },
+      });
+    }
+    let lineage = await this.prisma.lineageVideoProject.findFirst({
+      where: { user_id: input.memberUserId, center_person_id: input.memberPersonId },
+    });
+    if (!lineage) {
+      lineage = await this.prisma.lineageVideoProject.create({
+        data: {
+          user_id: input.memberUserId,
+          center_person_id: input.memberPersonId,
+          direction: 'paternal',
+          up_generations: 5,
+          down_generations: 1,
+          include_spouse: true,
+          style: 'nostalgic',
+          status: VideoProjectStatus.queued,
+          queue_position: 2,
+          paid_amount: '0.00',
+        },
+      });
+    }
+    if (input.mediaId) {
+      await this.prisma.videoMaterialLink.createMany({
+        data: [{ video_project_id: video.id, media_id: input.mediaId, sequence_order: 1 }],
+        skipDuplicates: true,
+      });
+      await this.prisma.lineageVideoMaterialLink.createMany({
+        data: [{
+          lineage_project_id: lineage.id,
+          media_id: input.mediaId,
+          person_id: input.memberPersonId,
+          sequence_order: 1,
+        }],
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  private async seedMemberOrdersAndBook(input: {
+    clanId: bigint;
+    memberUserId: string;
+    memberPersonId: bigint;
+  }) {
+    const title = '朱小小家庭图册';
+    let project = await this.prisma.familyBookProject.findFirst({
+      where: { user_id: input.memberUserId, title },
+    });
+    if (!project) {
+      project = await this.prisma.familyBookProject.create({
+        data: {
+          user_id: input.memberUserId,
+          clan_id: input.clanId,
+          start_person_id: input.memberPersonId,
+          generations: 3,
+          include_spouse: true,
+          grouping: 'family',
+          selected_fields: ['name', 'photo', 'birth', 'bio'],
+          cover_template: 'ink',
+          title,
+          preface: '从朱小小这一支往上翻三代，记下长房还在用的名字和照片。',
+          page_count: 3,
+          person_count: 1,
+          estimated_price: '128.00',
+          status: FamilyBookStatus.ordered,
+        },
+      });
+      await this.prisma.familyBookPage.createMany({
+        data: [
+          {
+            project_id: project.id,
+            page_number: 1,
+            page_type: FamilyBookPageType.cover,
+            title,
+            subtitle: '水墨',
+            body: project.preface,
+            content: { template: 'ink', title, start_person_name: '朱小小', generations: 3 },
+          },
+          {
+            project_id: project.id,
+            page_number: 2,
+            page_type: FamilyBookPageType.toc,
+            title: '目录',
+            content: { sections: [{ index: 1, title: '朱小小', generation: 36 }] },
+          },
+          {
+            project_id: project.id,
+            page_number: 3,
+            page_type: FamilyBookPageType.person,
+            title: '朱小小',
+            subtitle: '长房三十六世',
+            body: '2000年生于武夷山，厦门大学软件工程系毕业，现做家族数字化。',
+            content: {
+              name: '朱小小',
+              birth: '2000-03-15',
+              birth_place: '福建武夷山',
+              education: '厦门大学软件工程学士',
+            },
+          },
+        ],
+      });
+    }
+
+    const address = {
+      name: '朱小小',
+      phone: '13800000001',
+      province: '福建',
+      city: '南平',
+      district: '武夷山市',
+      detail: '五夫镇兴贤街18号',
+    };
+    const orders = [
+      {
+        specification: '朱熹族谱精装 A4 · 待支付',
+        quantity: 2,
+        amount: 268,
+        status: OrderStatus.PENDING,
+        tracking_no: null as string | null,
+        tracking_company: null as string | null,
+        linkBook: false,
+      },
+      {
+        specification: '朱小小家庭图册 · 印刷中',
+        quantity: 1,
+        amount: 128,
+        status: OrderStatus.PRINTING,
+        tracking_no: null,
+        tracking_company: null,
+        linkBook: true,
+      },
+      {
+        specification: '朱熹族谱线装 16开 · 已发货',
+        quantity: 1,
+        amount: 198,
+        status: OrderStatus.SHIPPED,
+        tracking_no: 'SF1029384756',
+        tracking_company: '顺丰速运',
+        linkBook: false,
+      },
+    ];
+    for (const order of orders) {
+      const exists = await this.prisma.printOrder.findFirst({
+        where: { user_id: input.memberUserId, specification: order.specification },
+        select: { id: true },
+      });
+      if (exists) continue;
+      await this.prisma.printOrder.create({
+        data: {
+          clan_id: input.clanId,
+          user_id: input.memberUserId,
+          specification: order.specification,
+          quantity: order.quantity,
+          amount: order.amount,
+          status: order.status,
+          tracking_no: order.tracking_no,
+          tracking_company: order.tracking_company,
+          shipping_address: address,
+          family_book_project_id: order.linkBook ? project.id : null,
+        },
+      });
+    }
+
+    const notices = [
+      {
+        title: '家庭图册已进入印刷',
+        content: '《朱小小家庭图册》1 册正在印刷，完成后寄往武夷山五夫。',
+      },
+      {
+        title: '线装族谱已发货',
+        content: '朱熹族谱线装 16 开 1 册已由顺丰发出，运单号 SF1029384756。',
+      },
+    ];
+    for (const notice of notices) {
+      const exists = await this.prisma.notification.findFirst({
+        where: { user_id: input.memberUserId, title: notice.title },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.notification.create({
+          data: {
+            user_id: input.memberUserId,
+            clan_id: input.clanId,
+            type: NotificationType.SYSTEM,
+            title: notice.title,
+            content: notice.content,
+          },
+        });
+      }
+    }
+  }
+
+  private async seedMemberApplications(input: {
+    clanId: bigint;
+    memberUserId: string;
+    memberPersonId: bigint;
+    cousinUserId: string;
+    cousinPersonId: bigint;
+  }) {
+    const mods = [
+      {
+        field_name: '学历',
+        old_value: '',
+        new_value: '厦门大学软件工程学士',
+        reason: '补录大学学历，与家族简介一致',
+        status: ModificationStatus.PENDING,
+      },
+      {
+        field_name: '职业',
+        old_value: '',
+        new_value: '族谱数字化编辑',
+        reason: '毕业后回乡做家族数字化',
+        status: ModificationStatus.APPROVED,
+      },
+    ];
+    for (const mod of mods) {
+      const exists = await this.prisma.personModificationRequest.findFirst({
+        where: {
+          requester_user_id: input.memberUserId,
+          field_name: mod.field_name,
+          new_value: mod.new_value,
+        },
+        select: { id: true },
+      });
+      if (!exists) {
+        await this.prisma.personModificationRequest.create({
+          data: {
+            person_id: input.memberPersonId,
+            clan_id: input.clanId,
+            requester_user_id: input.memberUserId,
+            field_name: mod.field_name,
+            old_value: mod.old_value,
+            new_value: mod.new_value,
+            reason: mod.reason,
+            status: mod.status,
+            reviewer_id: mod.status === ModificationStatus.APPROVED ? input.memberUserId : null,
+            reviewed_at: mod.status === ModificationStatus.APPROVED ? new Date() : null,
+          },
+        });
+      }
+    }
+
+    const openid = 'demo-cousin-zhuxiaowen';
+    const session = await this.prisma.verificationSession.findFirst({
+      where: { inviter_user_id: input.memberUserId, scanner_openid: openid },
+      select: { id: true },
+    });
+    if (!session) {
+      await this.prisma.verificationSession.create({
+        data: {
+          inviter_user_id: input.memberUserId,
+          scanner_openid: openid,
+          scanner_phone: '13800000002',
+          scanner_nickname: '朱小文',
+          clan_id: input.clanId,
+          status: VerificationStatus.PASSED,
+          verify_method: VerifyMethod.INFO_CONFIRM,
+          expire_at: new Date('2027-06-01T00:00:00.000Z'),
+          scanned_user_id: input.cousinUserId,
+          matched_person_id: input.cousinPersonId,
+          passed_at: new Date(),
+          submitted_info: { full_name: '朱小文', birth_place: '福建厦门' },
+        },
+      });
+    }
   }
 }
 interface HistoricalFigure {

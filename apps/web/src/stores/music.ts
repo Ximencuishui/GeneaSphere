@@ -37,6 +37,16 @@ export const TIMER_OPTIONS = [
   { label: '2小时', value: 120 }
 ]
 
+const WIDGET_HIDDEN_KEY = 'music_widget_hidden'
+
+function readWidgetHidden(): boolean {
+  try {
+    return sessionStorage.getItem(WIDGET_HIDDEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export const useMusicStore = defineStore('music', () => {
   // State
   const isPlaying = ref(false)
@@ -45,6 +55,7 @@ export const useMusicStore = defineStore('music', () => {
   const timerMinutes = ref(30)
   const isControlVisible = ref(false)
   const isInitialized = ref(false)
+  const isWidgetHidden = ref(readWidgetHidden())
 
   // Computed
   const currentTrack = computed(() => 
@@ -109,12 +120,32 @@ export const useMusicStore = defineStore('music', () => {
     isControlVisible.value = false
   }
 
+  function hideWidget() {
+    isWidgetHidden.value = true
+    isControlVisible.value = false
+    try {
+      sessionStorage.setItem(WIDGET_HIDDEN_KEY, '1')
+    } catch {
+      // 隐私模式写不进 sessionStorage 时，本次仍保持隐藏
+    }
+  }
+
+  function showWidget() {
+    isWidgetHidden.value = false
+    try {
+      sessionStorage.removeItem(WIDGET_HIDDEN_KEY)
+    } catch {
+      // 忽略
+    }
+  }
+
   return {
     isPlaying,
     volume,
     currentTrackId,
     timerMinutes,
     isControlVisible,
+    isWidgetHidden,
     isInitialized,
     currentTrack,
     volumeDecimal,
@@ -125,6 +156,8 @@ export const useMusicStore = defineStore('music', () => {
     setTrack,
     setTimer,
     toggleControl,
-    closeControl
+    closeControl,
+    hideWidget,
+    showWidget
   }
 })

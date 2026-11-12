@@ -56,12 +56,15 @@ export class UserService {
     }
 
     // 汇总统计
-    const [photoCount, annotationCount, orderCount] = await Promise.all([
+    const [photoCount, annotationCount, orderCount, groupCount] = await Promise.all([
       this.prisma.mediaArchive.count({ where: { uploader_id: userId } }),
       this.prisma.mediaPersonLink.count({
         where: { media: { uploader_id: userId } },
       }),
       this.prisma.printOrder.count({ where: { user_id: userId } }),
+      this.prisma.groupMember.count({
+        where: { user_id: userId, group: { deleted_at: null } },
+      }),
     ]);
 
     // 找到用户的主家族（最早加入的家族中角色最高的）
@@ -103,9 +106,8 @@ export class UserService {
         photo_count: photoCount,
         annotation_count: annotationCount,
         order_count: orderCount,
-        // 以下为尚未实现的模块，预留字段
         video_count: 0,
-        group_count: 0,
+        group_count: groupCount,
       },
       setting: user.setting
         ? {
@@ -788,6 +790,7 @@ export class UserService {
       announcementTotalCount,
       announcementReadCount,
       activeOrderCount,
+      groupCount,
     ] = await Promise.all([
       this.prisma.notification.count({ where: { user_id: userId, is_read: false } }),
       this.prisma.endorsement.count({
@@ -800,7 +803,10 @@ export class UserService {
         where: { requester_user_id: userId, status: 'PENDING' },
       }),
       this.prisma.familyRelationChange.count({
-        where: { target_user_id: userId, status: 'pending' },
+        where: {
+          status: 'pending',
+          OR: [{ target_user_id: userId }, { operator_user_id: userId }],
+        },
       }),
       this.prisma.verificationSession.count({
         where: { scanned_user_id: userId, status: 'PENDING' },
@@ -816,6 +822,9 @@ export class UserService {
       this.prisma.printOrder.count({
         where: { user_id: userId, status: { in: ['PAID', 'PRINTING', 'SHIPPED'] } },
       }),
+      this.prisma.groupMember.count({
+        where: { user_id: userId, group: { deleted_at: null } },
+      }),
     ]);
 
     const verifyTotal =
@@ -829,7 +838,7 @@ export class UserService {
       verify: verifyTotal,
       applications: applicationsTotal,
       announcements: announcementsUnread,
-      groups: 0,
+      groups: groupCount,
       orders: activeOrderCount,
       details: {
         verify_pending_endorsement: pendingEndorsementCount,
@@ -928,7 +937,9 @@ export class UserService {
     }
 
     if (include.includes('relation_change')) {
-      const where: any = { target_user_id: userId };
+      const where: any = {
+        OR: [{ target_user_id: userId }, { operator_user_id: userId }],
+      };
       if (options.status) where.status = options.status;
       const [rows, total] = await Promise.all([
         this.prisma.familyRelationChange.findMany({ where, orderBy: { created_at: 'desc' }, skip, take: pageSize }),

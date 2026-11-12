@@ -16,7 +16,7 @@
  * │ 账户与服务        │ ✓       │ ✓       │ ✓       │ ✓       │ ✓       │
  * └─────────────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
  *
- * EDITOR 在「家族事务」中看不到"我的验证 / 我的申请"（无修改/邀请权限）。
+ * EDITOR 在「家族事务」中看不到"我的验证"（无邀请权限），但能看到自己提交的"我的申请"。
  */
 import type { MenuEntry, MenuLeaf, MenuGroup } from './menuTypes'
 import {
@@ -262,7 +262,8 @@ export const getUserCenterMenuGroups = (input: BuildMenuInput): MenuEntry[] => {
 }
 
 /**
- * EDITOR 在「家族事务」中隐藏"我的验证 / 我的申请"（无修改/邀请权限）。
+ * EDITOR 在「家族事务」中隐藏"我的验证"（无邀请权限）。
+ * "我的申请"保留，只列出本人提交的记录。
  * 返回新数组，不修改入参。
  */
 export const filterMenuByRole = (
@@ -294,12 +295,10 @@ export const filterMenuByRole = (
       // group：处理子项
       const group = item as MenuGroup
       let children = group.children
-      // EDITOR 在「家族事务」隐藏"我的验证 / 我的申请"
+      // EDITOR 在「家族事务」隐藏"我的验证"（无邀请权限）
       if (isEditor && group.title === USER_CENTER_GROUP_TITLES.familyAffairs) {
         children = children.filter(
-          (c) =>
-            c.title !== FAMILY_AFFAIRS_ITEMS.myVerify &&
-            c.title !== FAMILY_AFFAIRS_ITEMS.myApplications,
+          (c) => c.title !== FAMILY_AFFAIRS_ITEMS.myVerify,
         )
       }
       // 未加入家族：「家族事务」整体隐藏
