@@ -25,7 +25,8 @@
  * 见 docs/dagre-vs-elkjs-selection.md。
  */
 
-import ELK from 'elkjs/lib/elk.bundled.js';
+import ELK from 'elkjs/lib/elk-api.js';
+import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url';
 import type { ElkNode } from 'elkjs';
 import type {
   LayoutNode,
@@ -35,8 +36,16 @@ import type {
 } from '@/types/layout';
 import { edgesForEngine } from '@/utils/dagre-layout';
 
+// [2026-11-12 P0 修复] 生产环境 elkjs worker 失效导致渲染超时
+//   旧写法：new ELK({ workerUrl }) + elk.bundled.js —— bundled 版构造器内部
+//   require.resolve('web-worker') 在浏览器必失败，永远回退到"假 worker"
+//   （同线程同步执行），1368 节点布局直接阻塞主线程，UI 冻结并触发
+//   initGraph 30s 渲染超时。
+//   修复：采用 elkjs 官方 workerUrl 模式 —— 用 Vite 的 ?url 后缀把
+//   elk-worker.min.js 作为原样静态资产发布（不做任何 Rollup 转换，
+//   避免 CJS interop 破坏其内部导出），以经典 Worker 加载。
 const elk = new ELK({
-  workerUrl: new URL('../workers/elkjs-layout.worker.ts', import.meta.url).href,
+  workerFactory: () => new Worker(elkWorkerUrl),
 });
 
 /**
