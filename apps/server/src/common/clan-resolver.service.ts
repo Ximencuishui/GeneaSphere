@@ -20,6 +20,22 @@ export class ClanResolverService {
       throw new ForbiddenException('clanSlug is required');
     }
 
+    // 兼容旧链接：纯数字按 clan id 解析（如 /clans/1/migration 传入 "1"）。
+    // 否则数字会走 slug 查询并报 "Clan '1' not found"（2026-11-12 巡检发现）。
+    if (/^\d+$/.test(clanSlug)) {
+      const byId = await this.prisma.clan.findUnique({
+        where: { id: BigInt(clanSlug) },
+        select: { id: true, slug: true, name: true, status: true },
+      });
+      if (!byId) {
+        throw new NotFoundException(`Clan '${clanSlug}' not found`);
+      }
+      if (byId.status !== 'NORMAL') {
+        throw new ForbiddenException('家族当前不可用');
+      }
+      return { id: byId.id, slug: byId.slug ?? clanSlug, name: byId.name };
+    }
+
     // slug 必须是合法的 url-safe 字符串，防止注入
     if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(clanSlug)) {
       throw new NotFoundException(`Invalid clan slug '${clanSlug}'`);
