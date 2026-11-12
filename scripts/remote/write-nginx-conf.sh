@@ -21,6 +21,22 @@ emit_common() {
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
     gzip_min_length 1000;
+    gzip_comp_level 5;
+    # 优先发送预压缩的 .gz 文件（deploy.sh 构建后生成），省 CPU 且响应更快
+    gzip_static on;
+
+    # Vite 产物带内容 hash，可安全长缓存（2026-11-12：跨境链路大文件传输
+    # 容易中断 ERR_INCOMPLETE_CHUNKED_ENCODING，强缓存可让重试直接命中本地缓存）
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files \$uri =404;
+    }
+
+    # index.html 必须每次回源校验，否则发版后用户拿不到新版本
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
 
     # API 反向代理：proxy_pass 末尾不要带 /，否则会剥离 /api/ 前缀导致 404
     location /api/ {
@@ -61,7 +77,7 @@ if [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
     cat << EOF
 
 server {
-    listen 443 ssl;
+    listen 443 ssl http2;
     server_name ${SERVER_NAME% _};
 
     ssl_certificate     ${SSL_CERT};

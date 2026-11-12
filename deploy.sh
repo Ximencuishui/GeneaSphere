@@ -229,6 +229,11 @@ swap_web_dist() {
         return 0
     fi
 
+    # 预压缩静态资源（.gz），配合 nginx gzip_static on：
+    # 免运行时压缩开销，并显著降低跨境链路大文件传输被掐断的概率
+    log_info "预压缩静态资源 (.gz)..."
+    find "$WEB_DIR/dist.new" -type f \( -name '*.js' -o -name '*.css' -o -name '*.svg' -o -name '*.json' -o -name '*.html' \) -exec gzip -k -9 {} + 2>/dev/null || true
+
     # 首次部署：没有旧 dist，直接改名
     if [ ! -d "$WEB_DIR/dist" ]; then
         mv "$WEB_DIR/dist.new" "$WEB_DIR/dist"
