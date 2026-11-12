@@ -4,6 +4,7 @@ import { ClanResolverService } from './clan-resolver.service';
 import { NotificationService } from './notification.service';
 import { CapabilityController } from './capability.controller';
 import { CapabilityService } from './capability.service';
+import { PlaceholderMediaController } from './placeholder-media.controller';
 
 /**
  * 通用服务 Module（@Global），使得任何业务 module 都能直接注入
@@ -12,7 +13,7 @@ import { CapabilityService } from './capability.service';
 @Global()
 @Module({
   imports: [PrismaModule],
-  controllers: [CapabilityController],
+  controllers: [CapabilityController, PlaceholderMediaController],
   providers: [ClanResolverService, NotificationService, CapabilityService],
   exports: [ClanResolverService, NotificationService, CapabilityService],
 })

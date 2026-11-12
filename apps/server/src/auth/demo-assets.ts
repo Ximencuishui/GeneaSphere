@@ -1,13 +1,15 @@
 /**
  * 演示账号图片资源常量
  *
- * 使用 picsum.photos 的 seed 锁定接口（同一 seed 永远返回同一图片），
- * 兼顾视觉真实度与 CDN 缓存命中率。
+ * 使用自托管占位图接口（GET /api/public/pic/:seed/:w/:h，见
+ * common/placeholder-media.controller.ts）：同一 seed 永远返回同一张图，
+ * 且与站点同源——原先指向 picsum.photos，国内网络不可达，
+ * 导致族谱树头像批量加载失败（2026-11-12 生产巡检）。
  *
  * 所有 URL 在种子初始化时一次性写入数据库，前端通过 <el-avatar :src="..."> 渲染。
  */
 
-const PICSUM_BASE = 'https://picsum.photos/seed'
+const PICSUM_BASE = '/api/public/pic'
 
 /** 管理员演示账号头像 */
 export const ADMIN_AVATAR = `${PICSUM_BASE}/geneasphere-admin-zhuxi/200/200`

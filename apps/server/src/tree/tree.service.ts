@@ -1431,14 +1431,24 @@ export class TreeService {
       }
       for (const [personIdStr, link] of perPersonFirst) {
         const fileUrl = link.media.file_url;
-        const parts = fileUrl.split('/');
-        const filename = parts[parts.length - 1];
-        const extIndex = filename.lastIndexOf('.');
-        const basename = extIndex > -1 ? filename.substring(0, extIndex) : filename;
-        const ext = extIndex > -1 ? filename.substring(extIndex) : '.jpg';
+        // 缩略图仅在 COS 托管的 http(s) 原图上按约定拼接（对象存储侧会生成
+        // /media/thumbnails/<name>_80w.jpg）。本地/相对路径（如演示占位图
+        // /api/public/pic/... 或 /uploads/...）没有对应缩略图文件，
+        // 拼接只会得到 404 → G6 加载头像时 console.error(Event) 刷屏
+        //（2026-11-12 巡检定位），此时直接用原图当缩略图。
+        const isRemoteImage = /^https?:\/\//.test(fileUrl);
+        let thumbnailUrl = fileUrl;
+        if (isRemoteImage) {
+          const parts = fileUrl.split('/');
+          const filename = parts[parts.length - 1];
+          const extIndex = filename.lastIndexOf('.');
+          const basename = extIndex > -1 ? filename.substring(0, extIndex) : filename;
+          const ext = extIndex > -1 ? filename.substring(extIndex) : '.jpg';
+          thumbnailUrl = `/media/thumbnails/${basename}_80w${ext}`;
+        }
         map.set(personIdStr, {
           avatar_url: fileUrl,
-          thumbnail_url: `/media/thumbnails/${basename}_80w${ext}`,
+          thumbnail_url: thumbnailUrl,
           has_photo: true,
         });
       }
