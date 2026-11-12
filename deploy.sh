@@ -283,44 +283,16 @@ setup_nginx() {
     fi
 
     # 创建 Nginx 配置
-    cat > /etc/nginx/conf.d/geneasphere.conf << NGINX_EOF
-server {
-    listen ${WEB_PORT};
-    server_name _;
-
-    root ${PROJECT_DIR}/apps/web/dist;
-    index index.html;
-
-    # Gzip 压缩
-    gzip on;
-    gzip_types text/css application/javascript application/json image/svg+xml;
-    gzip_min_length 1000;
-
-    # API 反向代理
-    # 注意：proxy_pass 末尾不要带 /，否则会剥离 /api/ 前缀，导致
-    # @Controller('api/xxx') 形式的接口全部 404。
-    location /api/ {
-        proxy_pass http://127.0.0.1:${API_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_read_timeout 300s;
-        proxy_connect_timeout 10s;
-    }
-
-    # 上传文件
-    location /uploads/ {
-        proxy_pass http://127.0.0.1:${API_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-    }
-
-    # SPA fallback
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-}
-NGINX_EOF
+    # 由 scripts/remote/write-nginx-conf.sh 生成：检测到 /etc/nginx/ssl 证书时
+    # 会同时写 80 与 443，避免重部署把 HTTPS 配置覆盖成纯 HTTP
+    # （生产事故 2026-11-12：https://xungenlu.cn 在部署后无法访问）。
+    NGINX_GEN="$PROJECT_DIR/scripts/remote/write-nginx-conf.sh"
+    if [ ! -f "$NGINX_GEN" ]; then
+        log_error "缺少 Nginx 配置生成脚本: $NGINX_GEN"
+        return 1
+    fi
+    PROJECT_DIR="$PROJECT_DIR" WEB_PORT="$WEB_PORT" API_PORT="$API_PORT" \
+        bash "$NGINX_GEN" > /etc/nginx/conf.d/geneasphere.conf
 
     # 清理默认 server 块（避免冲突）
     if grep -q 'listen.*80' /etc/nginx/nginx.conf 2>/dev/null; then
