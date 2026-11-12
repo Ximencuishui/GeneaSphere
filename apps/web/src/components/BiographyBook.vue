@@ -153,7 +153,7 @@ function bindHead(pageIndex: number, element: unknown) {
           />
           <aside v-if="entry.figures.length" class="bio-figures">
             <figure v-for="(figure, figureIndex) in entry.figures" :key="figure.url + figureIndex" class="bio-figure">
-              <img :src="figure.url" :alt="figure.caption" />
+              <img :src="figure.url" alt="" />
               <figcaption>图：{{ figure.caption }}</figcaption>
             </figure>
           </aside>
@@ -285,16 +285,17 @@ function bindHead(pageIndex: number, element: unknown) {
 .bio-figure {
   margin: 0 0 2mm;
   padding: 1.5mm;
+  overflow: hidden;
 }
 
 .bio-figure img {
   display: block;
-  width: auto;
+  width: 100%;
   height: auto;
-  max-width: 35mm;
-  max-height: 50mm;
-  margin: 0 auto;
-  object-fit: contain;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: #f3efe6;
+  color: transparent;
 }
 
 .bio-figure figcaption {
@@ -458,8 +459,9 @@ function bindHead(pageIndex: number, element: unknown) {
 }
 
 .bio-book.is-antique .bio-figure img {
-  max-width: 35mm;
-  max-height: 50mm;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
 }
 
 .bio-book.is-antique .bio-figure figcaption {

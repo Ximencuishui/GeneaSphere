@@ -1023,6 +1023,9 @@ export class CepuService {
       .bio{font-size:14px;line-height:1.9;margin:4px 0 4px 1em;text-indent:2em;}
       .annotation{font-size:12px;color:#8d6e63;margin:2px 0 2px 1em;}
       .vol-content{line-height:1.9;text-indent:2em;font-size:14px;}
+.vol-content h3,.vol-content h4,.vol-content .poem-line,.vol-content .poem-meta{text-indent:0;text-align:center;}
+.vol-content .poem-line{margin:0;}
+.vol-content .poem-meta{margin:0 0 2px;font-size:12px;color:#666;}
       ${this.shixiTableCss()}
       ${ouChartCss()}
       ${suChartCss()}
@@ -1132,6 +1135,9 @@ h1{text-align:center;font-family:'KaiTi',serif;font-size:26px;border-bottom:2px 
 .bio{font-size:14px;line-height:1.9;margin:4px 0 4px 1em;text-indent:2em;}
 .annotation{font-size:12px;color:#8d6e63;margin:2px 0 2px 1em;}
 .vol-content{line-height:1.9;text-indent:2em;font-size:14px;}
+.vol-content h3,.vol-content h4,.vol-content .poem-line,.vol-content .poem-meta{text-indent:0;text-align:center;}
+.vol-content .poem-line{margin:0;}
+.vol-content .poem-meta{margin:0 0 2px;font-size:12px;color:#666;}
 ${this.shixiTableCss()}
 ${ouChartCss()}
 ${suChartCss()}

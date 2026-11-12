@@ -13,15 +13,27 @@
 import { Controller, Get, Param, Res } from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
 
-/** FNV-1a 32 位哈希：把 seed 映射到稳定的伪随机数序列 */
+/**
+ * FNV-1a 32 位哈希 + 雪崩混合。
+ *
+ * 单纯 FNV 对「只有末尾字符不同」的序列 seed（xxx-1 / xxx-2）区分度极差：
+ * geneasphere-female-3000 与 -3001 的 hue 分别是 110 / 109，肉眼完全同色
+ * （2026-11-12 册谱页发现三张头像一模一样）。后面两轮 xorshift-multiply
+ * 把低位差异扩散到全部比特位，保证相邻 seed 也能拿到完全不同的颜色。
+ */
 function hashSeed(seed: string, salt: number): number {
-    let h = 0x811c9dc5;
+    let h = 0x811c9dc5 ^ Math.imul(salt, 0x9e3779b1);
     const s = seed + ':' + salt;
     for (let i = 0; i < s.length; i++) {
         h ^= s.charCodeAt(i);
         h = Math.imul(h, 0x01000193) >>> 0;
     }
-    return h;
+    h ^= h >>> 16;
+    h = Math.imul(h, 0x7feb352d) >>> 0;
+    h ^= h >>> 15;
+    h = Math.imul(h, 0x846ca68b) >>> 0;
+    h ^= h >>> 16;
+    return h >>> 0;
 }
 
 function personSvg(w: number, h: number, hue1: number, hue2: number, id: string): string {
@@ -58,11 +70,24 @@ function scenerySvg(w: number, h: number, hue1: number, hue2: number, id: string
 </svg>`;
 }
 
+// 路径带 v2 版本段：占位图内容变更时（如今次加强颜色区分度），
+// 旧 URL 仍会被浏览器按 immutable 缓存一年，必须换路径才能让用户拿到新图。
 @Controller('api/public/pic')
 export class PlaceholderMediaController {
     @Public()
-    @Get(':seed/:w/:h')
+    @Get('v2/:seed/:w/:h')
     getPic(@Param('seed') seed: string, @Param('w') wStr: string, @Param('h') hStr: string, @Res() res: any) {
+        return this.sendPic(seed, wStr, hStr, res, true);
+    }
+
+    /** 库里已经写死的旧地址。内容和 v2 相同，避免闺秀录配图变成裂图。 */
+    @Public()
+    @Get(':seed/:w/:h')
+    getLegacyPic(@Param('seed') seed: string, @Param('w') wStr: string, @Param('h') hStr: string, @Res() res: any) {
+        return this.sendPic(seed, wStr, hStr, res, false);
+    }
+
+    private sendPic(seed: string, wStr: string, hStr: string, res: any, immutable: boolean) {
         // seed 只允许 url-safe 字符，防止注入；尺寸限幅
         if (!/^[a-zA-Z0-9_-]{1,64}$/.test(seed)) {
             return res.status(400).send('invalid seed');
@@ -75,8 +100,9 @@ export class PlaceholderMediaController {
             ? personSvg(w, h, hue1, hue2, seed)
             : scenerySvg(w, h, hue1, hue2, seed);
         res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
-        // seed 不变则内容不变，可放心长缓存
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.setHeader('Cache-Control', immutable
+            ? 'public, max-age=31536000, immutable'
+            : 'public, max-age=86400');
         res.send(svg);
     }
 }

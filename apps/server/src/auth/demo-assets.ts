@@ -9,7 +9,7 @@
  * 所有 URL 在种子初始化时一次性写入数据库，前端通过 <el-avatar :src="..."> 渲染。
  */
 
-const PICSUM_BASE = '/api/public/pic'
+const PICSUM_BASE = '/api/public/pic/v2'
 
 /** 管理员演示账号头像 */
 export const ADMIN_AVATAR = `${PICSUM_BASE}/geneasphere-admin-zhuxi/200/200`

@@ -26,6 +26,7 @@ import NameIndexBook from '@/components/NameIndexBook.vue';
 import BookCatalog from '@/components/BookCatalog.vue';
 import BookCover from '@/components/BookCover.vue';
 import GenerationIndexBook from '@/components/GenerationIndexBook.vue';
+import DocumentBook from '@/components/DocumentBook.vue';
 import { europeanChartsFromShilu, europeanViewFromShilu } from '@/utils/european-chart-shilu';
 import { buildBookCatalog, findCatalogVolume, isLadiesVolume, type BookProfile, type CatalogEntry } from '@/utils/book-catalog';
 import { SU_FRAME_WEIGHTS_PT, suFrameWeightPt } from '@/utils/su-chart';
@@ -947,6 +948,9 @@ async function removeVolume(v: BookVolume) {
 }
 
 const isFamilyRulesVolume = computed(() => (volumeContent.value?.title || '').includes('家训'));
+const readingDocument = computed(() =>
+  volumeContent.value?.type === 'document' && !(isAdmin.value && editMode.value),
+);
 
 async function saveDocument() {
   if (!activeVolumeId.value) return;
@@ -1125,8 +1129,8 @@ onMounted(async () => {
       </aside>
 
       <!-- 主内容区（书本式阅读） -->
-      <main class="cepu-main" :class="{ 'is-book-page': isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || viewingCover || placeholderEntry }">
-        <div v-if="(isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry) && !loading && !volumeLoading && !accessError" class="book-script-bar">
+      <main class="cepu-main" :class="{ 'is-book-page': isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || viewingCover || placeholderEntry || readingDocument }">
+        <div v-if="(isLineageChart || isBiography || isLadies || viewingIndex || viewingCatalog || viewingGeneration || placeholderEntry || readingDocument) && !loading && !volumeLoading && !accessError" class="book-script-bar">
           <el-radio-group v-model="bookScript" size="small">
             <el-radio-button value="horizontal">横排简体（版本A）</el-radio-button>
             <el-radio-button value="antique">仿古竖排线装（版本B）</el-radio-button>
@@ -1217,16 +1221,24 @@ onMounted(async () => {
           :rows="generationRows"
           :script="bookScript"
         />
-        <section v-else-if="placeholderEntry" class="slot-preview" :class="{ 'is-antique': bookScript === 'antique' }">
-          <h2>{{ placeholderEntry.text }}</h2>
-          <p>本篇尚未录入。目录里保留这一目，写好内容后会出现在这里。</p>
-        </section>
+        <DocumentBook
+          v-else-if="placeholderEntry"
+          :title="placeholderEntry.text"
+          :anchor-id="placeholderEntry.anchor"
+          :script="bookScript"
+        />
         <template v-else-if="volumeContent">
           <!-- 文档卷 -->
           <template v-if="volumeContent.type === 'document'">
-            <h2 class="vol-title">{{ volumeContent.title }}</h2>
-            <div v-if="!(isAdmin && editMode)" class="book-article" v-html="volumeContent.content || ''" />
+            <DocumentBook
+              v-if="!(isAdmin && editMode)"
+              :title="volumeContent.title"
+              :html="volumeContent.content || ''"
+              :anchor-id="`vol-${volumeContent.id}`"
+              :script="bookScript"
+            />
             <div v-else class="book-editor">
+              <h2 class="vol-title">{{ volumeContent.title }}</h2>
               <p v-if="isFamilyRulesVolume" class="rules-source-note">这一篇和家族概况里的「家规家训」是同一份文字，改任何一边都会写回另一边。</p>
               <el-input
                 v-if="isFamilyRulesVolume"
@@ -1745,20 +1757,6 @@ onMounted(async () => {
   font-size: 12px;
   color: #8a8175;
 }
-.slot-preview {
-  max-width: 720px;
-  margin: 28px auto;
-  font-family: 'KaiTi', 'STKaiti', 'SimSun', serif;
-  text-align: left;
-}
-.slot-preview h2 { margin: 0 0 12px; font-size: 22px; letter-spacing: 0.12em; }
-.slot-preview p { margin: 0; line-height: 1.8; color: #666; }
-.slot-preview.is-antique {
-  writing-mode: vertical-rl;
-  text-orientation: upright;
-  font-family: 'SimSun', 'NSimSun', 'Songti SC', serif;
-  height: 72vh;
-}
 .sidebar-item {
   padding: 8px 10px;
   border-radius: 8px;
@@ -1817,17 +1815,6 @@ onMounted(async () => {
   border-bottom: 2px solid #d8cbb0;
   padding-bottom: 12px;
   margin: 0 0 24px;
-}
-.book-article {
-  line-height: 1.9;
-  font-size: 15px;
-  color: #3e3a35;
-  text-indent: 2em;
-}
-.book-article :deep(img) {
-  max-width: 100%;
-  margin: 8px auto;
-  display: block;
 }
 .rules-source-note {
   margin: 0 0 8px;

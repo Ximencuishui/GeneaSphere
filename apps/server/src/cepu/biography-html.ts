@@ -68,8 +68,8 @@ export function biographyCss(): string {
     .bio-entry + .bio-entry { border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; }
     .bio-anchor { display: block; height: 0; overflow: hidden; }
     .bio-figures { float: right; width: calc(35mm + 4mm); margin: 0 0 2mm 3mm; }
-    .bio-figure { margin: 0 0 2mm; padding: 1.5mm; }
-    .bio-figure img { display: block; width: auto; height: auto; max-width: 35mm; max-height: 50mm; margin: 0 auto; object-fit: contain; }
+    .bio-figure { margin: 0 0 2mm; padding: 1.5mm; overflow: hidden; }
+    .bio-figure img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; background: #f3efe6; color: transparent; }
     .bio-figure figcaption { margin-top: 1mm; font-size: 10px; line-height: 1.4; color: #888; text-align: center; }
     a.book-jump { color: #1a56c4; text-decoration: underline; }
     .bio-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; line-height: 1.5; }
@@ -178,7 +178,7 @@ export function biographyCss(): string {
     .bio-book.is-antique .bio-figure,
     .bio-sheet.is-antique .bio-figure { writing-mode: horizontal-tb; }
     .bio-book.is-antique .bio-figure img,
-    .bio-sheet.is-antique .bio-figure img { max-width: 35mm; max-height: 50mm; }
+    .bio-sheet.is-antique .bio-figure img { width: 100%; aspect-ratio: 1; object-fit: cover; }
     .bio-book.is-antique .bio-figure figcaption,
     .bio-sheet.is-antique .bio-figure figcaption {
       writing-mode: vertical-rl;
