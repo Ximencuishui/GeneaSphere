@@ -78,6 +78,17 @@ export interface OcrUsageLogItem {
   created_at: Date;
 }
 
+export function isInsufficientBalance(error: unknown): error is HttpException {
+  return error instanceof HttpException && error.getStatus() === HttpStatus.PAYMENT_REQUIRED;
+}
+
+interface LockedCredit {
+  paid_balance: number;
+  ocr_pages_used: number;
+  ocr_chars_used: number;
+  ocr_reset_date: Date;
+}
+
 /**
  * OCR 计费服务（v1.0 限免与计费策略）
  * - 月度免费额度：10 页 / 1000 字（先达到者为准）
@@ -106,11 +117,12 @@ export class OcrBillingService {
    */
   private async getOrCreateCredit(userId: string) {
     const prisma = this.prisma as any;
-    let credit = await prisma.userCredit.findUnique({
+    const existing = await prisma.userCredit.findUnique({
       where: { user_id: userId },
     });
-    if (!credit) {
-      credit = await prisma.userCredit.create({
+    if (existing) return existing;
+    try {
+      return await prisma.userCredit.create({
         data: {
           user_id: userId,
           free_remaining: 10,
@@ -120,8 +132,9 @@ export class OcrBillingService {
           ocr_reset_date: this.todayDate(),
         },
       });
+    } catch {
+      return prisma.userCredit.findUnique({ where: { user_id: userId } });
     }
-    return credit;
   }
 
   /**
@@ -205,102 +218,152 @@ export class OcrBillingService {
   }
 
   /**
-   * OCR 完成后调用：结算费用 + 更新额度 + 记录日志
-   * 必须保证 totalChars 已统计完整（中文字符数）
+   * 上传和真正调用 OCR 之前都走这里。免费额度能覆盖时 estimated_fee 为 0，余额为 0 也允许。
+   * 预计要扣钱而余额不够时直接 402，调用方不得再发起识别。
+   */
+  async assertAffordable(userId: string, pages: number): Promise<OcrPrecheckResult> {
+    const precheck = await this.precheckCost(userId, pages);
+    if (!precheck.sufficient) {
+      throw new HttpException(
+        {
+          success: false,
+          error: 'INSUFFICIENT_BALANCE',
+          message: `余额不足，已中止识别：预计需要 ¥${precheck.estimated_fee.toFixed(2)}，当前余额 ¥${Number(precheck.current_paid_balance).toFixed(2)}`,
+          required: precheck.estimated_fee,
+          current: Number(precheck.current_paid_balance),
+        },
+        HttpStatus.PAYMENT_REQUIRED,
+      );
+    }
+    return precheck;
+  }
+
+  /**
+   * OCR 完成后结算。扣减包在行锁里，并发请求会排队看到对方扣完后的余额。
    */
   async chargeAfterOcr(
     userId: string,
     params: OcrChargeParams,
   ): Promise<OcrFeeDetail> {
     const prisma = this.prisma as any;
-    const { taskId, pages, totalChars } = params;
+    await this.getOrCreateCredit(userId);
 
-    // 再次懒加载重置（确保跨任务时也能正确重置）
-    const credit = await this.ensureMonthlyReset(userId);
-
-    // 算法（与需求文档 4.2 一致）
-    const freePagesLeft = Math.max(0, this.FREE_PAGES - credit.ocr_pages_used);
-    const actualFreePagesUsed = Math.min(pages, freePagesLeft);
-    const chargedPages = Math.max(0, pages - actualFreePagesUsed);
-
-    const freeCharsLeft = Math.max(0, this.FREE_CHARS - credit.ocr_chars_used);
-    const actualFreeCharsUsed = Math.min(totalChars, freeCharsLeft);
-    const chargedChars = Math.max(0, totalChars - actualFreeCharsUsed);
-
-    // 不足 100 字按 100 字计
-    const chargedHundredChars = Math.ceil(chargedChars / 100);
-    const pageFee = this.roundMoney(chargedPages * this.PRICE_PER_PAGE);
-    const charFee = this.roundMoney(
-      chargedHundredChars * this.PRICE_PER_100_CHARS,
-    );
-    const fee = this.roundMoney(pageFee + charFee);
-
-    if (fee > credit.paid_balance) {
-      throw new HttpException(
-        {
-          success: false,
-          error: 'INSUFFICIENT_BALANCE',
-          message: `OCR 余额不足：本次需 ¥${fee.toFixed(2)}，当前余额 ¥${credit.paid_balance.toFixed(2)}`,
-          required: fee,
-          current: credit.paid_balance,
-        },
-        HttpStatus.PAYMENT_REQUIRED,
+    return prisma.$transaction(async (tx: any) => {
+      const locked = await tx.$queryRawUnsafe(
+        `SELECT paid_balance, ocr_pages_used, ocr_chars_used, ocr_reset_date
+         FROM user_credits
+         WHERE user_id = $1
+         FOR UPDATE`,
+        userId,
       );
-    }
+      const row = (Array.isArray(locked) ? locked[0] : null) as LockedCredit | undefined;
+      if (!row) {
+        throw new HttpException('计费账户不存在', HttpStatus.PAYMENT_REQUIRED);
+      }
 
-    const feeSource: 'free' | 'paid' | 'mixed' =
-      fee === 0 ? 'free' : chargedPages + chargedChars > 0 ? 'mixed' : 'paid';
-    // 修正语义：实际只需区分"是否扣了费"
-    const finalFeeSource: 'free' | 'paid' | 'mixed' =
-      fee === 0
-        ? 'free'
-        : (actualFreePagesUsed > 0 || actualFreeCharsUsed > 0) && fee > 0
-          ? 'mixed'
-          : 'paid';
+      let pagesUsed = Number(row.ocr_pages_used) || 0;
+      let charsUsed = Number(row.ocr_chars_used) || 0;
+      const balance = Number(row.paid_balance) || 0;
+      const resetDate = new Date(row.ocr_reset_date);
+      const now = new Date();
+      const sameMonth =
+        resetDate.getFullYear() === now.getFullYear() &&
+        resetDate.getMonth() === now.getMonth();
+      if (!sameMonth) {
+        pagesUsed = 0;
+        charsUsed = 0;
+      }
 
-    // 事务：扣余额 + 更新额度 + 写日志
-    const [updatedCredit, log] = await prisma.$transaction([
-      prisma.userCredit.update({
+      const quote = this.quote(pagesUsed, charsUsed, balance, params.pages, params.totalChars);
+      if (quote.fee > balance) {
+        throw new HttpException(
+          {
+            success: false,
+            error: 'INSUFFICIENT_BALANCE',
+            message: `OCR 余额不足：本次需 ¥${quote.fee.toFixed(2)}，当前余额 ¥${balance.toFixed(2)}`,
+            required: quote.fee,
+            current: balance,
+          },
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
+
+      const updated = await tx.userCredit.update({
         where: { user_id: userId },
         data: {
-          paid_balance: { decrement: fee },
-          ocr_pages_used: { increment: actualFreePagesUsed },
-          ocr_chars_used: { increment: actualFreeCharsUsed },
+          paid_balance: { decrement: quote.fee },
+          ocr_pages_used: quote.nextPagesUsed,
+          ocr_chars_used: quote.nextCharsUsed,
+          ...(sameMonth ? {} : { ocr_reset_date: this.todayDate() }),
         },
-      }),
-      prisma.ocrUsageLog.create({
+      });
+      await tx.ocrUsageLog.create({
         data: {
           user_id: userId,
-          task_id: taskId || null,
-          pages_total: pages,
-          chars_total: totalChars,
-          free_pages_used: actualFreePagesUsed,
-          free_chars_used: actualFreeCharsUsed,
-          charged_pages: chargedPages,
-          charged_chars: chargedChars,
-          fee_amount: fee,
-          fee_source: finalFeeSource,
+          task_id: params.taskId || null,
+          pages_total: params.pages,
+          chars_total: params.totalChars,
+          free_pages_used: quote.freePagesUsed,
+          free_chars_used: quote.freeCharsUsed,
+          charged_pages: quote.chargedPages,
+          charged_chars: quote.chargedChars,
+          fee_amount: quote.fee,
+          fee_source: quote.feeSource,
           status: 'completed',
         },
-      }),
-    ]);
+      });
 
-    this.logger.log(
-      `OCR 计费完成 user=${userId} pages=${pages} chars=${totalChars} ` +
-        `free_p=${actualFreePagesUsed} free_c=${actualFreeCharsUsed} ` +
-        `charged_p=${chargedPages} charged_c=${chargedChars} fee=¥${fee.toFixed(2)}`,
+      this.logger.log(
+        `OCR 计费完成 user=${userId} pages=${params.pages} chars=${params.totalChars} ` +
+          `free_p=${quote.freePagesUsed} free_c=${quote.freeCharsUsed} ` +
+          `charged_p=${quote.chargedPages} charged_c=${quote.chargedChars} fee=¥${quote.fee.toFixed(2)}`,
+      );
+      this.logger.log(
+        `[PDF_Import] Task ${params.taskId} 扣费成功 fee=¥${quote.fee.toFixed(2)} balance_after=${Number(updated.paid_balance)}`,
+      );
+
+      return {
+        pages_total: params.pages,
+        chars_total: params.totalChars,
+        free_pages_used: quote.freePagesUsed,
+        free_chars_used: quote.freeCharsUsed,
+        charged_pages: quote.chargedPages,
+        charged_chars: quote.chargedChars,
+        fee_amount: quote.fee,
+        fee_source: quote.feeSource,
+        paid_balance_after: Number(updated.paid_balance),
+      };
+    });
+  }
+
+  private quote(
+    pagesUsed: number,
+    charsUsed: number,
+    _balance: number,
+    pages: number,
+    totalChars: number,
+  ) {
+    const freePagesLeft = Math.max(0, this.FREE_PAGES - pagesUsed);
+    const freePagesUsed = Math.min(pages, freePagesLeft);
+    const chargedPages = Math.max(0, pages - freePagesUsed);
+    const freeCharsLeft = Math.max(0, this.FREE_CHARS - charsUsed);
+    const freeCharsUsed = Math.min(totalChars, freeCharsLeft);
+    const chargedChars = Math.max(0, totalChars - freeCharsUsed);
+    const chargedHundredChars = Math.ceil(chargedChars / 100);
+    const fee = this.roundMoney(
+      chargedPages * this.PRICE_PER_PAGE + chargedHundredChars * this.PRICE_PER_100_CHARS,
     );
-
+    const feeSource: 'free' | 'paid' | 'mixed' =
+      fee === 0 ? 'free' : freePagesUsed > 0 || freeCharsUsed > 0 ? 'mixed' : 'paid';
     return {
-      pages_total: pages,
-      chars_total: totalChars,
-      free_pages_used: actualFreePagesUsed,
-      free_chars_used: actualFreeCharsUsed,
-      charged_pages: chargedPages,
-      charged_chars: chargedChars,
-      fee_amount: fee,
-      fee_source: finalFeeSource,
-      paid_balance_after: updatedCredit.paid_balance,
+      freePagesUsed,
+      freeCharsUsed,
+      chargedPages,
+      chargedChars,
+      fee,
+      feeSource,
+      nextPagesUsed: pagesUsed + freePagesUsed,
+      nextCharsUsed: charsUsed + freeCharsUsed,
     };
   }
 

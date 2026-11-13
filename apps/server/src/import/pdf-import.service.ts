@@ -1,56 +1,85 @@
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, HttpException, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PrismaService } from '@geneasphere/db';
-import { PdfTextParserService, PdfParseResult } from './pdf-text-parser.service';
+import { PdfTextParserService, PdfParseResult, PdfParseProgress } from './pdf-text-parser.service';
 import { OcrService } from './ocr.service';
 import { CosService } from '../cos/cos.service';
-import { ImageProcessorService } from '../cos/image-processor.service';
 import {
   OcrBillingService,
   OcrFeeDetail,
   OcrPrecheckResult,
+  isInsufficientBalance,
 } from './ocr-billing.service';
+import { PedigreeService } from '../pedigree/pedigree.service';
+import { extractPersonsFromText, PdfPersonRecord } from './pdf-person-parser';
+import { PdfParseQueue } from './pdf-parse-queue';
+import {
+  PDF_PARSE_TIMEOUT_MESSAGE,
+  PdfParseTimeoutError,
+  runWithDeadline,
+} from './pdf-parse-timeout';
 
-export interface PdfImportTask {
-  taskId: string;
-  status: 'pending' | 'parsing' | 'preview' | 'correcting' | 'importing' | 'completed' | 'failed';
-  fileName: string;
-  fileSize: number;
-  parseMode: 'text' | 'ocr';
-  totalPages: number;
-  extractedRecords: PdfPersonRecord[];
+export type { PdfPersonRecord } from './pdf-person-parser';
+
+export type DuplicateStrategy = 'skip' | 'merge' | 'create';
+
+export interface DuplicateNameHit {
+  fullName: string;
+  count: number;
+  rowNumbers: number[];
+}
+
+export interface PdfImportResult {
+  successCount: number;
+  failureCount: number;
+  skippedCount: number;
+  mergedCount: number;
+  errors: string[];
+  needsDuplicateChoice?: boolean;
+  duplicates?: DuplicateNameHit[];
+  anchorPersonId?: string;
+}
+
+/** 落在 pdf_import_tasks.ocr_result 里的解析与计费快照 */
+interface StoredOcrResult {
+  records: PdfPersonRecord[];
   metadata: Record<string, any>;
-  errorMessage?: string;
-  // 持久化到 pdf_import_logs 的记录 ID（修谱工作流/导入管理页据此展示）
-  importLogId?: bigint;
-  // ========== OCR 计费相关字段 ==========
   ocrProvider?: string;
   ocrEstimatedFee?: number;
   ocrPrecheck?: OcrPrecheckResult;
   ocrFeeDetail?: OcrFeeDetail;
   ocrCharsCount?: number;
+  importResult?: PdfImportResult;
+  progress?: PdfParseProgress;
 }
 
-export interface PdfPersonRecord {
-  rowNumber: number;
-  fullName: string;
-  gender?: 'M' | 'F' | 'UNKNOWN';
-  generation?: number;
-  birthDate?: string;
-  deathDate?: string;
-  isLiving?: boolean;
-  parentName?: string;
-  spouseName?: string;
-  biography?: string;
-  burialPlace?: string;
-  notes?: string;
-  confidenceScore: number;
-  originalText?: string;
+export interface PdfImportTaskState {
+  taskId: string;
+  clanId: string;
+  status: 'pending' | 'parsing' | 'preview' | 'correcting' | 'importing' | 'completed' | 'failed';
+  fileName: string;
+  fileSize: number;
+  parseMode: 'text' | 'ocr';
+  totalPages: number;
+  records: PdfPersonRecord[];
+  metadata: Record<string, any>;
+  errorMessage?: string;
+  ocrProvider?: string;
+  ocrEstimatedFee?: number;
+  ocrPrecheck?: OcrPrecheckResult;
+  ocrFeeDetail?: OcrFeeDetail;
+  ocrCharsCount?: number;
+  importResult?: PdfImportResult;
+  progress?: PdfParseProgress;
 }
 
 @Injectable()
-export class PdfImportService {
+export class PdfImportService implements OnModuleInit {
   private readonly logger = new Logger(PdfImportService.name);
-  private importTasks = new Map<string, PdfImportTask>();
+  private readonly uploadRoot = path.resolve(process.cwd(), 'uploads', 'pdf-import');
+  private readonly parseQueue = new PdfParseQueue();
+  private static readonly STALE_STATUSES = ['pending', 'parsing', 'preview', 'correcting', 'importing', 'failed'];
 
   constructor(
     private readonly pdfTextParser: PdfTextParserService,
@@ -58,350 +87,475 @@ export class PdfImportService {
     private readonly ocrService: OcrService,
     private readonly ocrBilling: OcrBillingService,
     private readonly cosService: CosService,
-    private readonly imageProcessor: ImageProcessorService,
+    private readonly pedigreeService: PedigreeService,
   ) {}
 
+  async onModuleInit() {
+    this.startup().catch((err) => {
+      this.logger.error(`PDF 导入启动清理失败: ${(err as Error).message}`);
+    });
+  }
+
+  private async startup(): Promise<void> {
+    await this.cleanupStaleTasks().catch((err) => {
+      this.logger.error(`清理过期 PDF 导入任务失败: ${(err as Error).message}`);
+    });
+    await this.resumeIncomplete();
+  }
+
   /**
-   * 创建PDF导入任务
-   * @param userId 用户ID
-   * @param clanId 家族ID
-   * @param fileBuffer PDF文件Buffer
-   * @param fileName 文件名
-   * @returns 任务ID
+   * 创建 PDF 导入任务。扫描件先预检余额，不够就直接拒绝，不落任务、不进 OCR。
+   * 通过的任务进入单并发队列，后上传的在前一份解析完之前保持 pending。
    */
   async createImportTask(
     userId: string,
     clanId: bigint,
     fileBuffer: Buffer,
-    fileName: string
-  ): Promise<string> {
+    fileName: string,
+  ): Promise<{ taskId: string; queued: boolean; queuePosition: number }> {
+    const assessment = await this.pdfTextParser.assessPdf(fileBuffer);
+    if (assessment.needsOcr) {
+      await this.ocrBilling.assertAffordable(userId, assessment.totalPages);
+    }
+
     const taskId = this.generateTaskId();
-    const fileSize = fileBuffer.length;
+    const fileUrl = await this.persistOriginalFile(clanId, taskId, fileBuffer);
+    let taskCreated = false;
 
-    this.logger.log(`创建PDF导入任务: ${taskId}, 文件: ${fileName}`);
-
-    // 创建任务记录
-    const task: PdfImportTask = {
-      taskId,
-      status: 'pending',
-      fileName,
-      fileSize,
-      parseMode: 'text',
-      totalPages: 0,
-      extractedRecords: [],
-      metadata: {},
-    };
-
-    this.importTasks.set(taskId, task);
-
-    // 持久化导入记录（供导入管理页 / 修谱工作流读取；失败不阻塞主流程）
     try {
-      const log = await this.prisma.pdfImportLog.create({
+    this.logger.log(`[PDF_Import] Task ${taskId} 开始接收 ${fileName}`);
+
+    await this.prisma.pdfImportTask.create({
+      data: {
+        id: taskId,
+        user_id: userId,
+        clan_id: clanId,
+        file_name: fileName,
+        file_size: BigInt(fileBuffer.length),
+        file_url: fileUrl,
+        parse_mode: assessment.needsOcr ? 'ocr' : 'text',
+        total_pages: assessment.totalPages,
+        status: 'pending',
+        ocr_result: { records: [], metadata: {} },
+      },
+    });
+    taskCreated = true;
+
+    try {
+      await this.prisma.pdfImportLog.create({
         data: {
           task_id: taskId,
           user_id: userId,
           clan_id: clanId,
           file_name: fileName,
-          file_size: fileSize,
-          parse_mode: 'text',
+          file_size: BigInt(fileBuffer.length),
+          file_path: fileUrl,
+          parse_mode: assessment.needsOcr ? 'ocr' : 'text',
+          total_pages: assessment.totalPages,
           status: 'pending',
         },
       });
-      task.importLogId = log.id;
     } catch (err) {
       this.logger.warn(`PdfImportLog 持久化失败（不影响解析）: ${(err as Error).message}`);
     }
 
-    // COS 模式：异步上传原始 PDF 到冷 Bucket
     if (this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true') {
       this.uploadOriginalPdfToCos(taskId, fileBuffer, userId, clanId).catch((err) => {
         this.logger.warn(`原始 PDF 上传 COS 失败（非关键路径）: ${err.message}`);
       });
     }
 
-    // 异步开始解析
-    this.parsePdfAsync(taskId, fileBuffer, userId, clanId);
-
-    return taskId;
-  }
-
-  /**
-   * 获取任务状态
-   * @param taskId 任务ID
-   * @returns 任务信息
-   */
-  getTaskStatus(taskId: string): PdfImportTask | undefined {
-    return this.importTasks.get(taskId);
-  }
-
-  /**
-   * 获取任务预览数据
-   * @param taskId 任务ID
-   * @returns 提取的人员记录
-   */
-  getTaskPreview(taskId: string): PdfPersonRecord[] | undefined {
-    const task = this.importTasks.get(taskId);
-    return task?.status === 'preview' || task?.status === 'correcting'
-      ? task.extractedRecords
-      : undefined;
-  }
-
-  /**
-   * 更新校对后的数据
-   * @param taskId 任务ID
-   * @param correctedRecords 校正后的记录
-   */
-  updateCorrectedRecords(taskId: string, correctedRecords: PdfPersonRecord[]): void {
-    const task = this.importTasks.get(taskId);
-    if (task) {
-      task.extractedRecords = correctedRecords;
-      task.status = 'correcting';
-      this.logger.log(`任务 ${taskId} 已更新校对记录，共 ${correctedRecords.length} 条`);
-      // 持久化：标记临时记录已校对（左右对照编修证据，修谱工作流据此推进）
-      this.persistCorrection(task, correctedRecords).catch((err) =>
-        this.logger.warn(`校对结果持久化失败: ${(err as Error).message}`),
-      );
-    }
-  }
-
-  /**
-   * 持久化校对结果：更新临时记录字段并标记 is_corrected=true，导入记录进入 correcting。
-   */
-  private async persistCorrection(
-    task: PdfImportTask,
-    records: PdfPersonRecord[],
-  ): Promise<void> {
-    if (!task.importLogId) return;
-    await this.updateImportLog(task, { status: 'correcting' });
-    if (records.length === 0) return;
-
-    for (const r of records) {
-      await this.prisma.pdfParseTemp.updateMany({
-        where: { import_log_id: task.importLogId, row_number: r.rowNumber },
-        data: {
-          full_name: r.fullName,
-          gender: r.gender || 'UNKNOWN',
-          generation: r.generation ?? null,
-          birth_date: r.birthDate ? new Date(r.birthDate) : null,
-          death_date: r.deathDate ? new Date(r.deathDate) : null,
-          is_living: r.isLiving ?? true,
-          parent_name: r.parentName ?? null,
-          spouse_name: r.spouseName ?? null,
-          biography: r.biography ?? null,
-          burial_place: r.burialPlace ?? null,
-          notes: r.notes ?? null,
-          confidence_score: r.confidenceScore ?? null,
-          is_corrected: true,
+    const busy = this.parseQueue.pendingCount > 0;
+    if (busy) {
+      await this.persistTask(taskId, { status: 'pending' }, {
+        progress: {
+          phase: 'reading',
+          currentPage: 0,
+          totalPages: assessment.totalPages,
+          message: '排队等待解析',
         },
       });
     }
+    const slot = this.enqueueStoredTask(taskId, userId, clanId);
+    this.logger.log(
+      `[PDF_Import] Task ${taskId} 已入队 position=${slot.queuePosition} queued=${slot.queued}`,
+    );
+    return { taskId, queued: slot.queued, queuePosition: slot.queuePosition };
+    } catch (error) {
+      if (!taskCreated) await this.removeStoredFile(fileUrl);
+      throw error;
+    }
   }
 
-  /**
-   * 执行导入
-   * @param taskId 任务ID
-   * @param userId 用户ID
-   * @param clanId 家族ID
-   * @returns 导入结果
-   */
+  async getTaskStatus(taskId: string): Promise<PdfImportTaskState | null> {
+    const row = await this.prisma.pdfImportTask.findUnique({ where: { id: taskId } });
+    if (!row) return null;
+    return this.toState(row);
+  }
+
+  async getTaskPreview(taskId: string): Promise<PdfPersonRecord[] | undefined> {
+    const task = await this.getTaskStatus(taskId);
+    if (!task) return undefined;
+    if (task.status !== 'preview' && task.status !== 'correcting') return undefined;
+    return task.records;
+  }
+
+  async updateCorrectedRecords(taskId: string, correctedRecords: PdfPersonRecord[]): Promise<void> {
+    const row = await this.prisma.pdfImportTask.findUnique({ where: { id: taskId } });
+    if (!row) {
+      throw new NotFoundException('任务不存在');
+    }
+    if (row.status !== 'preview' && row.status !== 'correcting') {
+      throw new BadRequestException('任务状态不正确，无法校对');
+    }
+
+    await this.persistTask(taskId, { status: 'correcting' }, { records: correctedRecords });
+    await this.updateLog(taskId, { status: 'correcting' });
+    await this.persistCorrection(taskId, correctedRecords);
+    this.logger.log(`任务 ${taskId} 已更新校对记录，共 ${correctedRecords.length} 条`);
+  }
+
   async executeImport(
     taskId: string,
-    userId: string,
-    clanId: bigint
-  ): Promise<{ successCount: number; failureCount: number; errors: string[] }> {
-    const task = this.importTasks.get(taskId);
-    if (!task) {
-      throw new Error('任务不存在');
+    clanId: bigint,
+    correctedRecords?: PdfPersonRecord[],
+    duplicateStrategy?: DuplicateStrategy,
+  ): Promise<PdfImportResult> {
+    const row = await this.prisma.pdfImportTask.findUnique({ where: { id: taskId } });
+    if (!row) {
+      throw new NotFoundException('任务不存在');
+    }
+    if (row.clan_id !== clanId) {
+      throw new ForbiddenException('任务不属于该家族');
+    }
+    if (row.status !== 'correcting' && row.status !== 'preview') {
+      throw new BadRequestException('任务状态不正确，请先完成解析和校对');
     }
 
-    if (task.status !== 'correcting' && task.status !== 'preview') {
-      throw new Error('任务状态不正确，请先完成解析和校对');
+    const source = correctedRecords ?? this.readPayload(row.ocr_result).records;
+    const records = rebindRelations(source.map((item) => ({ ...item })));
+    if (records.length === 0) {
+      throw new BadRequestException('没有可导入的人员记录');
+    }
+    if (records.some((item) => !item.fullName?.trim())) {
+      throw new BadRequestException('存在空姓名，请先在校对表中补全或删除');
     }
 
-    task.status = 'importing';
-    const errors: string[] = [];
-    let successCount = 0;
-    let failureCount = 0;
+    await this.persistTask(taskId, { status: 'correcting' }, { records });
+    await this.updateLog(taskId, { status: 'correcting' });
+    await this.persistCorrection(taskId, records);
+
+    const duplicates = await this.findDuplicateNames(clanId, records);
+    if (duplicates.length > 0 && !duplicateStrategy) {
+      return {
+        successCount: 0,
+        failureCount: 0,
+        skippedCount: 0,
+        mergedCount: 0,
+        errors: [],
+        needsDuplicateChoice: true,
+        duplicates,
+      };
+    }
+
+    await this.persistTask(taskId, { status: 'importing' });
+    await this.updateLog(taskId, { status: 'importing' });
 
     try {
-      // 批量导入人员数据
-      for (const record of task.extractedRecords) {
-        try {
-          await this.importPersonRecord(record, clanId);
-          successCount++;
-        } catch (error) {
-          failureCount++;
-          errors.push(`第${record.rowNumber}行导入失败: ${error.message}`);
-          this.logger.error(`导入记录失败 (行${record.rowNumber}): ${error.message}`);
-        }
-      }
-
-      task.status = 'completed';
-      this.logger.log(
-        `任务 ${taskId} 导入完成: 成功 ${successCount} 条, 失败 ${failureCount} 条`
-      );
-
-      // 持久化导入结果（保存数据表证据：success_records > 0）
-      await this.updateImportLog(task, {
+      const importResult = await this.writeRecords(clanId, records, duplicateStrategy ?? 'create');
+      await this.persistTask(taskId, { status: 'completed' }, { records, importResult });
+      await this.updateLog(taskId, {
         status: 'completed',
-        total_records: task.extractedRecords.length,
-        success_records: successCount,
-        failed_records: failureCount,
+        total_records: records.length,
+        success_records: importResult.successCount,
+        failed_records: importResult.failureCount,
         completed_at: new Date(),
-      }).catch((err) =>
-        this.logger.warn(`PdfImportLog 完成状态回写失败: ${(err as Error).message}`),
+      });
+      this.logger.log(
+        `任务 ${taskId} 导入完成: 新增/合并 ${importResult.successCount} 条, 跳过 ${importResult.skippedCount} 条`,
       );
-
-      return { successCount, failureCount, errors };
+      return importResult;
     } catch (error) {
-      task.status = 'failed';
-      task.errorMessage = error.message;
-      await this.updateImportLog(task, {
-        status: 'failed',
-        error_message: error.message,
-      }).catch((err) =>
-        this.logger.warn(`PdfImportLog 失败状态回写失败: ${(err as Error).message}`),
-      );
+      const errorMessage = (error as Error).message || '导入执行失败';
+      await this.persistTask(taskId, { status: 'correcting', error_message: errorMessage });
+      await this.updateLog(taskId, { status: 'correcting', error_message: errorMessage });
       throw error;
     }
   }
 
   /**
-   * 异步解析PDF
+   * 进程重启后，把仍停在 pending/parsing 且文件还在的任务重新解析。
    */
+  private async resumeIncomplete(): Promise<void> {
+    const rows = await this.prisma.pdfImportTask.findMany({
+      where: { status: { in: ['pending', 'parsing'] } },
+      orderBy: { created_at: 'asc' },
+    });
+    if (rows.length === 0) return;
+    this.logger.log(`恢复 ${rows.length} 个未完成的 PDF 导入任务`);
+
+    for (const row of rows) {
+      try {
+        if (!row.file_url) {
+          await this.markFailed(row.id, '原始文件缺失，无法恢复解析');
+          continue;
+        }
+        const abs = this.resolveStoredFile(row.file_url);
+        if (!fs.existsSync(abs)) {
+          await this.markFailed(row.id, '原始文件缺失，无法恢复解析');
+          continue;
+        }
+        this.enqueueStoredTask(row.id, row.user_id, row.clan_id);
+      } catch (err) {
+        this.logger.error(`恢复任务 ${row.id} 失败: ${(err as Error).message}`);
+        await this.markFailed(row.id, (err as Error).message || '恢复解析失败');
+      }
+    }
+  }
+
+  private enqueueStoredTask(
+    taskId: string,
+    userId: string,
+    clanId: bigint,
+  ): { queued: boolean; queuePosition: number } {
+    return this.parseQueue.enqueue(async () => {
+      const row = await this.prisma.pdfImportTask.findUnique({ where: { id: taskId } });
+      if (!row?.file_url) {
+        await this.markFailed(taskId, '原始文件缺失，无法解析');
+        return;
+      }
+      if (row.status === 'failed' || row.status === 'completed') return;
+      const abs = this.resolveStoredFile(row.file_url);
+      if (!fs.existsSync(abs)) {
+        await this.markFailed(taskId, '原始文件缺失，无法解析');
+        return;
+      }
+      const buffer = await fs.promises.readFile(abs);
+      await runWithDeadline(
+        (isExpired) => this.parsePdfAsync(taskId, buffer, userId, clanId, isExpired),
+        async () => {
+          this.logger.error(`[PDF_Import] Task ${taskId} 解析失败: ${PDF_PARSE_TIMEOUT_MESSAGE}`);
+          await this.ocrService.releaseEngine().catch((err) => {
+            this.logger.warn(`[PDF_Import] Task ${taskId} 释放识别引擎失败: ${(err as Error).message}`);
+          });
+          await this.markFailed(taskId, PDF_PARSE_TIMEOUT_MESSAGE);
+          await this.removeStoredFile(row.file_url);
+        },
+      );
+    });
+  }
+
+  private async failForBalance(taskId: string, userId: string, error: HttpException): Promise<void> {
+    const resp = error.getResponse() as { message?: string; error?: string; required?: number; current?: number };
+    const errorMessage = resp?.message || '余额不足，已中止识别';
+    await this.persistTask(
+      taskId,
+      { status: 'failed', error_message: errorMessage },
+      {
+        metadata: {
+          ocrBillingError: {
+            error: resp?.error || 'INSUFFICIENT_BALANCE',
+            required: resp?.required,
+            current: resp?.current,
+          },
+        },
+      },
+    );
+    await this.updateLog(taskId, { status: 'failed', error_message: errorMessage });
+    await this.ocrBilling.recordFailure(userId, taskId, errorMessage);
+    this.logger.warn(`[PDF_Import] Task ${taskId} 解析失败: ${errorMessage}`);
+  }
+
+  /**
+   * 删除 7 天前仍未完成或已经失败的任务，以及落在本地的临时 PDF。
+   */
+  async cleanupStaleTasks(days = 7): Promise<number> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.pdfImportTask.findMany({
+      where: {
+        status: { in: PdfImportService.STALE_STATUSES },
+        created_at: { lt: cutoff },
+      },
+      select: { id: true, file_url: true },
+    });
+    for (const row of rows) {
+      if (row.file_url) {
+        try {
+          await fs.promises.unlink(this.resolveStoredFile(row.file_url));
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== 'ENOENT') {
+            this.logger.warn(`删除临时 PDF 失败 ${row.id}: ${(error as Error).message}`);
+          }
+        }
+      }
+      const log = await this.prisma.pdfImportLog.findUnique({
+        where: { task_id: row.id },
+        select: { id: true },
+      });
+      if (log) {
+        await this.prisma.pdfParseTemp.deleteMany({ where: { import_log_id: log.id } });
+        await this.prisma.pdfImportLog.delete({ where: { id: log.id } });
+      }
+      await this.prisma.pdfImportTask.delete({ where: { id: row.id } });
+    }
+    if (rows.length > 0) {
+      this.logger.log(`已清理 ${rows.length} 个超过 ${days} 天的未完成或失败导入任务`);
+    }
+    return rows.length;
+  }
+
   private async parsePdfAsync(
     taskId: string,
     fileBuffer: Buffer,
     userId: string,
-    clanId: bigint
+    _clanId: bigint,
+    isExpired: () => boolean = () => false,
   ): Promise<void> {
-    const task = this.importTasks.get(taskId);
-    if (!task) return;
-
+    const ensureAlive = () => {
+      if (isExpired()) throw new PdfParseTimeoutError();
+    };
     try {
-      task.status = 'parsing';
-      task.ocrProvider = this.ocrService.getProviderName();
+      const provider = this.ocrService.getProviderName();
+      this.logger.log(`[PDF_Import] Task ${taskId} 开始解析`);
+      const existing = await this.getTaskStatus(taskId);
+      await this.persistTask(taskId, { status: 'parsing' }, { ocrProvider: provider });
+      await this.updateLog(taskId, { status: 'parsing' });
+      await this.reportProgress(taskId, {
+        phase: 'reading',
+        currentPage: 0,
+        totalPages: 0,
+        message: '正在读取 PDF',
+      });
 
-      // 解析PDF文本（如需 OCR，pdfTextParser 内部自动调用）
-      const pdfResult: PdfParseResult = await this.pdfTextParser.parsePdf(fileBuffer);
-      task.totalPages = pdfResult.totalPages;
-      task.metadata = pdfResult.metadata;
+      const pdfResult: PdfParseResult = await this.pdfTextParser.parsePdf(fileBuffer, {
+        shouldAbort: isExpired,
+        onProgress: (progress) => {
+          ensureAlive();
+          return this.reportProgress(taskId, progress);
+        },
+        beforeOcr: existing?.ocrFeeDetail
+          ? undefined
+          : async (pages) => {
+              ensureAlive();
+              const precheck = await this.ocrBilling.assertAffordable(userId, pages);
+              this.logger.log(
+                `OCR 预检通过 user=${userId} pages=${pages} estimated_fee=¥${precheck.estimated_fee.toFixed(2)}`,
+              );
+            },
+      });
+      ensureAlive();
+      const parseMode: 'text' | 'ocr' = pdfResult.source === 'ocr' ? 'ocr' : 'text';
 
-      // 检测PDF类型
-      const pdfType = await this.pdfTextParser.detectPdfType(fileBuffer);
-      task.parseMode = pdfType === 'scan' ? 'ocr' : 'text';
+      this.logger.log(`[PDF_Import] Task ${taskId} 文本层读取完成 mode=${parseMode} pages=${pdfResult.totalPages}`);
 
-      this.logger.log(`PDF类型: ${pdfType}, 页数: ${pdfResult.totalPages}`);
+      const payload: Partial<StoredOcrResult> = {
+        ocrProvider: provider,
+        metadata: pdfResult.metadata || {},
+      };
 
-      // ========== OCR 计费集成（扫描件 PDF 才走）==========
-      if (task.parseMode === 'ocr' && task.totalPages > 0) {
-        const precheck = await this.ocrBilling.precheckCost(
-          userId,
-          task.totalPages,
-        );
-        task.ocrPrecheck = precheck;
-        task.ocrEstimatedFee = precheck.estimated_fee;
-        this.logger.log(
-          `OCR 预检 user=${userId} pages=${task.totalPages} ` +
-            `estimated_fee=¥${precheck.estimated_fee.toFixed(2)} ` +
-            `sufficient=${precheck.sufficient}`,
-        );
-
-        // 统计本次识别的中文字数
-        const totalChars = OcrBillingService.countChineseChars(pdfResult.text);
-        task.ocrCharsCount = totalChars;
-
-        // 精确扣费（事务：余额检查 + 扣费 + 写日志）
-        try {
-          const feeDetail = await this.ocrBilling.chargeAfterOcr(userId, {
+      if (parseMode === 'ocr' && pdfResult.totalPages > 0) {
+        if (existing?.ocrFeeDetail) {
+          payload.ocrPrecheck = existing.ocrPrecheck;
+          payload.ocrEstimatedFee = existing.ocrEstimatedFee;
+          payload.ocrCharsCount = existing.ocrCharsCount;
+          payload.ocrFeeDetail = existing.ocrFeeDetail;
+          this.logger.log(`任务 ${taskId} 已扣费，恢复解析时跳过重复计费`);
+        } else {
+          const totalChars = OcrBillingService.countChineseChars(pdfResult.text);
+          ensureAlive();
+          payload.ocrCharsCount = totalChars;
+          const precheck = await this.ocrBilling.precheckCost(userId, pdfResult.totalPages);
+          payload.ocrPrecheck = precheck;
+          payload.ocrEstimatedFee = precheck.estimated_fee;
+          payload.ocrFeeDetail = await this.ocrBilling.chargeAfterOcr(userId, {
             taskId,
-            pages: task.totalPages,
+            pages: pdfResult.totalPages,
             totalChars,
           });
-          task.ocrFeeDetail = feeDetail;
-        } catch (error) {
-          if (error instanceof HttpException) {
-            task.status = 'failed';
-            const resp = error.getResponse() as any;
-            task.errorMessage =
-              resp?.message || 'OCR 计费失败，余额不足';
-            task.metadata.ocrBillingError = {
-              error: resp?.error || 'INSUFFICIENT_BALANCE',
-              required: resp?.required,
-              current: resp?.current,
-            };
-            await this.ocrBilling.recordFailure(
-              userId,
-              taskId,
-              task.errorMessage,
-            );
-            this.logger.error(
-              `任务 ${taskId} OCR 计费失败：${task.errorMessage}`,
-            );
-            return;
-          }
-          throw error;
+          this.logger.log(
+            `[PDF_Import] Task ${taskId} 扣费成功 fee=¥${payload.ocrFeeDetail.fee_amount.toFixed(2)}`,
+          );
+          await this.persistTask(
+            taskId,
+            { status: 'parsing', parse_mode: parseMode, total_pages: pdfResult.totalPages },
+            payload,
+          );
         }
       }
 
-      // 清理文本
       const cleanedText = this.pdfTextParser.cleanPdfText(pdfResult.text);
+      await this.reportProgress(taskId, {
+        phase: 'extracting',
+        currentPage: pdfResult.totalPages,
+        totalPages: pdfResult.totalPages,
+        message: '正在提取人物',
+      });
+      const extractedRecords = this.extractPersonInfo(cleanedText, parseMode === 'ocr');
+      ensureAlive();
 
-      // 提取人员信息（传入是否为OCR模式）
-      const isOcrText = task.parseMode === 'ocr';
-      const extractedRecords = this.extractPersonInfo(cleanedText, isOcrText);
-      task.extractedRecords = extractedRecords;
-
-      task.status = 'preview';
-      this.logger.log(
-        `任务 ${taskId} 解析完成, 提取 ${extractedRecords.length} 条人员记录`
+      await this.persistTask(
+        taskId,
+        {
+          status: 'preview',
+          parse_mode: parseMode,
+          total_pages: pdfResult.totalPages,
+          error_message: null,
+        },
+        { ...payload, records: extractedRecords, progress: {
+          phase: 'done',
+          currentPage: pdfResult.totalPages,
+          totalPages: pdfResult.totalPages,
+          message: '解析完成',
+        } },
       );
-
-      // 持久化解析结果（pdf_import_logs + pdf_parse_temp，供左右对照编修 / 修谱工作流读取）
-      await this.persistParseResult(task, extractedRecords);
+      await this.persistParseResult(taskId, parseMode, pdfResult.totalPages, extractedRecords);
+      this.logger.log(`[PDF_Import] Task ${taskId} 解析完成 records=${extractedRecords.length}`);
     } catch (error) {
-      task.status = 'failed';
-      task.errorMessage = error.message;
-      this.logger.error(`任务 ${taskId} 解析失败: ${error.message}`);
-      // 同步导入记录状态
-      await this.updateImportLog(task, {
-        status: 'failed',
-        error_message: error.message,
-      }).catch((e) =>
-        this.logger.warn(`PdfImportLog 失败状态回写失败: ${(e as Error).message}`),
-      );
+      if (this.isParseTimeout(error)) {
+        this.logger.error(`[PDF_Import] Task ${taskId} 解析失败: ${PDF_PARSE_TIMEOUT_MESSAGE}`);
+        await this.markFailed(taskId, PDF_PARSE_TIMEOUT_MESSAGE);
+        return;
+      }
+      if (isInsufficientBalance(error)) {
+        await this.failForBalance(taskId, userId, error);
+        return;
+      }
+      const errorMessage = (error as Error).message || 'PDF 解析失败';
+      this.logger.error(`[PDF_Import] Task ${taskId} 解析失败: ${errorMessage}`);
+      await this.markFailed(taskId, errorMessage);
     }
   }
 
-  /**
-   * 持久化解析结果：更新导入记录状态并写入临时数据表（pdf_parse_temp）。
-   * 失败仅告警，不阻塞导入主流程（与旧逻辑保持一致）。
-   */
+  private isParseTimeout(error: unknown): boolean {
+    return error instanceof PdfParseTimeoutError;
+  }
+
   private async persistParseResult(
-    task: PdfImportTask,
+    taskId: string,
+    parseMode: string,
+    totalPages: number,
     records: PdfPersonRecord[],
   ): Promise<void> {
-    if (!task.importLogId) return;
+    const log = await this.prisma.pdfImportLog.findUnique({ where: { task_id: taskId } });
+    if (!log) return;
 
     try {
       await this.prisma.pdfImportLog.update({
-        where: { id: task.importLogId },
+        where: { id: log.id },
         data: {
-          parse_mode: task.parseMode,
-          total_pages: task.totalPages,
+          parse_mode: parseMode,
+          total_pages: totalPages,
           total_records: records.length,
           status: 'preview',
         },
       });
 
-      // 全量重建临时记录（保持与最新解析/校对结果一致）
-      await this.prisma.pdfParseTemp.deleteMany({
-        where: { import_log_id: task.importLogId },
-      });
+      await this.prisma.pdfParseTemp.deleteMany({ where: { import_log_id: log.id } });
       if (records.length > 0) {
         await this.prisma.pdfParseTemp.createMany({
           data: records.map((r) => ({
-            import_log_id: task.importLogId!,
+            import_log_id: log.id,
             row_number: r.rowNumber,
             full_name: r.fullName,
             gender: r.gender || 'UNKNOWN',
@@ -425,191 +579,348 @@ export class PdfImportService {
     }
   }
 
-  /** 更新 pdf_import_logs 记录（失败仅告警） */
-  private async updateImportLog(
-    task: PdfImportTask,
-    data: Record<string, unknown>,
+  private async persistCorrection(taskId: string, records: PdfPersonRecord[]): Promise<void> {
+    const log = await this.prisma.pdfImportLog.findUnique({ where: { task_id: taskId } });
+    if (!log || records.length === 0) return;
+
+    try {
+      for (const r of records) {
+        await this.prisma.pdfParseTemp.updateMany({
+          where: { import_log_id: log.id, row_number: r.rowNumber },
+          data: {
+            full_name: r.fullName,
+            gender: r.gender || 'UNKNOWN',
+            generation: r.generation ?? null,
+            birth_date: r.birthDate ? new Date(r.birthDate) : null,
+            death_date: r.deathDate ? new Date(r.deathDate) : null,
+            is_living: r.isLiving ?? true,
+            parent_name: r.parentName ?? null,
+            spouse_name: r.spouseName ?? null,
+            biography: r.biography ?? null,
+            burial_place: r.burialPlace ?? null,
+            notes: r.notes ?? null,
+            confidence_score: r.confidenceScore ?? null,
+            is_corrected: true,
+          },
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`校对结果持久化失败: ${(err as Error).message}`);
+    }
+  }
+
+  private async markFailed(taskId: string, errorMessage: string): Promise<void> {
+    await this.persistTask(taskId, { status: 'failed', error_message: errorMessage }).catch((err) => {
+      this.logger.warn(`任务失败状态回写失败: ${(err as Error).message}`);
+    });
+    await this.updateLog(taskId, { status: 'failed', error_message: errorMessage });
+  }
+
+  private async updateLog(taskId: string, data: Record<string, unknown>): Promise<void> {
+    try {
+      await this.prisma.pdfImportLog.update({
+        where: { task_id: taskId },
+        data: data as any,
+      });
+    } catch (err) {
+      this.logger.warn(`PdfImportLog 状态回写失败: ${(err as Error).message}`);
+    }
+  }
+
+  private async reportProgress(taskId: string, progress: PdfParseProgress): Promise<void> {
+    await this.persistTask(
+      taskId,
+      {
+        status: 'parsing',
+        ...(progress.phase === 'ocr'
+          ? { parse_mode: 'ocr', total_pages: progress.totalPages }
+          : {}),
+      },
+      { progress },
+    );
+  }
+
+  async renderPagePreview(taskId: string, pageNumber: number): Promise<{ png: Buffer; totalPages: number }> {
+    const row = await this.prisma.pdfImportTask.findUnique({ where: { id: taskId } });
+    if (!row?.file_url) throw new NotFoundException('原始 PDF 不存在');
+    const abs = this.resolveStoredFile(row.file_url);
+    if (!fs.existsSync(abs)) throw new NotFoundException('原始 PDF 不存在');
+    const buffer = await fs.promises.readFile(abs);
+    return this.pdfTextParser.renderPagePng(buffer, pageNumber);
+  }
+
+  private async persistTask(
+    taskId: string,
+    columns: {
+      status?: string;
+      parse_mode?: string;
+      total_pages?: number;
+      error_message?: string | null;
+    },
+    payloadPatch?: Partial<StoredOcrResult>,
   ): Promise<void> {
-    if (!task.importLogId) return;
-    await this.prisma.pdfImportLog.update({
-      where: { id: task.importLogId },
+    const data: Record<string, unknown> = { ...columns };
+    if (payloadPatch) {
+      const row = await this.prisma.pdfImportTask.findUnique({
+        where: { id: taskId },
+        select: { ocr_result: true },
+      });
+      const current = this.readPayload(row?.ocr_result);
+      const next: StoredOcrResult = {
+        ...current,
+        ...payloadPatch,
+        records: payloadPatch.records ?? current.records,
+        metadata: { ...(current.metadata || {}), ...(payloadPatch.metadata || {}) },
+      };
+      data.ocr_result = JSON.parse(JSON.stringify(next));
+    }
+    await this.prisma.pdfImportTask.update({
+      where: { id: taskId },
       data: data as any,
     });
   }
 
-  /**
-   * 从PDF文本中提取人员信息（NLP规则引擎）
-   * @param text PDF文本内容
-   * @param isOcrText 是否为OCR识别文本
-   * @returns 提取的人员记录
-   */
+  private readPayload(value: unknown): StoredOcrResult {
+    const raw = (value && typeof value === 'object' ? value : {}) as Partial<StoredOcrResult>;
+    return {
+      records: Array.isArray(raw.records) ? raw.records : [],
+      metadata: raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {},
+      ocrProvider: raw.ocrProvider,
+      ocrEstimatedFee: raw.ocrEstimatedFee,
+      ocrPrecheck: raw.ocrPrecheck,
+      ocrFeeDetail: raw.ocrFeeDetail,
+      ocrCharsCount: raw.ocrCharsCount,
+      importResult: raw.importResult,
+      progress: raw.progress,
+    };
+  }
+
+  private toState(row: {
+    id: string;
+    clan_id: bigint;
+    status: string;
+    file_name: string;
+    file_size: bigint;
+    parse_mode: string;
+    total_pages: number;
+    error_message: string | null;
+    ocr_result: unknown;
+  }): PdfImportTaskState {
+    const payload = this.readPayload(row.ocr_result);
+    return {
+      taskId: row.id,
+      clanId: row.clan_id.toString(),
+      status: row.status as PdfImportTaskState['status'],
+      fileName: row.file_name,
+      fileSize: Number(row.file_size),
+      parseMode: row.parse_mode === 'ocr' ? 'ocr' : 'text',
+      totalPages: row.total_pages,
+      records: payload.records,
+      metadata: payload.metadata,
+      errorMessage: row.error_message ?? undefined,
+      ocrProvider: payload.ocrProvider,
+      ocrEstimatedFee: payload.ocrEstimatedFee,
+      ocrPrecheck: payload.ocrPrecheck,
+      ocrFeeDetail: payload.ocrFeeDetail,
+      ocrCharsCount: payload.ocrCharsCount,
+      importResult: payload.importResult,
+      progress: payload.progress,
+    };
+  }
+
   private extractPersonInfo(text: string, isOcrText: boolean = false): PdfPersonRecord[] {
-    if (!text) return [];
-    const records: PdfPersonRecord[] = [];
-    const lines = text.split('\n').filter((line) => line.trim().length > 0);
-
-    let rowNumber = 0;
-    // OCR识别的文本降低基础置信度
-    const baseConfidence = isOcrText ? 40 : 50;
-
-    for (const line of lines) {
-      const record = this.parseLine(line, ++rowNumber, baseConfidence);
-      if (record) {
-        records.push(record);
-      }
-    }
-
-    return records;
+    return extractPersonsFromText(text, isOcrText);
   }
 
-  /**
-   * 解析单行文本，尝试提取人员信息
-   * @param line 文本行
-   * @param rowNumber 行号
-   * @param baseConfidence 基础置信度
-   * @returns 人员记录或null
-   */
-  private parseLine(line: string, rowNumber: number, baseConfidence: number = 50): PdfPersonRecord | null {
-    const trimmedLine = line.trim();
-
-    // 尝试匹配常见族谱格式
-    // 格式1: "姓名，男/女，生卒年月"
-    // 格式2: "第X世 姓名"
-    // 格式3: "姓名，字XX，号XX"
-
-    // 提取姓名（中文姓名，2-4个字符）
-    const nameMatch = trimmedLine.match(/([\u4e00-\u9fa5]{2,4})/);
-    if (!nameMatch) {
-      return null; // 没有中文姓名，跳过
+  private async findDuplicateNames(clanId: bigint, records: PdfPersonRecord[]): Promise<DuplicateNameHit[]> {
+    const names = [...new Set(records.map((item) => item.fullName.trim()).filter(Boolean))];
+    if (names.length === 0) return [];
+    const existing = await this.prisma.person.findMany({
+      where: { clan_id: clanId, full_name: { in: names }, deleted_at: null },
+      select: { full_name: true },
+    });
+    const counts = new Map<string, number>();
+    for (const person of existing) {
+      counts.set(person.full_name, (counts.get(person.full_name) ?? 0) + 1);
     }
-
-    const fullName = nameMatch[1];
-    let confidence = baseConfidence; // 使用传入的基础置信度
-
-    // 提取性别
-    let gender: 'M' | 'F' | 'UNKNOWN' = 'UNKNOWN';
-    if (trimmedLine.includes('男') || trimmedLine.includes('公') || trimmedLine.includes('氏')) {
-      gender = 'M';
-      confidence += 15;
-    } else if (trimmedLine.includes('女') || trimmedLine.includes('夫人') || trimmedLine.includes('孺人')) {
-      gender = 'F';
-      confidence += 15;
-    }
-
-    // 提取辈分
-    let generation: number | undefined;
-    const generationMatch = trimmedLine.match(/第([一二三四五六七八九十百千万\d]+)世/);
-    if (generationMatch) {
-      generation = this.parseGeneration(generationMatch[1]);
-      confidence += 15;
-    }
-
-    // 提取日期（简化的日期匹配）
-    const birthDate = this.extractDate(trimmedLine, ['生', '生于', '诞']);
-    const deathDate = this.extractDate(trimmedLine, ['卒', '殁', '逝世', '终']);
-
-    if (birthDate) confidence += 10;
-    if (deathDate) confidence += 10;
-
-    // 构建记录
-    const record: PdfPersonRecord = {
-      rowNumber,
+    return [...counts.entries()].map(([fullName, count]) => ({
       fullName,
-      gender,
-      generation,
-      birthDate,
-      deathDate,
-      isLiving: !deathDate,
-      confidenceScore: Math.min(confidence, 100),
-      originalText: trimmedLine.substring(0, 200),
-    };
-
-    return record;
+      count,
+      rowNumbers: records.filter((item) => item.fullName.trim() === fullName).map((item) => item.rowNumber),
+    }));
   }
 
   /**
-   * 解析辈分数字
-   * @param genStr 辈分字符串
-   * @returns 数字
+   * 同一事务写入人物、夫妻关系和亲子关系。任一步失败则整批回滚。
    */
-  private parseGeneration(genStr: string): number {
-    const chineseNumbers: Record<string, number> = {
-      '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-      '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
-      '百': 100, '千': 1000, '万': 10000
-    };
-
-    // 如果是阿拉伯数字
-    if (/^\d+$/.test(genStr)) {
-      return parseInt(genStr, 10);
-    }
-
-    // 如果是中文数字
-    return chineseNumbers[genStr] || 0;
-  }
-
-  /**
-   * 从文本中提取日期
-   * @param text 文本
-   * @param keywords 日期关键词
-   * @returns 日期字符串或null
-   */
-  private extractDate(text: string, keywords: string[]): string | null {
-    for (const keyword of keywords) {
-      const index = text.indexOf(keyword);
-      if (index === -1) continue;
-
-      // 在关键词后查找日期
-      const afterKeyword = text.substring(index + keyword.length);
-
-      // 匹配公历日期格式：YYYY-MM-DD 或 YYYY年MM月DD日
-      const dateMatch = afterKeyword.match(/(\d{4})[-年](\d{1,2})[-月](\d{1,2})[日]?/);
-      if (dateMatch) {
-        const year = parseInt(dateMatch[1], 10);
-        const month = parseInt(dateMatch[2], 10).toString().padStart(2, '0');
-        const day = parseInt(dateMatch[3], 10).toString().padStart(2, '0');
-        return `${year}-${month}-${day}`;
+  private async writeRecords(
+    clanId: bigint,
+    records: PdfPersonRecord[],
+    strategy: DuplicateStrategy,
+  ): Promise<PdfImportResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const names = [...new Set(records.map((item) => item.fullName.trim()))];
+      const existingRows = await tx.person.findMany({
+        where: { clan_id: clanId, full_name: { in: names }, deleted_at: null },
+        select: { id: true, full_name: true },
+        orderBy: { id: 'asc' },
+      });
+      const existingByName = new Map<string, bigint>();
+      for (const person of existingRows) {
+        if (!existingByName.has(person.full_name)) existingByName.set(person.full_name, person.id);
       }
 
-      // 匹配年份：YYYY年
-      const yearMatch = afterKeyword.match(/(\d{4})年/);
-      if (yearMatch) {
-        return `${yearMatch[1]}-01-01`;
-      }
-    }
+      const idByLocal = new Map<string, bigint>();
+      let created = 0;
+      let merged = 0;
+      let skipped = 0;
 
-    return null;
+      for (const record of orderByParent(records)) {
+        const name = record.fullName.trim();
+        const existingId = existingByName.get(name);
+        if (existingId && strategy === 'skip') {
+          skipped += 1;
+          continue;
+        }
+        if (existingId && strategy === 'merge') {
+          idByLocal.set(record.localId, existingId);
+          merged += 1;
+          continue;
+        }
+
+        const person = await tx.person.create({
+          data: {
+            clan_id: clanId,
+            full_name: name,
+            gender: record.gender === 'F' ? 'female' : 'male',
+            birth_date: toDate(record.birthDate),
+            death_date: toDate(record.deathDate),
+            is_living: record.isLiving ?? !record.deathDate,
+          },
+        });
+        idByLocal.set(record.localId, person.id);
+        await tx.personAncestry.createMany({
+          data: [{ ancestor_id: person.id, descendant_id: person.id, depth: 0 }],
+          skipDuplicates: true,
+        });
+        if (record.biography || record.burialPlace || record.notes) {
+          await tx.personBio.create({
+            data: {
+              person_id: person.id,
+              biography: record.biography || null,
+              burial_place: record.burialPlace || null,
+              source_note: record.notes || null,
+            },
+          });
+        }
+        created += 1;
+      }
+
+      const paired = new Set<string>();
+      for (const record of records) {
+        if (!record.spouseLocalId) continue;
+        const left = idByLocal.get(record.localId);
+        const right = idByLocal.get(record.spouseLocalId);
+        if (!left || !right || left === right) continue;
+        const key = [left.toString(), right.toString()].sort().join(':');
+        if (paired.has(key)) continue;
+        paired.add(key);
+        await this.ensureCouple(tx, clanId, left, right);
+      }
+
+      for (const record of records) {
+        const childId = idByLocal.get(record.localId);
+        if (!childId) continue;
+        const parentIds = [record.parentLocalId, record.motherLocalId]
+          .map((localId) => (localId ? idByLocal.get(localId) : undefined))
+          .filter((id): id is bigint => !!id && id !== childId);
+        const uniqueParents = [...new Map(parentIds.map((id) => [id.toString(), id])).values()];
+        if (uniqueParents.length === 0) continue;
+        await this.pedigreeService.attachChildToParents(tx, {
+          clan_id: clanId,
+          child_id: childId,
+          parent_ids: uniqueParents,
+        });
+      }
+
+      return {
+        successCount: created + merged,
+        failureCount: 0,
+        skippedCount: skipped,
+        mergedCount: merged,
+        errors: [],
+        anchorPersonId: pickAnchor(records, idByLocal),
+      };
+    }, { maxWait: 15000, timeout: 120000 });
   }
 
-  /**
-   * 导入单条人员记录到数据库
-   * @param record 人员记录
-   * @param clanId 家族ID
-   */
-  private async importPersonRecord(record: PdfPersonRecord, clanId: bigint): Promise<void> {
-    await this.prisma.person.create({
-      data: {
-        clan_id: clanId,
-        full_name: record.fullName,
-        gender: record.gender === 'M' ? 'male' : record.gender === 'F' ? 'female' : 'male', // 默认为male
-        birth_date: record.birthDate ? new Date(record.birthDate) : null,
-        death_date: record.deathDate ? new Date(record.deathDate) : null,
-        is_living: record.isLiving ?? true,
+  private async ensureCouple(
+    tx: Parameters<PedigreeService['attachChildToParents']>[0],
+    clanId: bigint,
+    leftId: bigint,
+    rightId: bigint,
+  ): Promise<void> {
+    const existing = await tx.familyUnit.findFirst({
+      where: {
+        OR: [
+          { husband_id: leftId, wife_id: rightId },
+          { husband_id: rightId, wife_id: leftId },
+        ],
       },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    const people = await tx.person.findMany({
+      where: { id: { in: [leftId, rightId] } },
+      select: { id: true, gender: true },
+    });
+    const male = people.find((person) => person.gender === 'male');
+    const female = people.find((person) => person.gender === 'female');
+    const husbandId = male?.id ?? leftId;
+    const wifeId = female && female.id !== husbandId ? female.id : rightId === husbandId ? leftId : rightId;
+    if (husbandId === wifeId) return;
+    await tx.familyUnit.create({
+      data: { clan_id: clanId, husband_id: husbandId, wife_id: wifeId },
     });
   }
 
-  /**
-   * 生成唯一任务ID
-   * @returns 任务ID
-   */
   private generateTaskId(): string {
     return `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 
-  /**
-   * 上传原始 PDF 到 COS 冷 Bucket
-   */
+  private async persistOriginalFile(clanId: bigint, taskId: string, fileBuffer: Buffer): Promise<string> {
+    const dir = path.join(this.uploadRoot, clanId.toString());
+    await fs.promises.mkdir(dir, { recursive: true });
+    const abs = path.join(dir, `${taskId}.pdf`);
+    await fs.promises.writeFile(abs, fileBuffer);
+    return ['uploads', 'pdf-import', clanId.toString(), `${taskId}.pdf`].join('/');
+  }
+
+  private resolveStoredFile(fileUrl: string): string {
+    const rel = fileUrl.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!rel.startsWith('uploads/pdf-import/')) {
+      throw new BadRequestException('非法文件路径');
+    }
+    const abs = path.resolve(process.cwd(), ...rel.split('/'));
+    const relative = path.relative(this.uploadRoot, abs);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new BadRequestException('非法文件路径');
+    }
+    return abs;
+  }
+
+  private async removeStoredFile(fileUrl: string): Promise<void> {
+    try {
+      await fs.promises.unlink(this.resolveStoredFile(fileUrl));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        this.logger.warn(`[PDF_Import] 删除未完成上传的临时文件失败: ${(error as Error).message}`);
+      }
+    }
+  }
+
   private async uploadOriginalPdfToCos(
     taskId: string,
     fileBuffer: Buffer,
@@ -624,4 +935,75 @@ export class PdfImportService {
     });
     this.logger.log(`原始 PDF 已上传至 COS 冷 Bucket: ${key} (task=${taskId})`);
   }
+}
+
+function rebindRelations(records: PdfPersonRecord[]): PdfPersonRecord[] {
+  records.forEach((record, index) => {
+    record.fullName = record.fullName?.trim() ?? '';
+    if (!record.localId) record.localId = `p${record.rowNumber || index + 1}`;
+    if (record.fullName.includes('氏')) record.gender = 'F';
+  });
+  const byId = new Map(records.map((record) => [record.localId, record]));
+  const byName = new Map<string, PdfPersonRecord>();
+  for (const record of records) {
+    if (record.fullName && !byName.has(record.fullName)) byName.set(record.fullName, record);
+  }
+
+  const resolve = (
+    record: PdfPersonRecord,
+    name: string | undefined,
+    localId: string | undefined,
+  ): string | undefined => {
+    const trimmed = name?.trim() ?? '';
+    if (name !== undefined && !trimmed) return undefined;
+    const linked = localId ? byId.get(localId) : undefined;
+    if (linked && (!trimmed || linked.fullName === trimmed)) return linked.localId;
+    const named = name?.trim() ? byName.get(name.trim()) : undefined;
+    if (named && named.localId !== record.localId) return named.localId;
+    return undefined;
+  };
+
+  for (const record of records) {
+    record.parentLocalId = resolve(record, record.parentName, record.parentLocalId);
+    record.parentName = record.parentLocalId ? byId.get(record.parentLocalId)?.fullName : record.parentName;
+    record.motherLocalId = resolve(record, record.motherName, record.motherLocalId);
+    record.motherName = record.motherLocalId ? byId.get(record.motherLocalId)?.fullName : record.motherName;
+    record.spouseLocalId = resolve(record, record.spouseName, record.spouseLocalId);
+    record.spouseName = record.spouseLocalId ? byId.get(record.spouseLocalId)?.fullName : record.spouseName;
+  }
+  return records;
+}
+
+function orderByParent(records: PdfPersonRecord[]): PdfPersonRecord[] {
+  const byId = new Map(records.map((record) => [record.localId, record]));
+  const ordered: PdfPersonRecord[] = [];
+  const seen = new Set<string>();
+  const visit = (record?: PdfPersonRecord) => {
+    if (!record || seen.has(record.localId)) return;
+    seen.add(record.localId);
+    if (record.parentLocalId) visit(byId.get(record.parentLocalId));
+    if (record.motherLocalId) visit(byId.get(record.motherLocalId));
+    ordered.push(record);
+  };
+  records.forEach((record) => visit(record));
+  return ordered;
+}
+
+function pickAnchor(records: PdfPersonRecord[], idByLocal: Map<string, bigint>): string | undefined {
+  const ranked = records
+    .filter((record) => !record.parentLocalId && !record.motherLocalId && idByLocal.has(record.localId))
+    .sort((left, right) => {
+      const generation = (left.generation ?? 999) - (right.generation ?? 999);
+      if (generation !== 0) return generation;
+      if ((left.gender === 'M') !== (right.gender === 'M')) return left.gender === 'M' ? -1 : 1;
+      return left.rowNumber - right.rowNumber;
+    });
+  const id = ranked[0] ? idByLocal.get(ranked[0].localId) : undefined;
+  return id?.toString();
+}
+
+function toDate(value?: string): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

@@ -68,15 +68,25 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       if (typeof resp === 'string') {
         message = resp;
       } else if (resp && typeof resp === 'object') {
-        const obj = resp as { message?: unknown; error?: unknown };
+        const obj = resp as {
+          message?: unknown;
+          error?: unknown;
+          required?: unknown;
+          current?: unknown;
+        };
+        if (typeof obj.error === 'string' && /^[A-Z0-9_]+$/.test(obj.error)) {
+          code = obj.error;
+        }
         if (typeof obj.message === 'string') {
           message = obj.message;
         } else if (Array.isArray(obj.message)) {
-          // class-validator 错误：取首条作为 message，保留全量到 details
           message = obj.message.join('; ');
           details = obj.message;
-        } else if (obj.error) {
+        } else if (obj.error && code === this.statusToCode(status)) {
           message = String(obj.error);
+        }
+        if (obj.required !== undefined || obj.current !== undefined) {
+          details = { required: obj.required, current: obj.current };
         }
       }
     } else if (exception instanceof Error) {
@@ -123,6 +133,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     const map: Record<number, string> = {
       400: 'BAD_REQUEST',
       401: 'UNAUTHORIZED',
+      402: 'PAYMENT_REQUIRED',
       403: 'FORBIDDEN',
       404: 'NOT_FOUND',
       409: 'CONFLICT',

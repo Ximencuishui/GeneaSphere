@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, shallowRef, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   ZoomIn,
@@ -1189,6 +1190,31 @@ const refreshGraph = () => {
   }
 };
 
+/** 导入完成后从这一支的祖先打开，不改全族默认根。 */
+const loadImportedBranch = async (personId: string) => {
+  errorState.value = null;
+  genealogyStore.setViewType('global');
+  startLoading();
+  try {
+    const data: any = await treeApi.getSubTree(personId);
+    const treeData = data?.data || data;
+    if (!treeData?.id) throw new Error('没有找到导入的这一支');
+    setLoadingStage('parse');
+    partialTree.value = false;
+    shownPersons.value = collectNodeIds(treeData).length;
+    genealogyStore.totalPersons = shownPersons.value;
+    genealogyStore.setTreeData(treeData);
+    await presentTree(treeData);
+  } catch (error: any) {
+    const status: number = error?.status || error?.response?.status || 500;
+    errorState.value = {
+      code: status,
+      message: error?.message || '无法打开导入的这一支',
+    };
+    failLoading();
+  }
+};
+
 /** 拉全局世系并重画。工具栏「全局世系」和首屏共用。 */
 const loadGlobalTree = async () => {
   const previousType = genealogyStore.viewType;
@@ -1852,8 +1878,15 @@ function findNodeInTree(root: GenealogyNode | null, id: string): GenealogyNode |
 
 // ==================== Watch & Lifecycle ====================
 
+const route = useRoute();
+
 onMounted(async () => {
   await nextTick();
+  const importedRoot = String(route.query.root || '');
+  if (/^\d+$/.test(importedRoot)) {
+    await loadImportedBranch(importedRoot);
+    return;
+  }
   await loadGlobalTree();
 });
 

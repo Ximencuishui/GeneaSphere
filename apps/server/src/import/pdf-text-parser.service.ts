@@ -1,10 +1,35 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
 import { PDFParse, TextResult } from 'pdf-parse';
 import { OcrService } from './ocr.service';
+import { toImportFileError } from './pdf-file-error';
+import { PdfParseTimeoutError } from './pdf-parse-timeout';
+
+export interface PdfParseProgress {
+  phase: 'reading' | 'ocr' | 'extracting' | 'done';
+  currentPage: number;
+  totalPages: number;
+  message: string;
+}
+
+export interface PdfParseHooks {
+  onProgress?: (progress: PdfParseProgress) => void | Promise<void>;
+  /** 决定走 OCR 之后、渲染页面和识别之前调用。余额不足时在这里中止。 */
+  beforeOcr?: (totalPages: number) => void | Promise<void>;
+  /** 解析超过时限后返回 true，调用方应停止继续渲染和识别。 */
+  shouldAbort?: () => boolean;
+}
+
+export interface PdfAssessment {
+  text: string;
+  totalPages: number;
+  needsOcr: boolean;
+  metadata: PdfParseResult['metadata'];
+}
 
 export interface PdfParseResult {
   text: string;
   totalPages: number;
+  source: 'text' | 'ocr';
   metadata: {
     title?: string;
     author?: string;
@@ -29,66 +54,63 @@ export class PdfTextParserService {
    * @param fileBuffer PDF文件Buffer
    * @returns 解析结果，包含文本和元数据
    */
-  async parsePdf(fileBuffer: Buffer): Promise<PdfParseResult> {
-    // 文件大小校验
+  /**
+   * 只抽取文字层并判断要不要 OCR，不渲染页面、不调用识别引擎。
+   */
+  async assessPdf(fileBuffer: Buffer): Promise<PdfAssessment> {
     if (fileBuffer.length > this.MAX_FILE_SIZE) {
       throw new BadRequestException(
-        `文件大小超过限制（最大50MB），当前大小：${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB`
+        `文件大小超过限制（最大50MB），当前大小：${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB`,
       );
     }
 
     try {
-      this.logger.log(`开始解析PDF文件，大小：${(fileBuffer.length / 1024).toFixed(2)}KB`);
-
-      // 创建PDFParse实例并加载PDF
       const pdfDoc = new PDFParse({ data: fileBuffer });
-      
-      // 提取文本内容
       const textResult: TextResult = await pdfDoc.getText();
-
-      // 安全获取text
       const extractedText = textResult.text || '';
       const totalPages = textResult.total || 0;
-
-      this.logger.log(
-        `PDF解析完成 - 页数：${totalPages}, 文本长度：${extractedText.length}字符`
-      );
-
-      // 检查是否提取到足够的文本
       const textLength = extractedText.trim().length;
+      const cjkCount = (extractedText.match(/[\u4e00-\u9fff]/g) ?? []).length;
       const expectedMinLength = totalPages * this.OCR_TEXT_THRESHOLD;
-
-      if (textLength < this.MIN_TEXT_LENGTH || textLength < expectedMinLength * this.OCR_RATIO) {
-        // 文本太少，使用OCR识别
-        this.logger.log(
-          `提取文本不足(${textLength}/${expectedMinLength}字符，阈值${Math.round(expectedMinLength * this.OCR_RATIO)})，切换到OCR模式...`
-        );
-        return await this.parsePdfWithOcr(fileBuffer, totalPages);
-      }
-
-      // 解析元数据
-      const metadata = await this.extractMetadata(pdfDoc);
-
+      // 正文里已经有汉字时直接用提取结果。短页族谱不够 200 字，不能因此改走 OCR。
+      const needsOcr =
+        totalPages > 0 &&
+        cjkCount < 8 &&
+        (textLength < this.MIN_TEXT_LENGTH || textLength < expectedMinLength * this.OCR_RATIO);
+      this.logger.log(
+        `PDF 预检 页数=${totalPages} 文本=${extractedText.length}字 需要OCR=${needsOcr}`,
+      );
       return {
         text: extractedText,
         totalPages,
-        metadata,
+        needsOcr,
+        metadata: needsOcr ? {} : await this.extractMetadata(pdfDoc),
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof PdfParseTimeoutError || error instanceof BadRequestException || error instanceof HttpException) {
         throw error;
       }
-
       this.logger.error(`PDF解析失败: ${error.message}`, error.stack);
-      this.logger.error(`错误详情: ${JSON.stringify({
-        message: error.message,
-        name: error.name,
-        stack: error.stack?.split('\n').slice(0, 5).join('\n'),
-      })}`);
-      throw new BadRequestException(
-        `PDF文件解析失败：${error.message || '文件格式可能已损坏'}`
-      );
+      throw toImportFileError(error);
     }
+  }
+
+  async parsePdf(fileBuffer: Buffer, hooks?: PdfParseHooks): Promise<PdfParseResult> {
+    const assessment = await this.assessPdf(fileBuffer);
+    if (!assessment.needsOcr) {
+      return {
+        text: assessment.text,
+        totalPages: assessment.totalPages,
+        source: 'text',
+        metadata: assessment.metadata,
+      };
+    }
+
+    if (hooks?.shouldAbort?.()) throw new PdfParseTimeoutError();
+    await hooks?.beforeOcr?.(assessment.totalPages);
+    if (hooks?.shouldAbort?.()) throw new PdfParseTimeoutError();
+    const recognized = await this.parsePdfWithOcr(fileBuffer, assessment.totalPages, hooks);
+    return { ...recognized, source: 'ocr' };
   }
 
   /**
@@ -99,22 +121,36 @@ export class PdfTextParserService {
    */
   private async parsePdfWithOcr(
     fileBuffer: Buffer,
-    totalPages: number
+    totalPages: number,
+    hooks?: PdfParseHooks,
   ): Promise<PdfParseResult> {
     try {
       this.logger.log(`开始OCR识别PDF，共${totalPages}页...`);
 
       // 将PDF每页转为图片
-      const pageImages = await this.convertPdfToImages(fileBuffer, totalPages);
-      
-      // 逐页OCR识别
+      const pageImages = await this.convertPdfToImages(fileBuffer, totalPages, hooks);
+      await hooks?.onProgress?.({
+        phase: 'ocr',
+        currentPage: 0,
+        totalPages: pageImages.length,
+        message: `准备识别，共 ${pageImages.length} 页`,
+      });
+
       let fullText = '';
       let totalConfidence = 0;
-      
+
       for (let i = 0; i < pageImages.length; i++) {
-        this.logger.log(`OCR识别第${i + 1}/${pageImages.length}页...`);
+        if (hooks?.shouldAbort?.()) throw new PdfParseTimeoutError();
+        const pageNo = i + 1;
+        await hooks?.onProgress?.({
+          phase: 'ocr',
+          currentPage: pageNo,
+          totalPages: pageImages.length,
+          message: `正在识别第 ${pageNo}/${pageImages.length} 页`,
+        });
+        this.logger.log(`OCR识别第${pageNo}/${pageImages.length}页...`);
         const ocrResult = await this.ocrService.recognizeImage(pageImages[i]);
-        fullText += ocrResult.text + '\n';
+        fullText += `@@PAGE:${pageNo}@@\n${ocrResult.text}\n`;
         totalConfidence += ocrResult.confidence;
         
         this.logger.debug(
@@ -131,6 +167,7 @@ export class PdfTextParserService {
       return {
         text: fullText,
         totalPages,
+        source: 'ocr',
         metadata: {
           title: 'OCR识别结果',
           creator: 'Tesseract.js OCR',
@@ -138,14 +175,11 @@ export class PdfTextParserService {
         },
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof PdfParseTimeoutError || error instanceof BadRequestException) {
         throw error;
       }
-      
       this.logger.error(`OCR识别失败: ${error.message}`, error.stack);
-      throw new BadRequestException(
-        `PDF OCR识别失败：${error.message}`
-      );
+      throw toImportFileError(error);
     }
   }
 
@@ -158,7 +192,8 @@ export class PdfTextParserService {
    */
   private async convertPdfToImages(
     fileBuffer: Buffer,
-    totalPages: number
+    totalPages: number,
+    hooks?: PdfParseHooks,
   ): Promise<Buffer[]> {
     try {
       // 动态导入pdfjs-dist（ESM模块需要动态导入）
@@ -194,6 +229,7 @@ export class PdfTextParserService {
       
       // 逐页渲染
       for (let pageNum = 1; pageNum <= actualPages; pageNum++) {
+        if (hooks?.shouldAbort?.()) throw new PdfParseTimeoutError();
         try {
           const page = await pdf.getPage(pageNum);
           
@@ -238,10 +274,9 @@ export class PdfTextParserService {
       this.logger.log(`PDF转图片完成: ${images.length}/${actualPages}页`);
       return images;
     } catch (error) {
+      if (error instanceof PdfParseTimeoutError || error instanceof BadRequestException) throw error;
       this.logger.error(`PDF转图片失败: ${error.message}`);
-      throw new BadRequestException(
-        `PDF转图片失败：${error.message}`
-      );
+      throw toImportFileError(error);
     }
   }
 
@@ -331,5 +366,27 @@ export class PdfTextParserService {
       .replace(/[ \t]+/g, ' ') // 合并多个空格/制表符
       .replace(/\n{3,}/g, '\n\n') // 合并多个空行
       .trim();
+  }
+
+  /** 把指定页渲成预览图。校对页只在扫描件上使用。 */
+  async renderPagePng(fileBuffer: Buffer, pageNumber: number): Promise<{ png: Buffer; totalPages: number }> {
+    if (pageNumber < 1) throw new BadRequestException('页码不正确');
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const path = await import('path');
+    const workerPath = path.resolve(__dirname, '../../../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'file:///' + workerPath.replace(/\\/g, '/');
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer), useSystemFonts: true }).promise;
+    if (pageNumber > pdf.numPages) throw new BadRequestException('页码超出文档范围');
+    const canvasModule = await import('@napi-rs/canvas');
+    globalThis.Image = canvasModule.Image as any;
+    globalThis.DOMMatrix = canvasModule.DOMMatrix as any;
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1.2 });
+    const canvas = canvasModule.createCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#FFFFFF';
+    context.fillRect(0, 0, viewport.width, viewport.height);
+    await page.render({ canvasContext: context, viewport, background: '#FFFFFF' } as any).promise;
+    return { png: canvas.toBuffer('image/png'), totalPages: pdf.numPages };
   }
 }

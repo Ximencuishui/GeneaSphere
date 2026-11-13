@@ -114,7 +114,7 @@ export class GenealogyWorkflowService {
           importLogCount > 0
             ? `已导入 ${importLogCount} 份旧谱电子文档 / 拍照件`
             : '上传旧谱 PDF 电子文档或拍照件',
-        link: link('/genealogy/history'),
+        link: link('/genealogy/pdf-import'),
       },
       {
         key: 'ocr',
@@ -125,7 +125,7 @@ export class GenealogyWorkflowService {
           ocrImportCount > 0
             ? `已完成 ${ocrImportCount} 个扫描件 OCR 识别`
             : '扫描件将自动 OCR 识别，文字版无需此步骤',
-        link: link('/import'),
+        link: link('/genealogy/pdf-import'),
       },
       {
         key: 'compare_edit',
@@ -136,7 +136,7 @@ export class GenealogyWorkflowService {
           correctedTempCount > 0
             ? `已左右对照校对 ${correctedTempCount} 条记录`
             : '在导入管理页对"原文 ↔ 识别结果"左右对照校对',
-        link: link('/import'),
+        link: link('/genealogy/pdf-import'),
       },
       {
         key: 'save_table',
@@ -147,7 +147,7 @@ export class GenealogyWorkflowService {
           saveLogCount > 0 || personCount > 0
             ? `已保存 ${personCount} 位族员至族谱数据表`
             : '校对完成后保存至族员数据表',
-        link: link('/import'),
+        link: link('/genealogy/pdf-import'),
       },
     ];
 
@@ -167,7 +167,7 @@ export class GenealogyWorkflowService {
         status: 'todo',
         count: digitizeSubStages.reduce((s, x) => s + x.count, 0),
         detail: '把旧族谱（电子文档 / 拍照件）转为结构化数据',
-        link: link('/import'),
+        link: link('/genealogy/pdf-import'),
         sub_stages: digitizeSubStages,
       },
       {

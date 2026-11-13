@@ -55,17 +55,17 @@ export interface OcrUsageItem {
  */
 export const ocrApi = {
   /** 查询当前用户 OCR 免费额度与已用量 */
-  getQuota: () => request.get<OcrQuota, OcrQuota>('/user/ocr/quota'),
+  getQuota: () => request.get<OcrQuota, OcrQuota>('/api/user/ocr/quota'),
 
   /** OCR 使用历史（分页） */
   getUsage: (page = 1, pageSize = 20) =>
     request.get<any, { data: OcrUsageItem[]; total: number }>(
-      '/user/ocr/usage',
+      '/api/user/ocr/usage',
       { params: { page, pageSize } },
     ),
 
   /** 预检费用（PDF 导入前） */
-  getPdfQuota: () => request.get<OcrQuota, OcrQuota>('/import/pdf/quota'),
+  getPdfQuota: () => request.get<OcrQuota, OcrQuota>('/api/import/pdf/quota'),
 };
 
 export default ocrApi;

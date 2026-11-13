@@ -270,6 +270,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings/storage', name: 'admin-storage-settings', component: () => import('@/views/admin/StoragePage.vue'), meta: { title: '云存储', requiresAuth: true, requiresAdmin: true } },
       { path: 'print', name: 'admin-print', component: () => import('@/views/admin/OrdersPage.vue'), meta: { title: '印刷', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/data', name: 'admin-genealogy-data', component: () => import('@/views/admin/GenealogyDataPage.vue'), meta: { title: '族谱数据', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/pdf-import', name: 'admin-pdf-import', component: () => import('@/views/PdfImportPage.vue'), meta: { title: '旧谱导入', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/crowdsource', name: 'admin-genealogy-crowdsource', component: () => import('@/views/admin/CrowdsourceEditPage.vue'), meta: { title: '众包修改', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/finalize', name: 'admin-genealogy-finalize', component: () => import('@/views/admin/GenealogyFinalizePage.vue'), meta: { title: '定谱', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/h5-entry', name: 'admin-genealogy-h5-entry', component: () => import('@/views/admin/H5EntryPage.vue'), meta: { title: '族员入口', requiresAuth: true, requiresAdmin: true } },

@@ -11,7 +11,7 @@ import { OcrBillingService } from '../import/ocr-billing.service';
  * - GET /api/user/ocr/quota 当前用户 OCR 免费额度与已用情况
  * - GET /api/user/ocr/usage OCR 使用历史（分页）
  */
-@Controller('user/ocr')
+@Controller('api/user/ocr')
 export class UserOcrController {
   constructor(private readonly ocrBilling: OcrBillingService) {}
 

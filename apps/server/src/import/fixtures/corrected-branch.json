@@ -1,0 +1,33 @@
+[
+  {
+    "rowNumber": 1,
+    "localId": "p1",
+    "fullName": "陈德明",
+    "gender": "M",
+    "generation": 13,
+    "spouseName": "王氏",
+    "confidenceScore": 90,
+    "originalText": "第十三世陈德明，配王氏，子陈文远"
+  },
+  {
+    "rowNumber": 2,
+    "localId": "p2",
+    "fullName": "王氏",
+    "gender": "F",
+    "generation": 13,
+    "spouseName": "陈德明",
+    "confidenceScore": 88,
+    "originalText": "第十三世陈德明，配王氏，子陈文远"
+  },
+  {
+    "rowNumber": 3,
+    "localId": "p3",
+    "fullName": "陈文远",
+    "gender": "M",
+    "generation": 14,
+    "parentName": "陈德明",
+    "motherName": "王氏",
+    "confidenceScore": 86,
+    "originalText": "第十三世陈德明，配王氏，子陈文远"
+  }
+]

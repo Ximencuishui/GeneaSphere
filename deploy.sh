@@ -359,11 +359,8 @@ start_server() {
         cp apps/server/.env .env
     fi
 
-    # 启动
-    pm2 start apps/server/dist/main.js \
-        --name geneasphere-server \
-        --node-args='--max-old-space-size=512' \
-        --env production
+    # 启动。内存上限和重启策略在仓库根目录的 ecosystem.config.js。
+    pm2 start ecosystem.config.js --env production
 
     # 保存并设置开机自启
     pm2 save

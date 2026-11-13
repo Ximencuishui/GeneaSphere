@@ -168,4 +168,21 @@ describe('GlobalHttpExceptionFilter', () => {
     expect(typeof body.timestamp).toBe('string');
     expect(new Date(body.timestamp!).toString()).not.toBe('Invalid Date');
   });
+
+  it('402 余额不足保留业务码和金额明细', () => {
+    const host = buildHost(req);
+    const res = host.switchToHttp().getResponse<MockResponse>();
+    filter.catch(new HttpException({
+      error: 'INSUFFICIENT_BALANCE',
+      message: '余额不足，已中止识别',
+      required: 0.5,
+      current: 0,
+    }, HttpStatus.PAYMENT_REQUIRED), host);
+
+    expect(res.status).toHaveBeenCalledWith(402);
+    const body = res.json.mock.calls[0][0] as ApiErrorBody & { details?: { required: number; current: number } };
+    expect(body.code).toBe('INSUFFICIENT_BALANCE');
+    expect(body.message).toBe('余额不足，已中止识别');
+    expect(body.details).toEqual({ required: 0.5, current: 0 });
+  });
 });

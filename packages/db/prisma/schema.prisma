@@ -48,6 +48,7 @@ model User {
   tool_usage_logs         ToolUsageLog[]
   ocr_usage_logs          OcrUsageLog[]
   pdf_import_logs         PdfImportLog[]
+  pdf_import_tasks        PdfImportTask[]
   credit                  UserCredit?
   setting                 UserSetting?
   vip_orders              VideoVipOrder[]
@@ -134,6 +135,7 @@ model Clan {
   families                 FamilyUnit[]
   media                    MediaArchive[]
   pdf_import_logs          PdfImportLog[]
+  pdf_import_tasks         PdfImportTask[]
   merge_applications       MergeApplication[]
   persons                  Person[]
   print_orders             PrintOrder[]
@@ -916,6 +918,31 @@ model PdfImportLog {
   @@index([status])
   @@index([created_at])
   @@map("pdf_import_logs")
+}
+
+// ========== PDF 导入任务（状态以本表为准，进程重启后可恢复）==========
+model PdfImportTask {
+  id            String   @id @map("id")
+  clan_id       BigInt   @map("clan_id")
+  user_id       String   @map("user_id")
+  status        String   @default("pending") @map("status") // pending|parsing|preview|correcting|importing|completed|failed
+  file_name     String   @map("file_name")
+  file_size     BigInt   @map("file_size")
+  file_url      String?  @map("file_url")
+  parse_mode    String   @default("text") @map("parse_mode") // text | ocr
+  total_pages   Int      @default(0) @map("total_pages")
+  error_message String?  @map("error_message") @db.Text
+  ocr_result    Json?    @map("ocr_result")
+  created_at    DateTime @default(now()) @map("created_at")
+  updated_at    DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  clan          Clan     @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id])
+  @@index([user_id])
+  @@index([status])
+  @@index([created_at])
+  @@map("pdf_import_tasks")
 }
 
 // ========== PDF 解析临时数据表（v1.0 需求文档）==========

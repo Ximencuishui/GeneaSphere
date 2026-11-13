@@ -3,6 +3,7 @@ import { ImportController } from './import.controller';
 import { ImportService } from './import.service';
 import { PdfImportController } from './pdf-import.controller';
 import { PdfImportService } from './pdf-import.service';
+import { PdfImportCleanupService } from './pdf-import-cleanup.service';
 import { PdfTextParserService } from './pdf-text-parser.service';
 import { OcrService } from './ocr.service';
 import { TencentOcrService } from './tencent-ocr.service';
@@ -17,6 +18,7 @@ import { AdminModule } from '../admin/admin.module';
   providers: [
     ImportService,
     PdfImportService,
+    PdfImportCleanupService,
     PdfTextParserService,
     OcrService,
     TencentOcrService,

@@ -8,6 +8,7 @@ import { createWorker, WorkerOptions } from 'tesseract.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { TencentOcrService } from './tencent-ocr.service';
+import { isUnrecoverablePdfError, toImportFileError } from './pdf-file-error';
 
 export type OcrProviderName = 'tencent' | 'tesseract';
 
@@ -156,6 +157,12 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Tesseract 初始化成功');
   }
 
+  /** 超时或进程回收时放开 Tesseract，避免识别线程继续占着内存。 */
+  async releaseEngine(): Promise<void> {
+    await this.terminateTesseract();
+    this.tesseractWorker = null;
+  }
+
   private async terminateTesseract() {
     if (this.tesseractWorker) {
       try {
@@ -248,6 +255,10 @@ export class OcrService implements OnModuleInit, OnModuleDestroy {
         const r = await this.recognizeImage(pages[i], onProgress, i);
         results.push(r);
       } catch (error: any) {
+        if (isUnrecoverablePdfError(error)) {
+          this.logger.error(`[PDF_Import] 第 ${i + 1} 页识别失败: ${error.message}`);
+          throw toImportFileError(error);
+        }
         this.logger.error(`第 ${i + 1} 页识别失败：${error.message}`);
         results.push({ text: '', confidence: 0, lines: [], pageIndex: i });
       }

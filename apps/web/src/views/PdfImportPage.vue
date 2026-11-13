@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <h2>PDF 族谱导入</h2>
-          <el-button @click="handleGoBack">返回</el-button>
+          <el-button @click="handleWizardBack">{{ backLabel }}</el-button>
         </div>
       </template>
 
@@ -43,11 +43,11 @@
                 <strong>{{ quota.free_chars_remaining }}</strong> 字
               </span>
               <span class="quota-pricing">
-                超出部分：¥{{ quota.price_per_page.toFixed(2) }}/页，
-                ¥{{ quota.price_per_100_chars.toFixed(2) }}/百字
+                超出部分：¥{{ (quota.price_per_page ?? 0).toFixed(2) }}/页，
+                ¥{{ (quota.price_per_100_chars ?? 0).toFixed(2) }}/百字
               </span>
               <span v-if="quota.paid_balance > 0" class="quota-balance">
-                账户余额：¥{{ quota.paid_balance.toFixed(2) }}
+                账户余额：¥{{ (quota.paid_balance ?? 0).toFixed(2) }}
               </span>
               <span v-else class="quota-balance warn">
                 当前为免费用户，超出免费额度需先充值
@@ -95,6 +95,15 @@
           >
             {{ uploading ? '上传中...' : '开始解析' }}
           </el-button>
+          <el-button
+            v-if="taskInfo && (taskInfo.status === 'pending' || taskInfo.status === 'parsing')"
+            @click="resumeParsing"
+          >
+            查看当前解析
+          </el-button>
+          <el-button v-if="canContinueCorrect" type="primary" plain @click="continueCorrect">
+            继续校对
+          </el-button>
           <el-button @click="handleGoBack">取消</el-button>
         </div>
       </div>
@@ -126,10 +135,20 @@
 
         <div class="parsing-status">
           <el-progress
-            :percentage="parsingProgress"
-            :status="parsingStatus"
+            v-if="showOcrPages"
+            :percentage="ocrPercent"
             :stroke-width="20"
+            :status="parsingStatus"
           />
+          <el-progress
+            v-else
+            :percentage="textProgress"
+            :indeterminate="parsingActive"
+            :show-text="false"
+            :stroke-width="20"
+            :status="parsingStatus"
+          />
+          <p v-if="showOcrPages" class="page-progress">第 {{ ocrCurrentPage }} / {{ ocrTotalPages }} 页</p>
           <p class="status-text">{{ parsingMessage }}</p>
 
           <!-- OCR 实时消耗显示 -->
@@ -161,6 +180,11 @@
             </el-descriptions-item>
           </el-descriptions>
         </div>
+
+        <div class="step-actions">
+          <el-button @click="handleWizardBack">返回重新上传</el-button>
+          <el-button v-if="canContinueCorrect" type="primary" @click="continueCorrect">继续校对</el-button>
+        </div>
       </div>
 
       <!-- Step 3: 预览校对 -->
@@ -182,14 +206,33 @@
           </el-tag>
         </div>
 
+        <div class="batch-bar">
+          <span>已选 {{ selectedRows.length }} 行</span>
+          <el-select v-model="batchGender" placeholder="性别" size="small" class="batch-gender">
+            <el-option label="男" value="M" />
+            <el-option label="女" value="F" />
+            <el-option label="未知" value="UNKNOWN" />
+          </el-select>
+          <el-button size="small" :disabled="!selectedRows.length || !batchGender" @click="applyBatchGender">修改性别</el-button>
+          <el-input-number v-model="batchGeneration" :min="1" :max="100" size="small" />
+          <el-button size="small" :disabled="!selectedRows.length || !batchGeneration" @click="applyBatchGeneration">修改世代</el-button>
+          <el-button size="small" type="danger" :disabled="!selectedRows.length" @click="batchDelete">删除所选</el-button>
+        </div>
+
+        <div class="preview-layout">
+        <div class="preview-table-wrap">
         <el-table
           :data="previewRecords"
           border
           stripe
-          style="width: 100%"
           max-height="500"
+          highlight-current-row
+          :row-class-name="rowClassName"
+          @selection-change="onSelectionChange"
+          @row-click="setActiveRow"
         >
-          <el-table-column prop="rowNumber" label="行号" width="80" />
+          <el-table-column type="selection" width="42" />
+          <el-table-column prop="rowNumber" label="行号" width="64" />
           <el-table-column prop="fullName" label="姓名" width="120">
             <template #default="{ row }">
               <el-input v-model="row.fullName" size="small" />
@@ -207,6 +250,21 @@
           <el-table-column prop="generation" label="辈分" width="100">
             <template #default="{ row }">
               <el-input-number v-model="row.generation" :min="1" :max="100" size="small" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="parentName" label="父亲" width="120">
+            <template #default="{ row }">
+              <el-input v-model="row.parentName" size="small" placeholder="父名" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="motherName" label="母亲" width="120">
+            <template #default="{ row }">
+              <el-input v-model="row.motherName" size="small" placeholder="母名" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="spouseName" label="配偶" width="120">
+            <template #default="{ row }">
+              <el-input v-model="row.spouseName" size="small" placeholder="配偶" />
             </template>
           </el-table-column>
           <el-table-column prop="birthDate" label="出生日期" width="150">
@@ -243,15 +301,39 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="originalText" label="原始文本" min-width="200" show-overflow-tooltip />
         </el-table>
+        </div>
+
+        <aside class="source-panel">
+          <h4>原文对照</h4>
+          <template v-if="activeRow">
+            <p class="source-title">第 {{ activeRow.rowNumber }} 行 · {{ activeRow.fullName || '未命名' }}</p>
+            <el-alert
+              v-if="activeRow.parseWarning || activeRow.confidenceScore < 70"
+              :title="activeRow.parseWarning || `置信度 ${activeRow.confidenceScore}%`"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+            <pre class="source-text">{{ activeRow.originalText || '这一行没有留下原文片段' }}</pre>
+            <img
+              v-if="pageImageUrl"
+              :src="pageImageUrl"
+              class="source-image"
+              alt="原 PDF 页面"
+            />
+            <p v-else-if="taskInfo?.parseMode === 'ocr'" class="source-hint">正在读取该页扫描图…</p>
+          </template>
+          <p v-else class="source-hint">点一行，查看它对应的原文。扫描件会同时显示该页图片。</p>
+        </aside>
+        </div>
 
         <div class="step-actions">
-          <el-button @click="currentStep = 2">返回</el-button>
+          <el-button @click="handleWizardBack">返回解析</el-button>
           <el-button
             type="primary"
             :loading="importing"
-            @click="handleExecuteImport"
+            @click="handleExecuteImport()"
           >
             {{ importing ? '导入中...' : '确认导入' }}
           </el-button>
@@ -263,15 +345,28 @@
         <h3>导入完成</h3>
 
         <el-result
-          icon="success"
-          title="PDF导入成功"
-          :sub-title="`成功导入 ${importResult?.successCount || 0} 条记录，失败 ${importResult?.failureCount || 0} 条`"
+          :icon="completionTone"
+          :title="completionTitle"
+          :sub-title="completionSubtitle"
         >
           <template #extra>
             <el-button type="primary" @click="handleViewTree">查看族谱树</el-button>
             <el-button @click="handleReset">继续导入</el-button>
           </template>
         </el-result>
+
+        <div v-if="completionIssues.length" class="issue-list">
+          <h4>需要留意的记录</h4>
+          <el-alert
+            v-for="(issue, index) in completionIssues"
+            :key="index"
+            :title="issue"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="issue-item"
+          />
+        </div>
 
         <!-- OCR 费用明细（仅扫描件 PDF 显示） -->
         <div v-if="feeDetail" class="fee-detail">
@@ -290,12 +385,12 @@
                 <el-descriptions-item label="免费页数">{{ feeDetail.free_pages_used }} 页</el-descriptions-item>
                 <el-descriptions-item label="免费字数">{{ feeDetail.free_chars_used }} 字</el-descriptions-item>
                 <el-descriptions-item label="超出页数" v-if="feeDetail.charged_pages > 0">
-                  {{ feeDetail.charged_pages }} 页 × ¥{{ quota?.price_per_page.toFixed(2) }} =
+                  {{ feeDetail.charged_pages }} 页 × ¥{{ (quota?.price_per_page ?? 0).toFixed(2) }} =
                   ¥{{ (feeDetail.charged_pages * (quota?.price_per_page || 0)).toFixed(2) }}
                 </el-descriptions-item>
                 <el-descriptions-item label="超出字数" v-if="feeDetail.charged_chars > 0">
                   {{ feeDetail.charged_chars }} 字（{{ Math.ceil(feeDetail.charged_chars / 100) }} 百字）×
-                  ¥{{ quota?.price_per_100_chars.toFixed(2) }} =
+                  ¥{{ (quota?.price_per_100_chars ?? 0).toFixed(2) }} =
                   ¥{{ (Math.ceil(feeDetail.charged_chars / 100) * (quota?.price_per_100_chars || 0)).toFixed(2) }}
                 </el-descriptions-item>
                 <el-descriptions-item label="合计费用" v-if="feeDetail.fee_amount > 0">
@@ -328,79 +423,131 @@
         </div>
       </div>
     </el-card>
+
+    <el-dialog v-model="duplicateVisible" title="发现重名" width="480px">
+      <p>以下姓名在当前族谱中已经存在：</p>
+      <p class="duplicate-names">{{ duplicateNames.join('、') }}</p>
+      <p>请选择这些重名记录如何写入。其余不重名的人仍会新增。</p>
+      <template #footer>
+        <el-button @click="confirmDuplicate('skip')">跳过</el-button>
+        <el-button @click="confirmDuplicate('merge')">合并</el-button>
+        <el-button type="primary" @click="confirmDuplicate('create')">新增</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { UploadFilled, Document } from '@element-plus/icons-vue';
 import {
   uploadPdf,
   getTaskStatus,
   getTaskPreview,
+  getTaskPageImage,
   executeImport,
 } from '@/api/pdf-import';
-import type { PdfImportTask, PdfPersonRecord } from '@/api/pdf-import';
+import type { PdfExecuteResult, PdfImportTask, PdfPersonRecord } from '@/api/pdf-import';
 import { ocrApi } from '@/api/ocr';
 import type { OcrQuota, OcrFeeDetail } from '@/api/ocr';
-import { useAuthStore } from '@/stores/auth';
-import { useClanStore } from '@/stores/clan';
 
+const route = useRoute();
 const router = useRouter();
-const authStore = useAuthStore();
-const clanStore = useClanStore();
+const clanSlug = computed(() => String(route.params.slug || ''));
 
 // 状态
-const currentStep = ref(1);
+const currentStep = ref(route.query.taskId ? 2 : 1);
 const selectedFile = ref<File | null>(null);
 const uploading = ref(false);
 const importing = ref(false);
-const taskId = ref('');
+const taskId = ref(String(route.query.taskId || ''));
 const taskInfo = ref<PdfImportTask | null>(null);
 const previewRecords = ref<PdfPersonRecord[]>([]);
+const quota = ref<OcrQuota | null>(null);
+const selectedRows = ref<PdfPersonRecord[]>([]);
+const activeRow = ref<PdfPersonRecord | null>(null);
+const pageImageUrl = ref('');
+const batchGender = ref<'M' | 'F' | 'UNKNOWN' | ''>('');
+const batchGeneration = ref<number | undefined>(undefined);
+const discardedIssues = ref<string[]>([]);
+const completionIssues = ref<string[]>([]);
+const followParse = ref(true);
 const importResult = ref<{
   successCount: number;
   failureCount: number;
+  skippedCount?: number;
   errors: string[];
   ocrFeeDetail?: OcrFeeDetail;
+  anchorPersonId?: string;
 } | null>(null);
 
-const quota = ref<OcrQuota | null>(null);
+const duplicateVisible = ref(false);
+const duplicateNames = ref<string[]>([]);
 
-// 轮询定时器
+// 轮询定时器。路由 fullPath 作为组件 key，替换 taskId 会卸载当前实例。
 let pollingTimer: number | null = null;
+let alive = true;
 
 // 计算属性
-const parsingProgress = computed(() => {
-  if (!taskInfo.value) return 0;
-  switch (taskInfo.value.status) {
-    case 'pending': return 10;
-    case 'parsing': return 50;
-    case 'preview': return 100;
-    default: return 0;
-  }
+const showOcrPages = computed(
+  () => taskInfo.value?.parseMode === 'ocr' && ocrTotalPages.value > 0,
+);
+const ocrTotalPages = computed(
+  () => taskInfo.value?.progress?.totalPages || taskInfo.value?.totalPages || 0,
+);
+const ocrCurrentPage = computed(() => taskInfo.value?.progress?.currentPage ?? 0);
+const ocrPercent = computed(() => {
+  if (!ocrTotalPages.value) return 0;
+  return Math.min(100, Math.round((ocrCurrentPage.value / ocrTotalPages.value) * 100));
 });
+const parsingActive = computed(
+  () => taskInfo.value?.status === 'pending' || taskInfo.value?.status === 'parsing',
+);
+const textProgress = computed(() => (parsingActive.value ? 0 : 100));
 
 const parsingStatus = computed(() => {
-  if (!taskInfo.value) return '';
-  return taskInfo.value.status === 'failed' ? 'exception' : '';
+  if (taskInfo.value?.status === 'failed') return 'exception';
+  if (taskInfo.value?.status === 'preview' || taskInfo.value?.status === 'correcting') return 'success';
+  return undefined;
 });
 
 const parsingMessage = computed(() => {
-  if (!taskInfo.value) return '';
-  switch (taskInfo.value.status) {
-    case 'pending': return '任务已创建，等待解析...';
-    case 'parsing':
-      return taskInfo.value.parseMode === 'ocr'
-        ? '正在 OCR 识别扫描件，请稍候...'
-        : '正在解析PDF文档...';
-    case 'preview': return '解析完成！';
-    case 'failed':
-      return `解析失败: ${taskInfo.value.errorMessage}`;
-    default: return '';
-  }
+  if (!taskInfo.value) return '正在准备解析...';
+  if (taskInfo.value.status === 'failed') return `解析失败: ${taskInfo.value.errorMessage || '未知错误'}`;
+  if (taskInfo.value.progress?.message) return taskInfo.value.progress.message;
+  if (taskInfo.value.status === 'preview' || taskInfo.value.status === 'correcting') return '解析完成';
+  return '正在解析 PDF';
+});
+
+const backLabel = computed(() => {
+  if (currentStep.value === 2) return '重新上传';
+  if (currentStep.value === 3) return '返回解析';
+  return '返回';
+});
+const canContinueCorrect = computed(
+  () => taskInfo.value?.status === 'preview' || taskInfo.value?.status === 'correcting',
+);
+
+const completionTone = computed<'success' | 'warning' | 'error'>(() => {
+  const failed = importResult.value?.failureCount ?? 0;
+  const success = importResult.value?.successCount ?? 0;
+  if (failed > 0 && success === 0) return 'error';
+  if (completionIssues.value.length || failed > 0 || (importResult.value?.skippedCount ?? 0) > 0) return 'warning';
+  return 'success';
+});
+const completionTitle = computed(() => {
+  if (completionTone.value === 'error') return '导入失败';
+  if (completionTone.value === 'warning') return '导入完成，但有部分记录未通过';
+  return 'PDF导入成功';
+});
+const completionSubtitle = computed(() => {
+  const success = importResult.value?.successCount ?? 0;
+  const failed = importResult.value?.failureCount ?? 0;
+  const skipped = importResult.value?.skippedCount ?? 0;
+  const dropped = discardedIssues.value.length;
+  return `写入 ${success} 条，失败 ${failed} 条，跳过 ${skipped} 条，校对时剔除 ${dropped} 条`;
 });
 
 const totalRecords = computed(() => previewRecords.value.length);
@@ -436,9 +583,15 @@ const quotaAlertType = computed(() => {
 
 onMounted(async () => {
   await fetchQuota();
+  const existingId = String(route.query.taskId || '');
+  if (existingId) {
+    taskId.value = existingId;
+    await restoreTask(existingId);
+  }
 });
 
 onUnmounted(() => {
+  alive = false;
   stopPolling();
 });
 
@@ -446,7 +599,8 @@ onUnmounted(() => {
 
 async function fetchQuota() {
   try {
-    quota.value = await ocrApi.getQuota();
+    const data = await ocrApi.getQuota();
+    if (data && typeof data.price_per_page === 'number') quota.value = data;
   } catch (error) {
     console.warn('获取 OCR 额度失败', error);
   }
@@ -463,32 +617,35 @@ function handleFileRemove() {
 
 // 上传PDF
 async function handleUpload() {
-  if (!selectedFile.value || !clanStore.currentClan) return;
+  if (!selectedFile.value || !clanSlug.value) return;
 
   uploading.value = true;
   try {
-    const response = await uploadPdf(
-      selectedFile.value,
-      clanStore.currentClan.id,
-      authStore.user?.sub || '',
-    );
-
-    taskId.value = response.data.taskId;
+    const response = await uploadPdf(selectedFile.value, clanSlug.value);
+    followParse.value = true;
+    discardedIssues.value = [];
+    completionIssues.value = [];
+    await router.replace({
+      path: route.path,
+      query: { ...route.query, taskId: response.taskId },
+    });
+    // fullPath 变化会卸载本实例，新实例在 onMounted 里按 taskId 恢复并轮询。
+    if (!alive) return;
+    taskId.value = response.taskId;
     currentStep.value = 2;
-
-    // 开始轮询任务状态
     startPolling();
   } catch (error: any) {
-    const status = error.response?.status;
-    const data = error.response?.data;
-    if (status === 402 && data?.error === 'INSUFFICIENT_BALANCE') {
+    const data = error.response?.data ?? error;
+    const code = data?.code || data?.error;
+    if (code === 'INSUFFICIENT_BALANCE') {
+      const details = data.details && typeof data.details === 'object' ? data.details : data;
       await handleInsufficientBalance({
-        required: data.required ?? 0,
-        current: data.current ?? 0,
+        required: Number(details.required ?? 0),
+        current: Number(details.current ?? 0),
       });
-    } else {
-      ElMessage.error(data?.message || '上传失败');
+      return;
     }
+    ElMessage.error(data?.message || '上传失败，请重试');
   } finally {
     uploading.value = false;
   }
@@ -496,31 +653,64 @@ async function handleUpload() {
 
 // 轮询任务状态
 function startPolling() {
+  stopPolling();
   pollingTimer = window.setInterval(async () => {
     try {
-      const response = await getTaskStatus(taskId.value);
-      taskInfo.value = response.data;
-
-      if (response.data.status === 'preview') {
-        // 解析完成，获取预览数据
-        stopPolling();
-        await loadPreview();
-      } else if (response.data.status === 'failed') {
-        stopPolling();
-        const billingErr = response.data.metadata?.ocrBillingError;
-        if (billingErr) {
-          await handleInsufficientBalance({
-            required: billingErr.required ?? 0,
-            current: billingErr.current ?? 0,
-          });
-        } else {
-          ElMessage.error('PDF解析失败: ' + response.data.errorMessage);
-        }
-      }
+      const task = await getTaskStatus(taskId.value);
+      taskInfo.value = task;
+      await applyTaskStatus(task);
     } catch (error) {
       console.error('轮询任务状态失败:', error);
     }
   }, 2000);
+}
+
+async function restoreTask(id: string) {
+  try {
+    const task = await getTaskStatus(id);
+    taskInfo.value = task;
+    await applyTaskStatus(task, true);
+  } catch {
+    ElMessage.error('无法打开该导入任务');
+  }
+}
+
+async function applyTaskStatus(task: PdfImportTask, fromRestore = false) {
+  if (task.status === 'preview' || task.status === 'correcting') {
+    stopPolling();
+    if (currentStep.value === 1 || (currentStep.value === 2 && !followParse.value)) return;
+    await loadPreview();
+    return;
+  }
+  if (task.status === 'completed') {
+    stopPolling();
+    importResult.value = {
+      successCount: task.importResult?.successCount ?? task.recordCount ?? 0,
+      failureCount: task.importResult?.failureCount ?? 0,
+      skippedCount: task.importResult?.skippedCount ?? 0,
+      errors: task.importResult?.errors ?? [],
+      ocrFeeDetail: task.ocrFeeDetail,
+      anchorPersonId: task.importResult?.anchorPersonId,
+    };
+    currentStep.value = 4;
+    return;
+  }
+  if (task.status === 'failed') {
+    stopPolling();
+    currentStep.value = 2;
+    const billingErr = task.metadata?.ocrBillingError;
+    if (billingErr) {
+      await handleInsufficientBalance({
+        required: billingErr.required ?? 0,
+        current: billingErr.current ?? 0,
+      });
+    } else {
+      ElMessage.error('PDF解析失败: ' + (task.errorMessage || '未知错误'));
+    }
+    return;
+  }
+  currentStep.value = 2;
+  if (fromRestore) startPolling();
 }
 
 function stopPolling() {
@@ -534,7 +724,9 @@ function stopPolling() {
 async function loadPreview() {
   try {
     const response = await getTaskPreview(taskId.value);
-    previewRecords.value = response.data.records;
+    previewRecords.value = response.records;
+    activeRow.value = response.records.find((item) => item.confidenceScore < 70 || item.parseWarning) ?? response.records[0] ?? null;
+    await loadActivePage();
     currentStep.value = 3;
     // 刷新额度（任务可能消耗了免费额度）
     await fetchQuota();
@@ -543,38 +735,71 @@ async function loadPreview() {
   }
 }
 
+function showImportResult(skippedCount: number, result: PdfExecuteResult) {
+  duplicateVisible.value = false;
+  completionIssues.value = collectCompletionIssues(skippedCount);
+  importResult.value = result;
+  currentStep.value = 4;
+}
+
+async function recoverCompletedImport() {
+  if (!taskId.value) return false;
+  try {
+    const task = await getTaskStatus(taskId.value);
+    if (task.status !== 'completed' || !task.importResult) return false;
+    showImportResult(task.importResult.skippedCount ?? 0, {
+      success: true,
+      message: '导入完成',
+      successCount: task.importResult.successCount,
+      failureCount: task.importResult.failureCount,
+      skippedCount: task.importResult.skippedCount ?? 0,
+      errors: task.importResult.errors ?? [],
+      anchorPersonId: task.importResult.anchorPersonId,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // 执行导入
-async function handleExecuteImport() {
-  if (!clanStore.currentClan) return;
+async function handleExecuteImport(strategy?: 'skip' | 'merge' | 'create') {
+  if (!clanSlug.value) return;
 
   importing.value = true;
   try {
-    const response = await executeImport(
-      taskId.value,
-      authStore.user?.sub || '',
-      clanStore.currentClan.id,
-    );
+    const response = await executeImport(taskId.value, clanSlug.value, previewRecords.value, strategy);
+    if (response.needsDuplicateChoice) {
+      duplicateNames.value = (response.duplicates ?? []).map((item) => item.fullName);
+      duplicateVisible.value = true;
+      return;
+    }
 
-    importResult.value = response.data;
-    currentStep.value = 4;
-
-    ElMessage.success('导入完成');
-    // 刷新额度
+    showImportResult(response.skippedCount ?? 0, response);
+    ElMessage.success(response.message || '导入完成');
     await fetchQuota();
   } catch (error: any) {
-    const status = error.response?.status;
-    const data = error.response?.data;
-    if (status === 402 && data?.error === 'INSUFFICIENT_BALANCE') {
+    const data = error.response?.data ?? error;
+    const code = data?.code || data?.error;
+    const details = data.details && typeof data.details === 'object' ? data.details : data;
+    if (code === 'INSUFFICIENT_BALANCE') {
       await handleInsufficientBalance({
-        required: data.required ?? 0,
-        current: data.current ?? 0,
+        required: Number(details.required ?? 0),
+        current: Number(details.current ?? 0),
       });
+    } else if (await recoverCompletedImport()) {
+      ElMessage.success('导入完成');
     } else {
-      ElMessage.error(data?.message || '导入失败');
+      ElMessage.error(data?.message || '导入失败，请重试');
     }
   } finally {
     importing.value = false;
   }
+}
+
+function confirmDuplicate(strategy: 'skip' | 'merge' | 'create') {
+  duplicateVisible.value = false;
+  handleExecuteImport(strategy);
 }
 
 // 余额不足弹窗
@@ -614,22 +839,128 @@ function formatFileSize(bytes: number): string {
 }
 
 function handleGoBack() {
-  router.back();
+  router.push(`/zupu/${clanSlug.value}/genealogy/data?tab=digitize`);
 }
 
-function handleViewTree() {
-  if (clanStore.currentClan) {
-    router.push(`/tree/${clanStore.currentClan.id}`);
+function handleWizardBack() {
+  if (currentStep.value === 3) {
+    followParse.value = false;
+    currentStep.value = 2;
+    return;
+  }
+  if (currentStep.value === 2) {
+    followParse.value = false;
+    stopPolling();
+    currentStep.value = 1;
+    return;
+  }
+  handleGoBack();
+}
+
+function resumeParsing() {
+  followParse.value = true;
+  currentStep.value = 2;
+  startPolling();
+}
+
+async function continueCorrect() {
+  followParse.value = true;
+  if (!previewRecords.value.length && taskId.value) await loadPreview();
+  else currentStep.value = 3;
+}
+
+function onSelectionChange(rows: PdfPersonRecord[]) {
+  selectedRows.value = rows;
+}
+
+function setActiveRow(row: PdfPersonRecord) {
+  activeRow.value = row;
+  loadActivePage();
+}
+
+function rowClassName({ row }: { row: PdfPersonRecord }) {
+  return row.confidenceScore < 70 || row.parseWarning ? 'row-low-confidence' : '';
+}
+
+function applyBatchGender() {
+  const gender = batchGender.value;
+  if (gender !== 'M' && gender !== 'F' && gender !== 'UNKNOWN') return;
+  selectedRows.value.forEach((row) => {
+    row.gender = gender;
+  });
+  ElMessage.success(`已把 ${selectedRows.value.length} 行的性别改为${gender === 'M' ? '男' : gender === 'F' ? '女' : '未知'}`);
+}
+
+function applyBatchGeneration() {
+  if (!batchGeneration.value) return;
+  const generation = batchGeneration.value;
+  selectedRows.value.forEach((row) => {
+    row.generation = generation;
+  });
+  ElMessage.success(`已把 ${selectedRows.value.length} 行的世代改为第 ${generation} 世`);
+}
+
+async function batchDelete() {
+  if (!selectedRows.value.length) return;
+  await ElMessageBox.confirm(`删除选中的 ${selectedRows.value.length} 行？这些行不会写入族谱。`, '删除记录', {
+    type: 'warning',
+  });
+  const removing = new Set(selectedRows.value);
+  selectedRows.value.forEach((row) => {
+    if (row.confidenceScore < 70 || row.parseWarning) {
+      discardedIssues.value.push(`第 ${row.rowNumber} 行「${row.fullName || '未命名'}」：${row.parseWarning || `置信度 ${row.confidenceScore}%`}`);
+    }
+  });
+  previewRecords.value = previewRecords.value.filter((row) => !removing.has(row));
+  if (activeRow.value && removing.has(activeRow.value)) {
+    activeRow.value = previewRecords.value[0] ?? null;
+    loadActivePage();
+  }
+  selectedRows.value = [];
+}
+
+function collectCompletionIssues(skippedCount: number): string[] {
+  const kept = previewRecords.value
+    .filter((row) => row.confidenceScore < 70 || row.parseWarning)
+    .map((row) => `第 ${row.rowNumber} 行「${row.fullName}」仍将写入，但${row.parseWarning || `置信度只有 ${row.confidenceScore}%`}`);
+  const skipped = skippedCount > 0 ? [`有 ${skippedCount} 条因为重名被跳过，没有新建人物`] : [];
+  return [...discardedIssues.value, ...kept, ...skipped];
+}
+
+async function loadActivePage() {
+  pageImageUrl.value = '';
+  const row = activeRow.value;
+  if (!row || taskInfo.value?.parseMode !== 'ocr' || !taskId.value) return;
+  const page = row.pageNumber || 1;
+  try {
+    const image = await getTaskPageImage(taskId.value, page);
+    if (activeRow.value === row) pageImageUrl.value = image.dataUrl;
+  } catch (error) {
+    console.warn('读取原页失败', error);
   }
 }
 
+function handleViewTree() {
+  if (!clanSlug.value) return;
+  const root = importResult.value?.anchorPersonId;
+  router.push(root ? { path: `/tree/${clanSlug.value}`, query: { root } } : `/tree/${clanSlug.value}`);
+}
+
 function handleReset() {
+  stopPolling();
   currentStep.value = 1;
   selectedFile.value = null;
   taskId.value = '';
   taskInfo.value = null;
   previewRecords.value = [];
   importResult.value = null;
+  discardedIssues.value = [];
+  completionIssues.value = [];
+  selectedRows.value = [];
+  activeRow.value = null;
+  pageImageUrl.value = '';
+  followParse.value = true;
+  router.replace({ path: route.path, query: {} });
   fetchQuota();
 }
 </script>
@@ -799,6 +1130,98 @@ function handleReset() {
 .fee-total {
   color: #f56c6c;
   font-size: 18px;
+}
+
+.page-progress {
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+
+.duplicate-names {
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.batch-gender {
+  width: 110px;
+}
+
+.preview-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.preview-table-wrap {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.preview-table-wrap .el-table {
+  min-width: 1080px;
+}
+
+.source-panel {
+  width: 280px;
+  flex: none;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.source-panel h4 {
+  margin: 0 0 8px;
+}
+
+.source-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.source-text {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+.source-image {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.source-hint {
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.issue-list {
+  margin-top: 16px;
+}
+
+.issue-item {
+  margin-bottom: 8px;
+}
+
+:deep(.row-low-confidence td) {
+  background: #fde2e2 !important;
+}
+
+.duplicate-names {
+  font-weight: 600;
+  line-height: 1.6;
 }
 
 .free-note {

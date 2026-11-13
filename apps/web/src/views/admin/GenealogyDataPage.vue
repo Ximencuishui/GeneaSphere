@@ -166,10 +166,10 @@ async function loadDigitizeList() {
 }
 
 function handleDigitizeDetail(row: any) {
-  router.push({ path: `/zupu/${clanSlug.value}/genealogy/data`, query: { tab: 'pdf-import', taskId: row?.id } })
+  router.push({ path: `/zupu/${clanSlug.value}/genealogy/pdf-import`, query: { taskId: row?.task_id } })
 }
 function handleDigitizeContinue(row: any) {
-  router.push({ path: `/zupu/${clanSlug.value}/genealogy/data`, query: { tab: 'pdf-import', taskId: row?.id, action: 'continue' } })
+  router.push({ path: `/zupu/${clanSlug.value}/genealogy/pdf-import`, query: { taskId: row?.task_id } })
 }
 
 // ===== Tab 3：PDF 导入管理（直接渲染 ImportManagementPage）=====
@@ -260,7 +260,7 @@ onMounted(() => {
         <!-- Tab 2：旧谱电子化 -->
         <ElTabPane label="旧谱电子化" name="digitize">
           <div class="tab-toolbar">
-            <ElButton type="primary" @click="router.push({ query: { ...route.query, tab: 'pdf-import' } })">新建旧谱电子化</ElButton>
+            <ElButton type="primary" @click="router.push(`/zupu/${clanSlug}/genealogy/pdf-import`)">新建旧谱电子化</ElButton>
             <ElButton @click="loadDigitizeList">刷新</ElButton>
           </div>
           <ElTable v-loading="digitizeLoading" :data="digitizeList" empty-text="暂无旧谱电子化项目">

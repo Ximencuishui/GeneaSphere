@@ -11,16 +11,24 @@ export interface PdfImportTask {
   recordCount: number;
   metadata: Record<string, any>;
   errorMessage?: string;
-  // ========== OCR 计费信息（v1.0 限免策略）==========
   ocrProvider?: string;
   ocrEstimatedFee?: number;
   ocrPrecheck?: OcrPrecheckResult;
   ocrFeeDetail?: OcrFeeDetail;
   ocrCharsCount?: number;
+  importResult?: {
+    successCount: number;
+    failureCount: number;
+    errors: string[];
+    anchorPersonId?: string;
+    skippedCount?: number;
+  };
+  progress?: PdfParseProgress | null;
 }
 
 export interface PdfPersonRecord {
   rowNumber: number;
+  localId?: string;
   fullName: string;
   gender?: 'M' | 'F' | 'UNKNOWN';
   generation?: number;
@@ -28,74 +36,112 @@ export interface PdfPersonRecord {
   deathDate?: string;
   isLiving?: boolean;
   parentName?: string;
+  parentLocalId?: string;
+  motherName?: string;
+  motherLocalId?: string;
   spouseName?: string;
+  spouseLocalId?: string;
   biography?: string;
   burialPlace?: string;
   notes?: string;
   confidenceScore: number;
   originalText?: string;
+  pageNumber?: number;
+  parseWarning?: string;
+}
+
+export interface PdfUploadResult {
+  success: boolean;
+  taskId: string;
+  message: string;
+  queued?: boolean;
+  queuePosition?: number;
+}
+
+export interface PdfPreviewResult {
+  taskId: string;
+  totalRecords: number;
+  records: PdfPersonRecord[];
+}
+
+export interface PdfExecuteResult {
+  success: boolean;
+  message: string;
+  successCount: number;
+  failureCount: number;
+  skippedCount?: number;
+  mergedCount?: number;
+  errors: string[];
+  needsDuplicateChoice?: boolean;
+  duplicates?: Array<{ fullName: string; count: number; rowNumbers: number[] }>;
+  anchorPersonId?: string;
+  ocrFeeDetail?: OcrFeeDetail;
+  ocrEstimatedFee?: number;
 }
 
 /**
- * 上传PDF文件
+ * 上传 PDF。request 拦截器已解包响应体。
  */
-export function uploadPdf(
-  file: File,
-  clanId: string | number,
-  userId: string,
-  forceOcr = false,
-) {
+export function uploadPdf(file: File, clanSlug: string, forceOcr = false) {
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('clan_id', String(clanId));
-  formData.append('user_id', userId);
+  formData.append('clan_slug', clanSlug);
   if (forceOcr) {
     formData.append('force_ocr', 'true');
   }
 
-  return request.post('/api/import/pdf/upload', formData, {
+  return request.post<PdfUploadResult, PdfUploadResult>('/api/import/pdf/upload', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
-    timeout: 300000, // 5分钟超时
+    timeout: 300000,
   });
 }
 
-/**
- * 查询任务状态
- */
-export function getTaskStatus(taskId: string): Promise<{ data: PdfImportTask }> {
-  return request.get(`/api/import/pdf/task/${taskId}/status`);
+export interface PdfParseProgress {
+  phase: 'reading' | 'ocr' | 'extracting' | 'done';
+  currentPage: number;
+  totalPages: number;
+  message: string;
 }
 
-/**
- * 获取任务预览数据
- */
-export function getTaskPreview(taskId: string): Promise<{
-  data: {
-    taskId: string;
-    totalRecords: number;
-    records: PdfPersonRecord[];
-  };
-}> {
-  return request.get(`/api/import/pdf/task/${taskId}/preview`);
+export function getTaskProgress(taskId: string) {
+  return request.get<{ taskId: string; status: string; parseMode: string; progress: PdfParseProgress }>(
+    `/api/import/pdf/task/${taskId}/progress`,
+  );
 }
 
-/**
- * 提交校对数据
- */
+export function getTaskPageImage(taskId: string, page: number) {
+  return request.get<{ page: number; totalPages: number; contentType: string; dataUrl: string }>(
+    `/api/import/pdf/task/${taskId}/page/${page}`,
+  );
+}
+
+export function getTaskStatus(taskId: string) {
+  return request.get<PdfImportTask, PdfImportTask>(`/api/import/pdf/task/${taskId}/status`);
+}
+
+export function getTaskPreview(taskId: string) {
+  return request.get<PdfPreviewResult, PdfPreviewResult>(`/api/import/pdf/task/${taskId}/preview`);
+}
+
 export function submitCorrection(taskId: string, records: PdfPersonRecord[]) {
   return request.put(`/api/import/pdf/task/${taskId}/correct`, {
     records,
   });
 }
 
-/**
- * 执行导入
- */
-export function executeImport(taskId: string, userId: string, clanId: string | number) {
-  return request.post(`/api/import/pdf/task/${taskId}/execute`, {
-    user_id: userId,
-    clan_id: String(clanId),
+export function executeImport(
+  taskId: string,
+  clanSlug: string,
+  records: PdfPersonRecord[],
+  duplicateStrategy?: 'skip' | 'merge' | 'create',
+) {
+  return request.post<PdfExecuteResult, PdfExecuteResult>(`/api/import/pdf/task/${taskId}/execute`, {
+    clan_slug: clanSlug,
+    records,
+    duplicate_strategy: duplicateStrategy,
+  }, {
+    timeout: 120000,
   });
 }
