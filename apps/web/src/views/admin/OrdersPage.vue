@@ -88,7 +88,7 @@ onMounted(() => {
     <GenealogyWorkflowBar :highlight="['print']" />
     <ElCard>
       <template #header>
-        <h2>印刷订单管理</h2>
+        <h2>预览、印刷出谱</h2>
       </template>
 
       <ElTabs v-model="activeTab" @tab-change="fetchOrders">

@@ -1,19 +1,20 @@
 <script setup lang="ts">
 /**
  * 修谱工作流条
- * 展示"新建族谱 → 旧谱电子化（导入与拍照→OCR→左右对照编修→保存数据表）→ 发通知族员 →
- * 族员自行更改 → 审核 → 新谱建成 → 印刷出谱"全流程，当前阶段高亮、可点击跳转。
+ * 展示 8 步修谱主流程。圆点里只放序号，统计数字在右下角小标签。
+ * 点击节点跳到侧栏对应页面；路由变化时重新拉取进度。
  * 数据来源：GET /api/genealogy-workflow/status?clanId=<slug>（后端按真实业务数据推导）。
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 
 interface WorkflowSubStage {
   key: string
   label: string
-  status: 'done' | 'current' | 'todo'
+  status: 'done' | 'current' | 'todo' | 'returned'
   count: number
+  badge?: number
   detail: string
   link: string
 }
@@ -21,10 +22,18 @@ interface WorkflowSubStage {
 interface WorkflowStage {
   key: string
   label: string
-  status: 'done' | 'current' | 'todo'
+  status: 'done' | 'current' | 'todo' | 'returned' | 'suspended'
   count: number
+  badge?: number
+  returned?: boolean
   detail: string
   link: string
+  menu_path?: string
+  pre_condition?: string | null
+  reject_return_key?: string | null
+  blocked?: boolean
+  return_notice?: { reason: string; requirement: string } | null
+  returned_from_label?: string | null
   sub_stages?: WorkflowSubStage[]
 }
 
@@ -32,6 +41,8 @@ interface WorkflowStatus {
   progress: number
   done_count: number
   total_count: number
+  mode?: 'serial' | 'free'
+  progress_paused?: boolean
   current_stage: string | null
   current_label: string | null
   stages: WorkflowStage[]
@@ -47,7 +58,7 @@ const errorType = ref<'auth' | 'forbidden' | 'notFound' | 'network'>('network')
 
 /**
  * 凸显的工作流节点 key 列表（与 workflow.stages[].key 对应）。
- * 例如 ['digitize'] 或 ['notify', 'member_edit', 'review']。
+ * 例如 ['digitize'] 或 ['errata_notice', 'errata_revise']。
  * 默认空数组：与现有行为一致，不凸显任何节点。
  *
  * 设计意图：在【修谱】菜单下的子页面顶部展示完整工作流条的同时，
@@ -71,15 +82,16 @@ function isSubHighlighted(key: string): boolean {
 
 async function load() {
   if (!clanSlug.value) return
-  loading.value = true
-  error.value = ''
-  errorType.value = 'network'
+  const firstLoad = !workflow.value
+  if (firstLoad) loading.value = true
   try {
     const res = await axios.get('/api/genealogy-workflow/status', {
       params: { clanId: clanSlug.value },
     })
+    error.value = ''
     workflow.value = res.data
   } catch (e: any) {
+    if (!firstLoad) return
     const status: number = e?.response?.status || 0
     const message = e?.response?.data?.message || ''
     if (status === 401 || message.includes('Unauthorized') || message.includes('未授权')) {
@@ -100,9 +112,12 @@ async function load() {
   }
 }
 
+function go(link: string) {
+  if (link) router.push(link)
+}
+
 function handleRetry() {
   if (errorType.value === 'auth') {
-    // 清除过期的 token 并跳转登录
     localStorage.removeItem('geneasphere_token')
     router.push({ path: '/login', query: { redirect: route.fullPath } })
   } else {
@@ -110,13 +125,67 @@ function handleRetry() {
   }
 }
 
-function go(link: string) {
-  if (link) router.push(link)
+function stepTitle(stage: WorkflowStage) {
+  if (!stage.blocked) return stage.detail
+  const stages = workflow.value?.stages ?? []
+  const index = stages.findIndex((item) => item.key === stage.key)
+  const blocker = stages.slice(0, index).find((item) => item.status !== 'done')
+  if (!blocker) return stage.detail
+  if (blocker.status === 'returned') {
+    const source = blocker.returned_from_label || blocker.label
+    return `${source}环节已驳回，请先处理：${blocker.label}`
+  }
+  if (blocker.status === 'suspended') return '本项目当前已搁置，恢复流转后才可继续推进'
+  return `请先完成上一环节：${blocker.label}`
 }
+
+function onStep(stage: WorkflowStage) {
+  if (stage.blocked) return
+  go(stage.menu_path || stage.link)
+}
+
+function onSubStep(link: string) {
+  if (digitizeStage.value?.blocked) return
+  go(link)
+}
+
+const pageReturn = computed(() => {
+  const keys = highlightKeys.value
+  return workflow.value?.stages.find((stage) => keys.has(stage.key) && stage.return_notice)?.return_notice ?? null
+})
+
+const pageSuspended = computed(() => {
+  const keys = highlightKeys.value
+  return Boolean(workflow.value?.stages.some((stage) => keys.has(stage.key) && stage.status === 'suspended'))
+})
+
+const hasReturned = computed(() => Boolean(workflow.value?.stages.some((stage) => stage.status === 'returned')))
+
+const focusStage = computed(() => {
+  const stages = workflow.value?.stages ?? []
+  return stages.find((stage) => stage.status === 'suspended') || stages.find((stage) => stage.status === 'current') || null
+})
+
+async function toggleSuspend() {
+  const stage = focusStage.value
+  if (!stage) return
+  const body = stage.status === 'suspended'
+    ? { clanId: clanSlug.value, resume: stage.key }
+    : { clanId: clanSlug.value, suspend: stage.key }
+  await axios.patch('/api/genealogy-workflow/settings', body)
+  await load()
+}
+
+function onExternalRefresh() {
+  load()
+}
+
+onMounted(() => window.addEventListener('xiupu-workflow-refresh', onExternalRefresh))
+onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', onExternalRefresh))
 
 const digitizeStage = computed(() => workflow.value?.stages.find((s) => s.key === 'digitize'))
 
-onMounted(load)
+watch(() => route.fullPath, () => load(), { immediate: true })
 </script>
 
 <template>
@@ -140,61 +209,68 @@ onMounted(load)
         <div class="wf-title">
           <span class="wf-logo">谱</span>
           <span class="wf-name">修谱工作流</span>
-          <el-tag v-if="workflow.current_label" type="warning" size="small" effect="light" class="wf-current-tag">
+          <el-tag v-if="workflow.progress_paused" type="info" size="small" effect="light" class="wf-current-tag">
+            进度已搁置：{{ workflow.current_label }}
+          </el-tag>
+          <el-tag v-else-if="workflow.current_label" type="warning" size="small" effect="light" class="wf-current-tag">
             当前：{{ workflow.current_label }}
           </el-tag>
           <el-tag v-else type="success" size="small" effect="light" class="wf-current-tag">
             全流程已完成 ✓
           </el-tag>
+          <el-button v-if="focusStage" text size="small" @click="toggleSuspend">
+            {{ focusStage.status === 'suspended' ? '取消搁置' : '搁置当前环节' }}
+          </el-button>
         </div>
-        <div class="wf-progress">
-          <span class="wf-progress-text">{{ workflow.done_count }} / {{ workflow.total_count }} 步</span>
-          <el-progress
-            :percentage="workflow.progress"
-            :show-text="false"
-            :stroke-width="7"
-            :color="workflow.progress >= 100 ? '#67C23A' : '#C9A96E'"
-            class="wf-progress-bar"
-          />
-          <span class="wf-progress-num">{{ workflow.progress }}%</span>
+        <div class="wf-progress-wrap">
+          <div class="wf-progress wf-progress-quiet">
+            <span class="wf-progress-text">{{ workflow.done_count }} / {{ workflow.total_count }} 步</span>
+            <el-progress
+              :percentage="workflow.progress"
+              :show-text="false"
+              :stroke-width="7"
+              :color="workflow.progress >= 100 ? '#67C23A' : '#C9A96E'"
+              class="wf-progress-bar"
+            />
+            <span class="wf-progress-num">{{ workflow.progress }}%</span>
+          </div>
+          <span v-if="hasReturned" class="wf-return-warn">⚠️ 存在驳回回流项，请先修订。</span>
         </div>
       </div>
 
-      <!-- 主阶段步骤条 -->
       <div class="wf-steps">
         <template v-for="(stage, i) in workflow.stages" :key="stage.key">
           <div
             class="wf-step"
-            :class="[stage.status, { highlighted: isStageHighlighted(stage.key) }]"
-            :title="stage.detail"
-            @click="go(stage.link)"
+            :class="[stage.status, { highlighted: isStageHighlighted(stage.key), returned: stage.returned, blocked: stage.blocked }]"
+            :title="stepTitle(stage)"
+            @click="onStep(stage)"
           >
             <div class="wf-node-row">
               <div class="wf-node">
-                <svg v-if="stage.status === 'done'" class="wf-node-icon" viewBox="0 0 24 24" width="16" height="16">
+                <svg v-if="stage.status === 'done' && !stage.blocked" class="wf-node-icon" viewBox="0 0 24 24" width="16" height="16">
                   <path fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7.5" />
                 </svg>
-                <span v-else-if="stage.status === 'current'" class="wf-pulse" />
                 <span v-else class="wf-num">{{ i + 1 }}</span>
+                <sup v-if="stage.badge" class="wf-dot">{{ stage.badge }}</sup>
+                <span v-if="stage.count > 0" class="wf-count-tag">{{ stage.count }}</span>
               </div>
               <div v-if="i < workflow.stages.length - 1" class="wf-line" :class="{ active: stage.status === 'done' }" />
             </div>
-            <div class="wf-label" :class="{ strong: stage.status === 'current' }">{{ stage.label }}</div>
-            <div v-if="stage.count > 0" class="wf-count">{{ stage.count }}</div>
+            <div class="wf-label" :class="{ strong: stage.status === 'current' || stage.status === 'returned' }">{{ stage.label }}</div>
           </div>
         </template>
       </div>
 
-      <!-- 旧谱电子化子步骤 -->
       <div v-if="digitizeStage && digitizeStage.sub_stages && digitizeStage.sub_stages.length" class="wf-substeps">
-        <span class="wf-substep-hint">旧谱电子化：</span>
+        <span class="wf-substep-hint">谱源录入：</span>
         <span
           v-for="sub in digitizeStage.sub_stages"
           :key="sub.key"
           class="wf-substep"
           :class="[sub.status, { highlighted: isSubHighlighted(sub.key) }]"
-          :title="sub.detail"
-          @click="go(sub.link)"
+          :title="digitizeStage.blocked ? stepTitle(digitizeStage) : sub.detail"
+          @click.stop="onSubStep(sub.link)"
         >
           <i class="wf-sub-dot" />
           {{ sub.label }}
@@ -202,6 +278,24 @@ onMounted(load)
         </span>
       </div>
     </div>
+
+    <el-alert
+      v-if="pageSuspended"
+      class="wf-return-alert"
+      type="info"
+      show-icon
+      :closable="false"
+      title="本项目当前已搁置，恢复流转后才可继续推进"
+    />
+    <el-alert
+      v-if="pageReturn"
+      class="wf-return-alert"
+      type="warning"
+      show-icon
+      :closable="false"
+      :title="`驳回：${pageReturn.reason}`"
+      :description="pageReturn.requirement"
+    />
   </div>
 </template>
 
@@ -273,13 +367,67 @@ onMounted(load)
   border-radius: 10px;
 }
 
+.wf-progress-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1;
+  min-width: 260px;
+}
+
 .wf-progress {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 260px;
+  min-width: 220px;
   flex: 1;
-  max-width: 380px;
+  max-width: 320px;
+}
+
+.wf-return-warn {
+  color: #d08a1f;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.wf-progress-quiet {
+  opacity: 0.55;
+}
+
+.wf-progress-quiet .wf-progress-num {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.wf-return-alert {
+  margin-top: 8px;
+}
+
+.wf-step.blocked {
+  cursor: not-allowed;
+}
+
+.wf-step.blocked .wf-node {
+  background: #e4ddd2;
+  border-color: #efe7da;
+  color: #a08b6f;
+  box-shadow: none;
+}
+
+.wf-step.blocked .wf-label {
+  color: #b5a488;
+}
+
+.wf-step.suspended .wf-node::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 11px solid #a08b6f;
+  border-left: 11px solid transparent;
+  border-radius: 0 14px 0 0;
 }
 
 .wf-progress-text {
@@ -305,6 +453,8 @@ onMounted(load)
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  overflow-x: auto;
+  padding: 12px 4px 6px;
 }
 
 .wf-step {
@@ -313,7 +463,7 @@ onMounted(load)
   flex-direction: column;
   align-items: center;
   cursor: pointer;
-  min-width: 0;
+  min-width: 92px;
 }
 
 .wf-node-row {
@@ -323,6 +473,7 @@ onMounted(load)
 }
 
 .wf-node {
+  position: relative;
   width: 30px;
   height: 30px;
   border-radius: 50%;
@@ -349,7 +500,15 @@ onMounted(load)
 .wf-step.current .wf-node {
   background: linear-gradient(135deg, #e6a23c, #d08a1f);
   border-color: #e6a23c;
+  color: #fff;
   box-shadow: 0 0 0 4px rgba(230, 162, 60, 0.18);
+}
+
+.wf-step.returned .wf-node {
+  background: #f8e7c1;
+  border-color: #e6c07b;
+  color: #8a5a12;
+  box-shadow: 0 0 0 4px rgba(230, 192, 123, 0.28);
 }
 
 .wf-pulse {
@@ -380,10 +539,12 @@ onMounted(load)
 
 .wf-label {
   margin-top: 8px;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.35;
   color: #7a6a55;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
+  max-width: 96px;
   transition: color 0.2s;
 }
 
@@ -396,19 +557,39 @@ onMounted(load)
   color: #529b2e;
 }
 
-.wf-count {
-  margin-top: 3px;
-  font-size: 11px;
-  color: #b5a488;
+.wf-step.returned .wf-label {
+  color: #8a5a12;
 }
 
-.wf-step.done .wf-count {
-  color: #67c23a;
+.wf-dot {
+  position: absolute;
+  top: -12px;
+  left: 22px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #f56c6c;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px #fffdf8;
 }
 
-.wf-step.current .wf-count {
-  color: #d08a1f;
-  font-weight: 600;
+.wf-count-tag {
+  position: absolute;
+  left: 22px;
+  bottom: -12px;
+  background: #fffdf8;
+  border: 1px solid #e8d9bf;
+  color: #8c6d4f;
+  font-size: 10px;
+  line-height: 14px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-weight: 500;
+  box-shadow: 0 0 0 2px #fffdf8;
 }
 
 .wf-step:hover .wf-node {

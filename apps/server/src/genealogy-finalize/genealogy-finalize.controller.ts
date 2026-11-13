@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Request } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Request } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminService } from '../admin/admin.service';
 import { ClanResolverService } from '../common/clan-resolver.service';
@@ -22,9 +22,30 @@ export class GenealogyFinalizeController {
   }
 
   @Post('finalize')
-  @ApiOperation({ summary: '定谱并固化为新版本' })
+  @ApiOperation({ summary: '定谱并锁定谱系' })
   async finalize(@Request() req, @Param('slug') slug: string, @Body() dto: FinalizeGenealogyDto) {
     return { data: await this.service.finalize(await this.clanId(slug, req.user.userId), req.user.userId, dto) };
+  }
+
+  @Get('pedigree-lock')
+  @ApiOperation({ summary: '终审锁谱记录' })
+  async lockState(@Request() req, @Param('slug') slug: string) {
+    return { data: await this.service.lockState(await this.clanId(slug, req.user.userId), req.user.userId) };
+  }
+
+  @Post('finalize/reject')
+  @ApiOperation({ summary: '终审驳回，回流到汇总勘误、修订谱稿' })
+  async reject(@Request() req, @Param('slug') slug: string, @Body() body: { reason?: string }) {
+    const reason = body?.reason?.trim();
+    if (!reason) throw new BadRequestException('请填写驳回原因');
+    return { data: await this.service.reject(await this.clanId(slug, req.user.userId), req.user.userId, reason) };
+  }
+
+  @Post('finalize/unlock')
+  @ApiOperation({ summary: '解锁谱系，仅族长可操作' })
+  async unlock(@Request() req, @Param('slug') slug: string) {
+    const clanId = await this.admin.requireOwnerBySlug(slug, req.user.userId);
+    return { data: await this.service.unlock(clanId, req.user.userId) };
   }
 
   @Get('versions')

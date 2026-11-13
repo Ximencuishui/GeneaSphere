@@ -259,7 +259,7 @@ const routes: RouteRecordRaw[] = [
       // 家族理事会 / 修谱小组：已集成到 FamilyOverviewPage，通过入口卡片弹窗查看，不再保留独立路由
       { path: 'members', name: 'admin-members', component: () => import('@/views/admin/MembersPage.vue'), meta: { title: '族员管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'reviews/media', name: 'admin-media-reviews', component: () => import('@/views/admin/MediaReviewPage.vue'), meta: { title: '影像审核', requiresAuth: true, requiresAdmin: true } },
-      { path: 'reviews/bio', name: 'admin-bio-reviews', component: () => import('@/views/admin/BioReviewPage.vue'), meta: { title: '生平审核', requiresAuth: true, requiresAdmin: true } },
+      { path: 'reviews/bio', name: 'admin-bio-reviews', component: () => import('@/views/admin/BioReviewPage.vue'), meta: { title: '谱稿初审', requiresAuth: true, requiresAdmin: true } },
       { path: 'merge/applications', name: 'admin-merge-applications', component: () => import('@/views/admin/MergeApplicationsPage.vue'), meta: { title: '认亲申请', requiresAuth: true, requiresAdmin: true } },
       { path: 'merge/wizard/:appId', name: 'admin-merge-wizard', component: () => import('@/views/admin/MergeWizardPage.vue'), meta: { title: '归宗合并', requiresAuth: true, requiresAdmin: true } },
       { path: 'merge/posts', name: 'admin-merge-posts', component: () => import('@/views/admin/SearchPostsPage.vue'), meta: { title: '寻亲帖管理', requiresAuth: true, requiresAdmin: true } },
@@ -270,9 +270,16 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings/storage', name: 'admin-storage-settings', component: () => import('@/views/admin/StoragePage.vue'), meta: { title: '云存储', requiresAuth: true, requiresAdmin: true } },
       { path: 'print', name: 'admin-print', component: () => import('@/views/admin/OrdersPage.vue'), meta: { title: '印刷', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/data', name: 'admin-genealogy-data', component: () => import('@/views/admin/GenealogyDataPage.vue'), meta: { title: '族谱数据', requiresAuth: true, requiresAdmin: true } },
-      { path: 'genealogy/pdf-import', name: 'admin-pdf-import', component: () => import('@/views/PdfImportPage.vue'), meta: { title: '旧谱导入', requiresAuth: true, requiresAdmin: true } },
-      { path: 'genealogy/crowdsource', name: 'admin-genealogy-crowdsource', component: () => import('@/views/admin/CrowdsourceEditPage.vue'), meta: { title: '众包修改', requiresAuth: true, requiresAdmin: true } },
-      { path: 'genealogy/finalize', name: 'admin-genealogy-finalize', component: () => import('@/views/admin/GenealogyFinalizePage.vue'), meta: { title: '定谱', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/pdf-import', redirect: (to) => `/zupu/${to.params.slug}/genealogy/data?tab=digitize&import=1${to.query.taskId ? `&taskId=${to.query.taskId}` : ''}` },
+      { path: 'genealogy/errata', name: 'admin-genealogy-errata', component: () => import('@/views/admin/CrowdsourceEditPage.vue'), meta: { title: '族人勘误', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/crowdsource', redirect: (to) => {
+        const tab = String(to.query.tab || '')
+        if (tab === 'bio') return `/zupu/${to.params.slug}/reviews/bio`
+        const next = tab === 'submissions' || tab === 'revise' ? 'revise' : 'dispatch'
+        return `/zupu/${to.params.slug}/genealogy/errata?tab=${next}`
+      } },
+      { path: 'genealogy/finalize', name: 'admin-genealogy-finalize', component: () => import('@/views/admin/GenealogyFinalizePage.vue'), meta: { title: '终审定稿', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/typeset', name: 'admin-genealogy-typeset', component: () => import('@/views/admin/GenealogyFinalizePage.vue'), meta: { title: '册谱版式渲染', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/h5-entry', name: 'admin-genealogy-h5-entry', component: () => import('@/views/admin/H5EntryPage.vue'), meta: { title: '族员入口', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/old', name: 'admin-genealogy-old', component: () => import('@/views/admin/GenealogyHistoryPage.vue'), meta: { title: '旧谱', requiresAuth: true, requiresAdmin: true } },
       { path: 'video/migration', name: 'admin-video-migration', component: () => import('@/views/admin/MigrationVideoPage.vue'), meta: { title: '迁徙历史视频', requiresAuth: true, requiresAdmin: true } },
@@ -312,7 +319,7 @@ const routes: RouteRecordRaw[] = [
       // - 印刷订单 → 印刷
       { path: 'orders', redirect: (to) => `/zupu/${to.params.slug}/print` },
       // - 生成族谱 → 定谱（默认 generate tab，原独立页面已合并到定谱的"生成族谱"子功能）
-      { path: 'genealogy/generate', redirect: (to) => `/zupu/${to.params.slug}/genealogy/finalize?tab=generate` },
+      { path: 'genealogy/generate', redirect: (to) => `/zupu/${to.params.slug}/genealogy/typeset` },
     ],
   },
   // 全局 catch-all：未匹配的 /zupu/:slug/* 子路径 → 跳到 /zupu/:slug（默认子路由）

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -180,18 +180,45 @@ const handleBatchRejectWithPreset = async (preset: string) => {
 
 const hasSelection = computed(() => selectedReviews.value.length > 0)
 
+const stageSuspended = ref(false)
+
+async function loadStageSuspend() {
+  try {
+    const res = await axios.get('/api/genealogy-workflow/status', { params: { clanId: clanSlug.value } })
+    stageSuspended.value = (res.data?.stages ?? []).some(
+      (stage: { key?: string; status?: string }) => stage.key === 'internal_review' && stage.status === 'suspended',
+    )
+  } catch {
+    stageSuspended.value = false
+  }
+}
+
 onMounted(() => {
   clanSlug.value = route.params.slug as string || '1'
   fetchReviews()
+  loadStageSuspend()
+  window.addEventListener('xiupu-workflow-refresh', loadStageSuspend)
 })
+onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', loadStageSuspend))
 </script>
 
 <template>
   <div class="bio-review-page">
+    <ElAlert
+      v-if="stageSuspended"
+      type="info"
+      show-icon
+      :closable="false"
+      title="本项目当前已搁置，恢复流转后才可继续推进"
+      style="margin-bottom: 12px"
+    />
     <ElCard>
       <template #header>
         <div class="page-header">
-          <h2>生平审核</h2>
+          <div>
+            <h2>谱稿初审</h2>
+            <p class="scope-hint">审核人物生平和世系关系。驳回后请回到旧谱电子化修订。</p>
+          </div>
           <div class="header-actions">
             <ElButton
               type="success"
@@ -323,6 +350,13 @@ onMounted(() => {
 
 .page-header h2 {
   margin: 0;
+}
+
+.scope-hint {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: #606266;
 }
 
 .header-actions {

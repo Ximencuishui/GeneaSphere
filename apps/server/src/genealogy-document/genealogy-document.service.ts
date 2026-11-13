@@ -10,6 +10,7 @@ import { CreateGenealogyDocumentDto } from './dto/create-genealogy-document.dto'
 import { PrintService } from '../print/print.service';
 import { CosService } from '../cos/cos.service';
 import { v4 as uuidv4 } from 'uuid';
+import { assertPedigreeLocked } from '../genealogy-workflow/xiupu-settings';
 
 /**
  * 族谱文档历史版本管理服务
@@ -39,7 +40,8 @@ export class GenealogyDocumentService {
     userId: string,
     dto: CreateGenealogyDocumentDto,
   ) {
-    // 生成 PDF
+    await assertPedigreeLocked(this.prisma, clanId);
+    // 锁谱之后世系不能再改，这里读到的就是已锁定的谱稿。
     let pdfBuffer: Buffer;
     try {
       pdfBuffer = await this.printService.generateGenealogyPdf(clanId);

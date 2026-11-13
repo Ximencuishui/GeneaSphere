@@ -1,38 +1,47 @@
 <script setup lang="ts">
 /**
- * 众包修改管理
- *
- * 左：通知文案管理（生成 H5 通知文案，让族员通过手机号登录修改族谱信息）
- * 右：族员修改审核（族员提交的修改记录，管理员通过/拒绝）
+ * 族人勘误：下发通知，汇总勘误并修订谱稿。
+ * 族人只能提交勘误申请，主修审核通过后才写入谱库。
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import axios from 'axios'
-import BioReviewPage from '@/views/admin/BioReviewPage.vue'
 
 const route = useRoute()
 const router = useRouter()
 const clanSlug = computed(() => String(route.params.slug ?? '1'))
-const ALLOWED_TABS = ['notice', 'submissions', 'bio'] as const
+const ALLOWED_TABS = ['dispatch', 'revise'] as const
 type TabKey = (typeof ALLOWED_TABS)[number]
-const activeTab = ref<TabKey>('notice')
+
+function normalizeTab(value: unknown): TabKey {
+  if (value === 'revise' || value === 'submissions') return 'revise'
+  return 'dispatch'
+}
+
+const treeEditorOpen = ref(false)
+const activeTab = ref<TabKey>('dispatch')
 
 watch(() => route.query.tab, (value) => {
-  activeTab.value = ALLOWED_TABS.includes(value as TabKey) ? value as TabKey : 'notice'
+  if (value === 'bio') {
+    router.replace(`/zupu/${clanSlug.value}/reviews/bio`)
+    return
+  }
+  const next = normalizeTab(value)
+  activeTab.value = next
+  if (value !== next) router.replace({ query: { ...route.query, tab: next } })
 }, { immediate: true })
 
 watch(activeTab, (value) => {
   if (route.query.tab !== value) router.replace({ query: { ...route.query, tab: value } })
-  if (value === 'notice') loadNotices()
-  if (value === 'submissions') loadSubmissions()
+  if (value === 'dispatch') loadNotices()
+  if (value === 'revise') loadSubmissions()
 })
 
 const workflowHighlight = computed(() => {
-  if (activeTab.value === 'notice') return ['notify']
-  if (activeTab.value === 'submissions') return ['member_edit']
-  return ['review']
+  if (activeTab.value === 'revise') return ['errata_revise']
+  return ['errata_notice']
 })
 
 // ===== 通知文案 =====
@@ -228,29 +237,29 @@ async function handleReject(row: any) {
 }
 
 onMounted(() => {
-  if (activeTab.value === 'notice') loadNotices()
-  if (activeTab.value === 'submissions') loadSubmissions()
+  if (activeTab.value === 'dispatch') loadNotices()
+  if (activeTab.value === 'revise') loadSubmissions()
 })
 </script>
 
 <template>
   <div class="crowdsource-page">
-    <!-- 修谱工作流（顶部一目了然，并凸显与本页相关的"发通知族员 / 族员自行更改 / 审核"三个节点） -->
+    <!-- 修谱工作流：本页对应「下发族人勘误」或「汇总勘误、修订谱稿」 -->
     <GenealogyWorkflowBar :highlight="workflowHighlight" />
     <ElTabs v-model="activeTab" class="crowdsource-tabs">
-      <ElTabPane label="通知文案管理" name="notice">
+      <ElTabPane label="下发族人勘误" name="dispatch">
         <ElRow :gutter="20">
           <ElCol :span="24">
         <ElCard>
           <template #header>
             <div class="card-header">
-              <h2>通知文案管理</h2>
+              <h2>下发族人勘误</h2>
               <ElButton type="primary" size="small" @click="openCreateNotice">新建通知</ElButton>
             </div>
           </template>
 
           <p class="card-hint">
-            创建通知文案，生成 H5 链接发送给族员。族员扫码或点击链接，使用手机号登录后即可修改自己的族谱信息，提交后进入右侧审核列表。
+            通知族人核对谱稿。族人只能提交勘误申请，主修审核通过后才写入谱库。
           </p>
 
           <ElTable v-loading="noticeLoading" :data="noticeList" empty-text="暂无通知文案">
@@ -277,13 +286,15 @@ onMounted(() => {
         </ElRow>
       </ElTabPane>
 
-      <ElTabPane label="族员修改审核" name="submissions">
+      <ElTabPane label="汇总勘误、修订谱稿" name="revise">
         <ElRow :gutter="20">
           <ElCol :span="24">
         <ElCard>
           <template #header>
             <div class="card-header">
-              <h2>族员修改审核</h2>
+              <h2>汇总勘误、修订谱稿</h2>
+              <p class="review-hint">族人只能提交勘误申请，主修审核通过后才写入谱库。</p>
+              <ElButton size="small" @click="treeEditorOpen = true">世系&人物编辑</ElButton>
               <ElSelect v-model="submissionFilter" size="small" style="width: 120px;" @change="loadSubmissions">
                 <ElOption label="待审核" value="pending" />
                 <ElOption label="已通过" value="approved" />
@@ -317,10 +328,6 @@ onMounted(() => {
         </ElCard>
           </ElCol>
         </ElRow>
-      </ElTabPane>
-
-      <ElTabPane label="生平传记审核" name="bio">
-        <BioReviewPage />
       </ElTabPane>
     </ElTabs>
 
@@ -374,6 +381,17 @@ onMounted(() => {
         <ElButton type="primary" @click="handleSaveNotice">保存</ElButton>
       </template>
     </ElDialog>
+
+    <ElDialog
+      v-model="treeEditorOpen"
+      title="世系&人物编辑"
+      width="92%"
+      top="4vh"
+      append-to-body
+      destroy-on-close
+    >
+      <iframe v-if="treeEditorOpen" class="tree-tool-frame" :src="`/tree/${clanSlug}`" />
+    </ElDialog>
   </div>
 </template>
 
@@ -393,6 +411,19 @@ onMounted(() => {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+}
+
+.review-hint {
+  margin: 6px 0 0;
+  color: #8c6d4f;
+  font-size: 13px;
+}
+
+.tree-tool-frame {
+  width: 100%;
+  height: 72vh;
+  border: 0;
+  background: #fff;
 }
 
 .card-hint {

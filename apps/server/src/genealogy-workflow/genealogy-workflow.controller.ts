@@ -1,6 +1,8 @@
 import {
+  Body,
   Controller,
   Get,
+  Patch,
   Query,
   Request,
   UseGuards,
@@ -31,7 +33,7 @@ export class GenealogyWorkflowController {
   ) {}
 
   @Get('status')
-  @ApiOperation({ summary: '获取修谱工作流状态（7 阶段 + 旧谱电子化 4 子阶段）' })
+  @ApiOperation({ summary: '获取修谱工作流状态（8 个主节点）' })
   async getStatus(@Request() req, @Query('clanId') clanId: string) {
     if (!clanId) {
       throw new BadRequestException('clanId 必填');
@@ -46,6 +48,19 @@ export class GenealogyWorkflowController {
 
     await this.adminService.requireAdmin(clan.id, userId);
     return this.workflowService.getStatus(clan);
+  }
+
+  @Patch('settings')
+  @ApiOperation({ summary: '保存修谱流转方式或搁置某个环节' })
+  async updateSettings(
+    @Request() req,
+    @Body() body: { clanId?: string; mode?: string; suspend?: string; resume?: string; resubmit?: string },
+  ) {
+    if (!body?.clanId) throw new BadRequestException('clanId 必填');
+    const clan = await this.resolveClan(body.clanId);
+    if (!clan) throw new NotFoundException(`Clan '${body.clanId}' not found`);
+    await this.adminService.requireAdmin(clan.id, req.user.userId);
+    return this.workflowService.updateSettings(clan, body);
   }
 
   private async resolveClan(

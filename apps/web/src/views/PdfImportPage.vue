@@ -24,7 +24,7 @@
       <div v-if="currentStep === 1" class="step-content">
         <h3>第一步：上传PDF族谱文档</h3>
         <p class="step-description">
-          请上传PDF格式的族谱文档（支持文本PDF和扫描PDF）。系统将自动解析并提取人员信息。
+          上传一份 PDF。文字版直接提取人名；扫描版自动 OCR。纸质旧谱请先拍照或扫描，导出成 PDF 再上传，单张照片不能直接导入。
         </p>
 
         <!-- OCR 额度提示 -->
@@ -75,7 +75,7 @@
           </div>
           <template #tip>
             <div class="el-upload__tip">
-              支持格式：.pdf，最大50MB
+              支持 .pdf，最大 50MB。照片请先导出为 PDF。
             </div>
           </template>
         </el-upload>

@@ -1,15 +1,7 @@
 <script setup lang="ts">
 /**
- * 定谱（含生成族谱 tab）
- *
- * Tab（受控于 URL ?tab=，默认 finalize）：
- *   - finalize：定谱信息录入、确认定谱、已定谱版本列表
- *   - generate：生成族谱 PDF（基础信息/排版风格/内容包含/生成结果预览）
- *
- * 流程：
- *   1. 定谱 → 二次确认 → 调 API（TODO）固化版本
- *   2. 定谱完成后跳到 generate tab 生成 PDF 电子档（复用 /api/genealogy-documents/）
- *   3. 已定谱版本在底部列表展示，可下载/转发/查看全部
+ * 终审定稿与册谱版式渲染分属两条路由，共用本页里原有的两块内容。
+ * /genealogy/finalize 锁谱；/genealogy/typeset 只读取已锁定的谱稿。
  */
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -26,31 +18,55 @@ const route = useRoute()
 const router = useRouter()
 const clanSlug = computed(() => String(route.params.slug ?? '1'))
 
-// 当前 tab（与 URL ?tab= 同步），允许值：finalize | generate
-const ALLOWED_TABS = ['finalize', 'generate'] as const
-type TabKey = (typeof ALLOWED_TABS)[number]
-const activeTab = ref<TabKey>('finalize')
+const isTypeset = computed(() => route.path.endsWith('/genealogy/typeset'))
+const workflowHighlight = computed<string[]>(() => (isTypeset.value ? ['render'] : ['lock']))
 
-function syncTabFromQuery() {
-  const q = String(route.query.tab || '')
-  if ((ALLOWED_TABS as readonly string[]).includes(q)) {
-    activeTab.value = q as TabKey
-  } else {
-    activeTab.value = 'finalize'
+const lockInfo = ref({ locked: false, operator_name: '', locked_at: '', version_name: '', can_unlock: false })
+
+async function loadLock() {
+  try {
+    const { data } = await axios.get(`/api/genealogy/${clanSlug.value}/pedigree-lock`)
+    const row = data?.data ?? data ?? {}
+    lockInfo.value = {
+      locked: Boolean(row.locked),
+      operator_name: row.operator_name || '',
+      locked_at: row.locked_at ? new Date(row.locked_at).toLocaleString('zh-CN') : '',
+      version_name: row.version_name || '',
+      can_unlock: Boolean(row.can_unlock),
+    }
+  } catch {
+    lockInfo.value = { locked: false, operator_name: '', locked_at: '', version_name: '', can_unlock: false }
   }
 }
-watch(() => route.query.tab, syncTabFromQuery, { immediate: true })
 
-function handleTabClick(tab: any) {
-  const name = tab?.props?.name as TabKey
-  activeTab.value = name
-  router.replace({ query: { ...route.query, tab: name } })
+async function handleReject() {
+  try {
+    const { value } = await ElMessageBox.prompt('请填写驳回原因。谱稿将回到「汇总勘误、修订谱稿」。', '终审驳回', {
+      inputPlaceholder: '例如：世系有缺代，需补齐后再定稿',
+      inputValidator: (text) => (text && text.trim() ? true : '请填写驳回原因'),
+    })
+    await axios.post(`/api/genealogy/${clanSlug.value}/finalize/reject`, { reason: value })
+    ElMessage.success('已退回修订')
+    await loadLock()
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err?.response?.data?.message || '退回失败')
+  }
 }
 
-// 定谱页面（包含定谱 + 生成族谱两个 tab）统一关联工作流中的"新谱建成"节点。
-// - finalize tab：重点是“定稿出新谱”
-// - generate tab：重点是“生成可发布的族谱文档”（仍屈于"新谱建成"阶段）
-const workflowHighlight = computed<string[]>(() => ['new_book'])
+async function handleUnlock() {
+  try {
+    await ElMessageBox.confirm('解锁定稿将开放世系、人物核心信息编辑，本次定稿记录作废，是否确认？', '解锁谱系', { type: 'warning' })
+    await axios.post(`/api/genealogy/${clanSlug.value}/finalize/unlock`)
+    ElMessage.success('谱系已解锁')
+    await loadLock()
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err?.response?.data?.message || '解锁失败')
+  }
+}
 
 // =========================================================================
 // Tab 1：定谱
@@ -145,8 +161,10 @@ async function handleFinalize() {
   try {
     const { editorInput: _editorInput, ...payload } = finalizeForm.value
     await axios.post(`/api/genealogy/${clanSlug.value}/finalize`, payload)
-    ElMessage.success('定谱成功，版本已固化')
+    ElMessage.success('定谱成功，谱系已锁定')
     await loadVersionList()
+    await loadLock()
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '定谱失败')
   } finally {
@@ -211,6 +229,10 @@ const generating = ref(false)
 const lastResult = ref<any>(null)
 
 async function handleGenerate() {
+  if (!lockInfo.value.locked) {
+    ElMessage.warning('请先完成终审定稿锁谱，再生成册谱')
+    return
+  }
   if (!generateForm.version_name.trim()) {
     ElMessage.warning('请输入版本名称')
     return
@@ -326,12 +348,18 @@ async function handleShare(row: any) {
 }
 
 onMounted(() => {
+  if (route.query.tab === 'generate') {
+    router.replace(`/zupu/${clanSlug.value}/genealogy/typeset`)
+    return
+  }
   loadCurrentDraft()
   loadVersionList()
-  if (activeTab.value === 'generate') loadBranches()
+  loadLock()
+  if (isTypeset.value) loadBranches()
 })
-watch(activeTab, (v) => {
-  if (v === 'generate' && branchOptions.value.length === 0) loadBranches()
+watch(isTypeset, (value) => {
+  if (value) loadBranches()
+  loadLock()
 })
 </script>
 
@@ -339,8 +367,7 @@ watch(activeTab, (v) => {
   <div class="finalize-page">
     <!-- 修谱工作流（顶部一目了然，并凸显与本页相关的"新谱建成"节点） -->
     <GenealogyWorkflowBar :highlight="workflowHighlight" />
-    <ElTabs :model-value="activeTab" @tab-click="handleTabClick" class="finalize-tabs">
-      <ElTabPane label="定谱" name="finalize">
+    <div v-if="!isTypeset">
         <!-- ===== Tab 1：定谱 ===== -->
         <!-- 当前草稿信息卡 -->
         <ElCard class="draft-card" shadow="never">
@@ -422,20 +449,31 @@ watch(activeTab, (v) => {
             </ElFormItem>
 
             <ElFormItem>
-              <ElButton type="warning" :loading="finalizing" @click="handleFinalize">
+              <ElButton type="warning" :loading="finalizing" :disabled="lockInfo.locked" @click="handleFinalize">
                 确认定谱（固化版本）
               </ElButton>
+              <ElButton v-if="lockInfo.locked" @click="handleReject">退回修订</ElButton>
+              <ElButton v-if="lockInfo.locked && lockInfo.can_unlock" @click="handleUnlock">解锁谱系</ElButton>
               <ElButton @click="router.push(`/zupu/${clanSlug}/genealogy/data`)">
                 返回族谱数据
               </ElButton>
             </ElFormItem>
+            <p v-if="lockInfo.locked" class="page-desc">
+              已锁谱。操作人 {{ lockInfo.operator_name }}，锁定时间 {{ lockInfo.locked_at }}。锁谱后不能修改世系和人物核心信息，解锁仅族长可操作。
+            </p>
           </ElForm>
         </ElCard>
-      </ElTabPane>
-
-      <ElTabPane label="生成族谱" name="generate">
-        <!-- ===== Tab 2：生成族谱（原 GenealogyGeneratePage） ===== -->
+    </div>
+    <div v-else>
         <div class="generate-container">
+          <ElAlert
+            v-if="!lockInfo.locked"
+            title="请先完成终审定稿锁谱，再生成册谱"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="lock-alert"
+          />
           <p class="page-desc">将家族的族谱数据生成可视化的 PDF 文档，支持多种排版风格与历史版本管理</p>
 
           <div class="form-grid">
@@ -656,6 +694,7 @@ watch(activeTab, (v) => {
                 type="primary"
                 size="large"
                 :loading="generating"
+                :disabled="!lockInfo.locked"
                 @click="handleGenerate"
               >
                 生成预览
@@ -696,8 +735,7 @@ watch(activeTab, (v) => {
             </ElCard>
           </div>
         </div>
-      </ElTabPane>
-    </ElTabs>
+    </div>
 
     <!-- 已定谱版本列表（两个 tab 共用） -->
     <ElCard class="version-card" shadow="never">
@@ -789,6 +827,10 @@ watch(activeTab, (v) => {
   margin: 0 0 8px 0;
   color: #909399;
   font-size: 14px;
+}
+
+.lock-alert {
+  margin-bottom: 12px;
 }
 
 .form-grid {

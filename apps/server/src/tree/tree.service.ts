@@ -3,6 +3,7 @@ import { Prisma, PrismaService, Person, Gender } from '@geneasphere/db';
 import { ChildRelationType } from '@prisma/client';
 import { serializeBigInt } from '../common/bigint-serializer';
 import { PedigreeService } from '../pedigree/pedigree.service';
+import { assertPedigreeUnlocked } from '../genealogy-workflow/xiupu-settings';
 
 export interface TreeNode {
   id: string;
@@ -219,6 +220,7 @@ export class TreeService {
     },
     parent_id?: bigint
   ): Promise<Person> {
+    await assertPedigreeUnlocked(this.prisma, data.clan_id);
     return await this.prisma.$transaction(async (tx) => {
       const person = await tx.person.create({
         data: {
@@ -1924,6 +1926,12 @@ export class TreeService {
       unions?: { family_id: string; union_type: string }[];
     },
   ): Promise<Person> {
+    const existing = await this.prisma.person.findUnique({
+      where: { id: personId },
+      select: { clan_id: true },
+    });
+    if (!existing) throw new NotFoundException('人物不存在');
+    await assertPedigreeUnlocked(this.prisma, existing.clan_id);
     return await this.prisma.$transaction(async (tx) => {
       const person = await tx.person.update({
         where: { id: personId },
@@ -2501,6 +2509,12 @@ export class TreeService {
    * - 禁止把子树移动到自身或其后代下
    */
   async moveSubTree(subtreeRootId: bigint, newParentId: bigint): Promise<void> {
+    const existing = await this.prisma.person.findUnique({
+      where: { id: subtreeRootId },
+      select: { clan_id: true },
+    });
+    if (!existing) throw new NotFoundException('人物不存在');
+    await assertPedigreeUnlocked(this.prisma, existing.clan_id);
     return await this.prisma.$transaction(async (tx) => {
       const subtreeDescendants = await tx.personAncestry.findMany({
         where: { ancestor_id: subtreeRootId },

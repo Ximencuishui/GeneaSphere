@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
+import { assertPedigreeUnlocked } from '../genealogy-workflow/xiupu-settings';
 import {
   InviteQrcodeStatus,
   VerificationStatus,
@@ -280,6 +281,10 @@ export class InviteService {
 
     if (decision.status === ModificationStatus.REJECTED && !decision.reject_reason) {
       throw new BadRequestException('驳回时必须填写原因');
+    }
+
+    if (decision.status === ModificationStatus.APPROVED) {
+      await assertPedigreeUnlocked(this.prisma, record.clan_id);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {

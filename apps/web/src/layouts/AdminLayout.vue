@@ -146,11 +146,14 @@ const menuItems = computed<MenuEntry[]>(() => [
     title: '修谱',
     icon: 'EditPen',
     children: [
-      { title: '族谱数据', path: `/zupu/${clanSlug.value}/genealogy/data` },
-      { title: '众包修改', path: `/zupu/${clanSlug.value}/genealogy/crowdsource` },
-      { title: '定谱', path: `/zupu/${clanSlug.value}/genealogy/finalize` },
-      { title: '族员入口', path: `/zupu/${clanSlug.value}/genealogy/h5-entry` },
-      { title: '印刷', path: `/zupu/${clanSlug.value}/print` },
+      { title: '新建族谱项目', path: `/zupu/${clanSlug.value}/genealogy/data?tab=new` },
+      { title: '旧谱电子化', path: `/zupu/${clanSlug.value}/genealogy/data?tab=digitize` },
+      { title: '谱稿初审', path: `/zupu/${clanSlug.value}/reviews/bio` },
+      { title: '下发族人勘误', path: `/zupu/${clanSlug.value}/genealogy/errata?tab=dispatch` },
+      { title: '汇总勘误、修订谱稿', path: `/zupu/${clanSlug.value}/genealogy/errata?tab=revise` },
+      { title: '终审定稿', path: `/zupu/${clanSlug.value}/genealogy/finalize` },
+      { title: '册谱版式渲染', path: `/zupu/${clanSlug.value}/genealogy/typeset` },
+      { title: '预览、印刷出谱', path: `/zupu/${clanSlug.value}/print` },
     ],
   },
   {
@@ -173,7 +176,7 @@ const menuItems = computed<MenuEntry[]>(() => [
       // 邀请二维码：内集成【验证记录】 tab，默认进入二维码列表
       { title: '邀请二维码', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
       { title: '族员信息审核', path: `/zupu/${clanSlug.value}/invite/reviews` },
-      { title: '生平审核', path: `/zupu/${clanSlug.value}/reviews/bio` },
+      { title: '内部初审', path: `/zupu/${clanSlug.value}/reviews/bio` },
       { title: '家庭关系变更审核', path: `/zupu/${clanSlug.value}/family-relation/reviews` },
       { title: '子女归属争议', path: `/zupu/${clanSlug.value}/family-relation/disputes` },
       { title: '举报管理', path: `/zupu/${clanSlug.value}/reports` },
@@ -232,13 +235,38 @@ const menuItems = computed<MenuEntry[]>(() => [
 const openedMenus = ref<string[]>([])
 const isLeaf = (item: MenuEntry): item is MenuLeaf =>
   typeof (item as MenuLeaf).path === 'string'
+const xiupuIndex = (path: string, query: Record<string, unknown>) => {
+  const base = `/zupu/${clanSlug.value}`
+  if (path === `${base}/genealogy/data`) {
+    return String(query.tab || 'new') === 'new'
+      ? `${base}/genealogy/data?tab=new`
+      : `${base}/genealogy/data?tab=digitize`
+  }
+  if (path === `${base}/reviews/bio`) return `${base}/reviews/bio`
+  if (path === `${base}/genealogy/errata` || path === `${base}/genealogy/crowdsource` || path === `${base}/genealogy/h5-entry`) {
+    const tab = String(query.tab || 'dispatch')
+    return tab === 'revise' || tab === 'submissions'
+      ? `${base}/genealogy/errata?tab=revise`
+      : `${base}/genealogy/errata?tab=dispatch`
+  }
+  if (path === `${base}/genealogy/typeset`) return `${base}/genealogy/typeset`
+  if (path === `${base}/genealogy/finalize`) return `${base}/genealogy/finalize`
+  if (path === `${base}/print`) return `${base}/print`
+  return ''
+}
+
 const updateOpenedMenus = () => {
   const currentPath = route.path
+  const active = xiupuIndex(currentPath, route.query as Record<string, unknown>)
+  if (active) {
+    if (!openedMenus.value.includes('修谱')) openedMenus.value = [...openedMenus.value, '修谱']
+    return
+  }
   for (const item of menuItems.value) {
-    // 顶级直达项（leaf）没有子菜单，无需展开
     if (isLeaf(item)) continue
     for (const child of item.children) {
-      if (child.path === currentPath || currentPath.startsWith(child.path + '?')) {
+      const childBase = child.path.split('?')[0]
+      if (childBase === currentPath || currentPath.startsWith(childBase + '/')) {
         if (!openedMenus.value.includes(item.title)) {
           openedMenus.value = [...openedMenus.value, item.title]
         }
@@ -249,18 +277,61 @@ const updateOpenedMenus = () => {
 }
 watch(() => route.path, updateOpenedMenus, { immediate: true })
 
-const activeMenu = computed(() => {
-  // 使用纯路径（不含 query）作为高亮依据；
-  // 原【族员列表】与【权限分配】两个菜单项都指向同一页面（一个带 ?tab=roles），
-  // 现在合并为单个【族员管理】菜单项，路径与页面一致即可：
-  // 在该页面上（不论是否带 query）都高亮同一个菜单项。
-  return route.path
-})
+const activeMenu = computed(() => xiupuIndex(route.path, route.query as Record<string, unknown>) || route.path)
 
 // 生成面包屑
 const breadcrumbs = computed(() => {
   const crumbs: { title: string; path?: string }[] = []
   const currentPath = route.path
+  const base = `/zupu/${clanSlug.value}`
+  const tab = String(route.query.tab || '')
+  if (currentPath === `${base}/genealogy/data`) {
+    crumbs.push({ title: '修谱' })
+    if (tab === 'new' || !tab) {
+      crumbs.push({ title: '新建族谱项目' })
+    } else if (tab === 'pdf-import') {
+      crumbs.push({ title: '旧谱电子化', path: `${base}/genealogy/data?tab=digitize` })
+      crumbs.push({ title: 'PDF导入管理' })
+    } else if (route.query.import === '1') {
+      crumbs.push({ title: '旧谱电子化', path: `${base}/genealogy/data?tab=digitize` })
+      crumbs.push({ title: '上传旧谱' })
+    } else {
+      crumbs.push({ title: '旧谱电子化' })
+    }
+    return crumbs
+  }
+  if (currentPath === `${base}/genealogy/errata` || currentPath === `${base}/genealogy/crowdsource`) {
+    crumbs.push({ title: '修谱' })
+    crumbs.push({ title: tab === 'revise' || tab === 'submissions' ? '汇总勘误、修订谱稿' : '下发族人勘误' })
+    return crumbs
+  }
+  if (currentPath === `${base}/reviews/bio`) {
+    crumbs.push({ title: '修谱' })
+    crumbs.push({ title: '谱稿初审' })
+    return crumbs
+  }
+  if (currentPath === `${base}/genealogy/finalize`) {
+    crumbs.push({ title: '修谱' })
+    crumbs.push({ title: '终审定稿' })
+    return crumbs
+  }
+  if (currentPath === `${base}/genealogy/typeset`) {
+    crumbs.push({ title: '修谱' })
+    crumbs.push({ title: '终审定稿', path: `${base}/genealogy/finalize` })
+    crumbs.push({ title: '册谱版式渲染' })
+    return crumbs
+  }
+  if (currentPath === `${base}/print`) {
+    crumbs.push({ title: '修谱' })
+    crumbs.push({ title: '预览、印刷出谱' })
+    return crumbs
+  }
+  if (currentPath === `${base}/genealogy/h5-entry`) {
+    crumbs.push({ title: '修谱' })
+    crumbs.push({ title: '下发族人勘误', path: `${base}/genealogy/errata?tab=dispatch` })
+    crumbs.push({ title: '族人入口' })
+    return crumbs
+  }
   for (const item of menuItems.value) {
     // 顶级直达项（leaf）：面包屑只显示当前页标题，不显示上级
     if (isLeaf(item)) {
@@ -420,13 +491,11 @@ const storageHint = computed(() =>
             @click="sidebarVisible = true"
           />
           <ElBreadcrumb separator="/" class="breadcrumb">
-            <ElBreadcrumbItem :to="{ path: `/zupu/${clanSlug}/dashboard` }">
-              <ElIcon><HomeFilled /></ElIcon>
-            </ElBreadcrumbItem>
+            <ElBreadcrumbItem :to="{ path: `/zupu/${clanSlug}` }">首页</ElBreadcrumbItem>
             <ElBreadcrumbItem
               v-for="(crumb, idx) in breadcrumbs"
               :key="idx"
-              :to="crumb.path ? { path: crumb.path } : undefined"
+              :to="crumb.path || undefined"
             >
               {{ crumb.title }}
             </ElBreadcrumbItem>

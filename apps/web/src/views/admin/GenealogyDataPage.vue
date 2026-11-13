@@ -6,10 +6,11 @@
  *   - 旧谱电子化：旧谱项目列表（详情/继续编辑）
  *   - PDF 导入管理：复用 ImportManagementPage（导入记录/活跃任务/OCR 统计）
  */
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
+import PdfImportPage from '@/views/PdfImportPage.vue'
 import ImportManagementPage from '@/views/admin/ImportManagementPage.vue'
 
 const route = useRoute()
@@ -36,7 +37,30 @@ watch(() => route.query.tab, syncTabFromQuery, { immediate: true })
 function handleTabClick(tab: any) {
   const name = tab?.props?.name as TabKey
   activeTab.value = name
-  router.replace({ query: { ...route.query, tab: name } })
+  const query: Record<string, any> = { ...route.query, tab: name }
+  if (name !== 'digitize') {
+    delete query.import
+    delete query.taskId
+  }
+  router.replace({ query })
+}
+
+function openUploader(taskId?: string) {
+  router.replace({
+    path: `/zupu/${clanSlug.value}/genealogy/data`,
+    query: {
+      tab: 'digitize',
+      import: '1',
+      ...(taskId ? { taskId } : {}),
+    },
+  })
+}
+
+function closeUploader() {
+  router.replace({
+    path: `/zupu/${clanSlug.value}/genealogy/data`,
+    query: { tab: 'digitize' },
+  })
 }
 
 // ===== Tab 1：新建族谱 =====
@@ -143,11 +167,62 @@ function handleGoFinalize() {
 //   - 新建族谱 tab → 高亮 "新建族谱" 节点
 //   - 旧谱电子化 / PDF 导入管理 tab → 高亮 "旧谱电子化" 主阶段及其子步骤（OCR/对照/保存）
 const workflowHighlight = computed<string[]>(() => {
-  if (activeTab.value === 'new') return ['clan_created']
-  if (activeTab.value === 'digitize') return ['digitize', 'import_photo', 'compare_edit', 'save_table']
-  if (activeTab.value === 'pdf-import') return ['digitize', 'ocr', 'compare_edit', 'save_table']
-  return ['digitize']
+  if (activeTab.value === 'new') return ['project']
+  if (activeTab.value === 'pdf-import') return ['digitize', 'compare_edit']
+  return ['digitize', 'import_photo', 'ocr', 'save_table']
 })
+const pageTitle = computed(() => {
+  if (activeTab.value === 'pdf-import') return 'PDF导入管理'
+  if (activeTab.value === 'digitize') return '旧谱电子化'
+  return '新建族谱项目'
+})
+
+const flowMode = ref<'serial' | 'free'>('serial')
+const flowSaving = ref(false)
+const digitizeReturned = ref(false)
+const resubmitting = ref(false)
+
+async function loadFlowMode() {
+  try {
+    const { data } = await axios.get('/api/genealogy-workflow/status', { params: { clanId: clanSlug.value } })
+    flowMode.value = data?.mode === 'free' ? 'free' : 'serial'
+    const digitize = (data?.stages ?? []).find((stage: { key?: string }) => stage.key === 'digitize')
+    digitizeReturned.value = digitize?.status === 'returned'
+  } catch {
+    flowMode.value = 'serial'
+  }
+}
+
+async function resubmitReview() {
+  resubmitting.value = true
+  try {
+    await axios.patch('/api/genealogy-workflow/settings', { clanId: clanSlug.value, resubmit: 'digitize' })
+    ElMessage.success('已提交重新谱稿初审')
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+    await loadFlowMode()
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || '提交失败')
+  } finally {
+    resubmitting.value = false
+  }
+}
+
+async function saveFlowMode(mode: string | number | boolean) {
+  if (mode !== 'serial' && mode !== 'free') return
+  if (mode === flowMode.value) return
+  flowSaving.value = true
+  try {
+    await axios.patch('/api/genealogy-workflow/settings', { clanId: clanSlug.value, mode })
+    flowMode.value = mode
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+    ElMessage.success(mode === 'serial' ? '已切换为严格串行模式' : '已切换为自由补录模式')
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || '流转方式保存失败')
+    await loadFlowMode()
+  } finally {
+    flowSaving.value = false
+  }
+}
 
 // ===== Tab 2：旧谱电子化 =====
 const digitizeList = ref<any[]>([])
@@ -165,12 +240,9 @@ async function loadDigitizeList() {
   }
 }
 
-function handleDigitizeDetail(row: any) {
-  router.push({ path: `/zupu/${clanSlug.value}/genealogy/pdf-import`, query: { taskId: row?.task_id } })
-}
-function handleDigitizeContinue(row: any) {
-  router.push({ path: `/zupu/${clanSlug.value}/genealogy/pdf-import`, query: { taskId: row?.task_id } })
-}
+const showUploader = computed(
+  () => activeTab.value === 'digitize' && (route.query.import === '1' || !!route.query.taskId),
+)
 
 // ===== Tab 3：PDF 导入管理（直接渲染 ImportManagementPage）=====
 // ImportManagementPage 内部使用 route.params.slug 加载数据，无需传 prop
@@ -184,9 +256,12 @@ watch(activeTab, (v) => {
 })
 
 onMounted(() => {
+  loadFlowMode()
+  window.addEventListener('xiupu-workflow-refresh', loadFlowMode)
   if (activeTab.value === 'digitize') loadDigitizeList()
   if (activeTab.value === 'new') loadDraftList()
 })
+onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', loadFlowMode))
 </script>
 
 <template>
@@ -196,8 +271,11 @@ onMounted(() => {
     <ElCard>
       <template #header>
         <div class="page-header">
-          <h2>族谱数据</h2>
-          <ElButton type="primary" :icon="undefined" @click="handleBackup">备份族谱数据</ElButton>
+          <h2>{{ pageTitle }}</h2>
+          <div class="page-header-actions">
+            <ElButton type="primary" @click="openUploader()">上传旧谱 PDF</ElButton>
+            <ElButton @click="handleBackup">备份族谱数据</ElButton>
+          </div>
         </div>
       </template>
 
@@ -209,6 +287,13 @@ onMounted(() => {
             label-width="100px"
             class="new-form"
           >
+            <ElFormItem label="流转方式">
+              <ElRadioGroup :model-value="flowMode" :disabled="flowSaving" @change="saveFlowMode">
+                <ElRadio value="serial">严格串行模式</ElRadio>
+                <ElRadio value="free">自由补录模式</ElRadio>
+              </ElRadioGroup>
+              <p class="flow-hint">严格串行是默认方式：上一环节未完成时，后面的环节不能提前进入。自由补录给资深主修补录老谱，可以进入后面的环节。</p>
+            </ElFormItem>
             <ElFormItem label="族谱名称" required>
               <ElInput v-model="newForm.name" placeholder="例：朱氏宗谱·2026版" maxlength="60" show-word-limit />
             </ElFormItem>
@@ -260,9 +345,11 @@ onMounted(() => {
         <!-- Tab 2：旧谱电子化 -->
         <ElTabPane label="旧谱电子化" name="digitize">
           <div class="tab-toolbar">
-            <ElButton type="primary" @click="router.push(`/zupu/${clanSlug}/genealogy/pdf-import`)">新建旧谱电子化</ElButton>
+            <ElButton v-if="!showUploader" type="primary" @click="openUploader()">上传旧谱 PDF</ElButton>
+            <ElButton v-else @click="closeUploader">返回项目列表</ElButton>
             <ElButton @click="loadDigitizeList">刷新</ElButton>
           </div>
+          <PdfImportPage v-if="showUploader" :key="String(route.query.taskId || 'new')" class="embedded-import" />
           <ElTable v-loading="digitizeLoading" :data="digitizeList" empty-text="暂无旧谱电子化项目">
             <ElTableColumn label="项目名称" prop="name" />
             <ElTableColumn label="原始文件" prop="source_file" width="200" />
@@ -276,15 +363,18 @@ onMounted(() => {
             <ElTableColumn label="创建时间" prop="created_at" width="180" />
             <ElTableColumn label="操作" width="220">
               <template #default="{ row }">
-                <ElButton size="small" link type="primary" @click="handleDigitizeDetail(row)">详情</ElButton>
-                <ElButton size="small" link type="success" @click="handleDigitizeContinue(row)">继续编辑</ElButton>
+                <ElButton size="small" link type="primary" @click="openUploader(row?.task_id)">详情</ElButton>
+                <ElButton size="small" link type="success" @click="openUploader(row?.task_id)">继续编辑</ElButton>
               </template>
             </ElTableColumn>
           </ElTable>
+          <div v-if="digitizeReturned" class="resubmit-row">
+            <ElButton type="warning" :loading="resubmitting" @click="resubmitReview">提交重新谱稿初审</ElButton>
+          </div>
         </ElTabPane>
 
         <!-- Tab 3：PDF 导入管理（复用现有页面） -->
-        <ElTabPane label="PDF 导入管理" name="pdf-import">
+        <ElTabPane label="PDF导入管理" name="pdf-import">
           <div class="pdf-import-wrap">
             <ImportManagementPage />
           </div>
@@ -310,6 +400,11 @@ onMounted(() => {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .new-form {
@@ -338,9 +433,37 @@ onMounted(() => {
   gap: 8px;
 }
 
+.resubmit-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
 /* PDF 导入管理内嵌时去掉自身 Card 外框（已被外层 ElCard 包裹） */
 .pdf-import-wrap :deep(.el-card) {
   border: none;
   box-shadow: none;
+}
+
+.embedded-import {
+  margin-bottom: 16px;
+}
+
+.flow-hint {
+  margin: 6px 0 0;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.embedded-import :deep(.import-card) {
+  border: none;
+  box-shadow: none;
+}
+
+.embedded-import :deep(.el-card__body),
+.embedded-import :deep(.el-card__header) {
+  padding-left: 0;
+  padding-right: 0;
 }
 </style>

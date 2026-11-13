@@ -166,12 +166,10 @@ onMounted(() => {
 
 <template>
   <div class="import-management-page">
-    <!-- 修谱工作流（顶部一目了然） -->
-    <GenealogyWorkflowBar />
     <el-card class="page-header">
       <template #header>
         <div class="card-header">
-          <h2>PDF 导入管理</h2>
+          <h2>PDF导入管理</h2>
         </div>
       </template>
 

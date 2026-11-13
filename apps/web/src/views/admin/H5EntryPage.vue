@@ -46,7 +46,7 @@ onMounted(loadNotices)
 
 <template>
   <div class="h5-entry-page">
-    <GenealogyWorkflowBar :highlight="['notify', 'member_edit']" />
+    <GenealogyWorkflowBar :highlight="['errata_notice']" />
     <ElRow :gutter="20">
       <ElCol :xs="24" :md="8">
         <ElCard v-loading="loading" class="qr-card">
@@ -57,7 +57,7 @@ onMounted(loadNotices)
             <p>{{ activeNotice.content }}</p>
             <ElButton type="primary" @click="copyLink(activeNotice)">复制链接</ElButton>
           </template>
-          <ElEmpty v-else description="请先在众包修改中创建通知文案" />
+          <ElEmpty v-else description="请先在「下发族人勘误」里创建通知" />
         </ElCard>
       </ElCol>
       <ElCol :xs="24" :md="16">
