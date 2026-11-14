@@ -10,6 +10,18 @@ import { CreateFamilyEventDto } from './dto/create-family-event.dto';
 import { UpdateFamilyEventDto } from './dto/update-family-event.dto';
 
 /**
+ * event_year 是独立的整数列，不是数据库生成列。
+ * 只收到日期时，用日期字符串的公历年补上，避免筛选和视频预览漏掉这条记录。
+ */
+function yearFromEventDate(eventDate: string): number {
+  const matched = /^(\d{4})/.exec(eventDate);
+  if (!matched) {
+    throw new BadRequestException('event_date 无法解析出年份');
+  }
+  return Number(matched[1]);
+}
+
+/**
  * 家族大事件服务
  *
  * 提供 CRUD + 批量导入 + 自动生成诞辰/逝世事件能力。
@@ -22,7 +34,9 @@ export class FamilyEventService {
    * 创建家族事件
    */
   async create(clanId: bigint, userId: string, dto: CreateFamilyEventDto) {
-    if (!dto.event_date && !dto.event_year) {
+    const eventYear =
+      dto.event_year ?? (dto.event_date ? yearFromEventDate(dto.event_date) : undefined);
+    if (!dto.event_date && eventYear == null) {
       throw new BadRequestException('event_date 与 event_year 必须至少填写一个');
     }
 
@@ -32,7 +46,7 @@ export class FamilyEventService {
         event_name: dto.event_name,
         event_type: dto.event_type,
         event_date: dto.event_date ? new Date(dto.event_date) : null,
-        event_year: dto.event_year ?? null,
+        event_year: eventYear ?? null,
         location: dto.location,
         description: dto.description,
         media_ids: dto.media_ids ? (dto.media_ids as unknown as Prisma.InputJsonValue) : Prisma.JsonNull,
@@ -108,13 +122,19 @@ export class FamilyEventService {
       throw new NotFoundException(`事件 ${id} 不存在`);
     }
 
+    const eventYear =
+      dto.event_year !== undefined
+        ? dto.event_year
+        : dto.event_date
+          ? yearFromEventDate(dto.event_date)
+          : undefined;
     const data: Prisma.FamilyEventUpdateInput = {
       ...(dto.event_name !== undefined ? { event_name: dto.event_name } : {}),
       ...(dto.event_type !== undefined ? { event_type: dto.event_type } : {}),
       ...(dto.event_date !== undefined
         ? { event_date: dto.event_date ? new Date(dto.event_date) : null }
         : {}),
-      ...(dto.event_year !== undefined ? { event_year: dto.event_year } : {}),
+      ...(eventYear !== undefined ? { event_year: eventYear } : {}),
       ...(dto.location !== undefined ? { location: dto.location } : {}),
       ...(dto.description !== undefined ? { description: dto.description } : {}),
       ...(dto.media_ids !== undefined

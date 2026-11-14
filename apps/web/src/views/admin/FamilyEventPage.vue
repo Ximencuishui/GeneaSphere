@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
+import { buildFamilyEventWritePayload } from './family-event-payload'
 
 const route = useRoute()
 const clanSlug = computed(() => String(route.params.slug ?? '1'))
@@ -100,18 +101,7 @@ async function handleSubmit() {
     ElMessage.warning('请输入事件名称')
     return
   }
-  const payload: any = {
-    event_name: form.event_name,
-    event_type: form.event_type,
-    location: form.location || undefined,
-    description: form.description || undefined,
-    media_ids: form.media_ids,
-  }
-  if (form.event_date) {
-    payload.event_date = new Date(form.event_date).toISOString()
-  } else if (form.event_year) {
-    payload.event_year = form.event_year
-  }
+  const payload = buildFamilyEventWritePayload(form)
   try {
     if (dialogMode.value === 'create') {
       await axios.post(`/api/family-events/${clanSlug.value}`, payload)
@@ -164,6 +154,7 @@ async function handleAutoGenerate() {
       return
     }
     let successCount = 0
+    let failedCount = 0
     for (const c of candidates) {
       try {
         await axios.post(`/api/family-events/${clanSlug.value}`, {
@@ -174,10 +165,14 @@ async function handleAutoGenerate() {
         })
         successCount++
       } catch {
-        // skip individual errors
+        failedCount++
       }
     }
-    ElMessage.success(`已自动生成 ${successCount} 个事件`)
+    if (failedCount > 0) {
+      ElMessage.warning(`成功 ${successCount} 条，失败 ${failedCount} 条`)
+    } else {
+      ElMessage.success(`已自动生成 ${successCount} 个事件`)
+    }
     loadList()
   } catch (err: any) {
     ElMessage.error(`自动生成失败：${err?.response?.data?.message ?? err.message}`)

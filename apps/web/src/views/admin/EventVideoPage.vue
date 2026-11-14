@@ -98,7 +98,7 @@ function startPolling(projectId: string) {
         pollingTimer.value = null
         loadList()
       } else if (res.data?.status === 'failed') {
-        ElMessage.error('视频生成失败')
+        ElMessage.error('生成失败，请稍后重试')
         if (pollingTimer.value) clearInterval(pollingTimer.value)
         pollingTimer.value = null
         loadList()
@@ -128,6 +128,17 @@ function formatBytes(b: number | null) {
   if (!b) return '-'
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(2)} KB`
   return `${(b / 1024 / 1024).toFixed(2)} MB`
+}
+
+function playVideo(url: string) {
+  window.open(url, '_blank')
+}
+
+function downloadVideo(url: string, title: string) {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `${title}.mp4`
+  anchor.click()
 }
 
 function typeLabels(types: string[] | undefined) {
@@ -234,17 +245,13 @@ onMounted(() => {
         <ElTableColumn label="创建时间" width="180">
           <template #default="{ row }">{{ new Date(row.created_at).toLocaleString('zh-CN') }}</template>
         </ElTableColumn>
-        <ElTableColumn label="操作" width="160">
+        <ElTableColumn label="操作" width="200">
           <template #default="{ row }">
-            <ElButton v-if="row.video_url" size="small" type="primary" @click="window.open(row.video_url, '_blank')">
+            <span v-if="row.status === 'failed'" class="fail-hint">生成失败，请稍后重试</span>
+            <ElButton v-if="row.video_url" size="small" type="primary" @click="playVideo(row.video_url)">
               播放
             </ElButton>
-            <ElButton v-if="row.video_url" size="small" @click="() => {
-              const a = document.createElement('a')
-              a.href = row.video_url
-              a.download = `${row.title}.mp4`
-              a.click()
-            }">下载</ElButton>
+            <ElButton v-if="row.video_url" size="small" @click="downloadVideo(row.video_url, row.title)">下载</ElButton>
           </template>
         </ElTableColumn>
       </ElTable>
@@ -262,6 +269,7 @@ onMounted(() => {
 .big-num { font-size: 24px; font-weight: 600; color: #67C23A; }
 .empty-hint { color: #909399; font-size: 14px; margin-top: 12px; text-align: center; }
 .list-header { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+.fail-hint { color: #f56c6c; font-size: 12px; line-height: 1.4; }
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
 }

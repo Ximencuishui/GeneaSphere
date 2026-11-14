@@ -17,6 +17,7 @@ import { FamilyEventService } from './family-event.service';
 import { CreateFamilyEventDto } from './dto/create-family-event.dto';
 import { UpdateFamilyEventDto } from './dto/update-family-event.dto';
 import { FamilyEventType } from '@prisma/client';
+import { AdminService } from '../admin/admin.service';
 import { ClanResolverService } from '../common/clan-resolver.service';
 
 @ApiTags('family-event')
@@ -27,6 +28,7 @@ export class FamilyEventController {
   constructor(
     private readonly service: FamilyEventService,
     private readonly clanResolver: ClanResolverService,
+    private readonly admin: AdminService,
   ) {}
 
   @Get(':clanSlug')
@@ -67,25 +69,26 @@ export class FamilyEventController {
     @Param('clanSlug') clanSlug: string,
     @Body() dto: CreateFamilyEventDto,
   ) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.create(clanId, req.user.userId, dto);
   }
 
   @Put(':clanSlug/:id')
   @ApiOperation({ summary: '更新家族事件' })
   async update(
+    @Request() req,
     @Param('clanSlug') clanSlug: string,
     @Param('id') idStr: string,
     @Body() dto: UpdateFamilyEventDto,
   ) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.update(clanId, this.toBigInt(idStr), dto);
   }
 
   @Delete(':clanSlug/:id')
   @ApiOperation({ summary: '删除家族事件' })
-  async delete(@Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+  async delete(@Request() req, @Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.delete(clanId, this.toBigInt(idStr));
   }
 
@@ -96,17 +99,17 @@ export class FamilyEventController {
     @Param('clanSlug') clanSlug: string,
     @Body() body: { events: CreateFamilyEventDto[] },
   ) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     if (!Array.isArray(body?.events)) {
       throw new BadRequestException('events 必须是数组');
     }
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
     return this.service.bulkCreate(clanId, req.user.userId, body.events);
   }
 
   @Post(':clanSlug/generate-life-events')
   @ApiOperation({ summary: '基于人物生卒数据自动生成候选事件' })
-  async generateLifeEvents(@Param('clanSlug') clanSlug: string) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+  async generateLifeEvents(@Request() req, @Param('clanSlug') clanSlug: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.generateLifeEvents(clanId);
   }
 

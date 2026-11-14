@@ -241,6 +241,7 @@ model Person {
   custody_as_parent    ChildCustodyRecord[]   @relation("CustodyParent")
   bio                  PersonBio?
   events               PersonEvent[]
+  family_events        FamilyEvent[]
 
   @@index([clan_id])
   @@index([clan_id, migration_branch])
@@ -2384,6 +2385,8 @@ enum GenealogyDocumentStorageStatus {
 model FamilyEvent {
   id          BigInt          @id @default(autoincrement()) @map("id")
   clan_id     BigInt          @map("clan_id")
+  // 仅诞辰/逝世填写。祭祖、修谱、建祠、聚会、其他保持空，这些类型允许多条。
+  person_id   BigInt?         @map("person_id")
   event_name  String          @map("event_name") @db.VarChar(100)
   event_type  FamilyEventType @map("event_type")
   event_date  DateTime?       @map("event_date")
@@ -2395,11 +2398,18 @@ model FamilyEvent {
   created_at  DateTime        @default(now()) @map("created_at")
   updated_at  DateTime        @updatedAt @map("updated_at")
 
-  clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
-  creator User @relation(fields: [created_by], references: [id], onDelete: Cascade)
+  clan    Clan    @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  person  Person? @relation(fields: [person_id], references: [id], onDelete: SetNull)
+  creator User    @relation(fields: [created_by], references: [id], onDelete: Cascade)
 
   @@index([clan_id, event_type])
   @@index([clan_id, event_year])
+  @@index([person_id])
+  // 生卒去重是部分唯一索引。Prisma 5 的 @@unique 写不出 WHERE，
+  // 不要改成 @@unique([person_id, event_type])，否则同一人的多次聚会也会被锁成一条。
+  // 索引在 migrations/20261114151000_family_event_dedup：
+  // UNIQUE (person_id, event_type)
+  //   WHERE person_id IS NOT NULL AND event_type IN ('birth', 'death')
   @@map("family_events")
 }
 

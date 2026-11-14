@@ -6,7 +6,6 @@ import {
 import { PrismaService } from '@geneasphere/db';
 import { VideoProjectStatus, Prisma } from '@prisma/client';
 import { CreateClanMigrationVideoDto } from './dto/create-clan-migration-video.dto';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
  * 全族迁徙历史视频服务
@@ -25,8 +24,8 @@ export class ClanMigrationVideoService {
    *
    * 1. 提取指定时间范围内的迁徙事件
    * 2. 按时间排序
-   * 3. 创建视频项目记录（status=queued）
-   * 4. 异步模拟生成（生产环境应调用 AI 视频服务）
+   * 3. 创建视频项目记录（status=queued，不写 video_url）
+   * 4. 写入 HeavyJob，由线下 worker 领取
    */
   async create(clanId: bigint, userId: string, dto: CreateClanMigrationVideoDto) {
     // 提取迁徙事件
@@ -59,40 +58,36 @@ export class ClanMigrationVideoService {
       },
     });
 
-    // 异步处理（生产环境应使用队列）
-    this.processAsync(project.id, events.length).catch((err) => {
-      this.logger.error(`视频 ${project.id} 异步处理失败: ${err?.message}`);
-    });
+    try {
+      await this.prisma.heavyJob.create({
+        data: {
+          type: 'video',
+          status: 'pending',
+          userId,
+          clanId,
+          payload: {
+            kind: 'clan-migration',
+            projectId: project.id.toString(),
+          },
+        },
+      });
+    } catch (err) {
+      await this.markProjectFailed(project.id);
+      throw err;
+    }
 
     return this.toResponse(project);
   }
 
-  /**
-   * 异步模拟视频生成
-   */
-  private async processAsync(projectId: bigint, eventCount: number) {
-    // 模拟处理时间（每个事件约 1 秒）
-    const processingMs = Math.min(Math.max(eventCount * 1000, 5000), 60000);
-    await new Promise((r) => setTimeout(r, processingMs));
-
-    // 模拟视频 URL（COS 模式或本地模式）
-    const uuid = uuidv4().replace(/-/g, '');
-    const key = `migration-videos/${projectId}/${uuid}.mp4`;
-    const useCos = process.env.COS_ENABLED === 'true';
-    const videoUrl = useCos
-      ? `https://cdn.xungenlu.cn/${key}`
-      : `/storage/${key.replace(/\//g, '_')}`;
-
-    await this.prisma.clanMigrationVideo.update({
-      where: { id: projectId },
-      data: {
-        status: VideoProjectStatus.completed,
-        video_url: videoUrl,
-        duration_seconds: Math.min(eventCount * 15, 600), // 每个事件约 15 秒
-        file_size: BigInt(Math.floor(eventCount * 1024 * 1024 * 2)), // 约 2MB/事件
-        completed_at: new Date(),
-      },
-    });
+  private async markProjectFailed(projectId: bigint) {
+    try {
+      await this.prisma.clanMigrationVideo.update({
+        where: { id: projectId },
+        data: { status: VideoProjectStatus.failed },
+      });
+    } catch (err: any) {
+      this.logger.error(`迁徙视频 ${projectId} 标记失败未写入：${err?.message ?? err}`);
+    }
   }
 
   /**
@@ -183,17 +178,29 @@ export class ClanMigrationVideoService {
   }
 
   /**
-   * 统一响应
+   * 统一响应。ClanMigrationVideo 的 BigInt 列是 id、clan_id、file_size。
+   * id / clan_id 转字符串；file_size 与册谱文档 toResponse 一样转 Number。
+   * 展开后若还剩 BigInt，一律转字符串，避免 JSON.stringify 抛错。
    */
-  private toResponse<T extends { id: bigint; file_size: any; created_at: Date; completed_at?: Date | null }>(
-    p: T,
-  ) {
-    return {
+  private toResponse<T extends {
+    id: bigint | string;
+    clan_id: bigint | string;
+    file_size?: bigint | number | null;
+    created_at: Date | string;
+    completed_at?: Date | string | null;
+  }>(p: T) {
+    const response: Record<string, unknown> = {
       ...p,
       id: p.id.toString(),
-      file_size: p.file_size ? Number(p.file_size) : null,
-      created_at: p.created_at.toISOString(),
-      completed_at: p.completed_at ? p.completed_at.toISOString() : null,
+      clan_id: p.clan_id.toString(),
+      file_size: p.file_size == null ? null : Number(p.file_size),
+      created_at: p.created_at instanceof Date ? p.created_at.toISOString() : p.created_at,
+      completed_at:
+        p.completed_at instanceof Date ? p.completed_at.toISOString() : (p.completed_at ?? null),
     };
+    for (const [key, value] of Object.entries(response)) {
+      if (typeof value === 'bigint') response[key] = value.toString();
+    }
+    return response;
   }
 }

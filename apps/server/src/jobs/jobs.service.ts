@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
+import { VideoProjectStatus } from '@prisma/client';
 
 export type JobType = 'ocr' | 'video' | 'puppeteer' | 'image_process';
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
@@ -100,7 +101,31 @@ export class JobsService {
     });
 
     this.logger.error(`任务失败: ${jobId} - ${errorMessage}`);
+    await this.markClanVideoFailed(job.payload);
     return job;
+  }
+
+  /**
+   * 阶段一失败只改项目 status。error_message 列还不存在。
+   * 项目已删除或 id 无法解析时吞掉错误，任务行保持 failed。
+   */
+  private async markClanVideoFailed(payload: unknown) {
+    if (!payload || typeof payload !== 'object') return;
+    const { kind, projectId } = payload as { kind?: string; projectId?: string };
+    if (kind !== 'clan-event' && kind !== 'clan-migration') return;
+    if (projectId == null || projectId === '') return;
+
+    try {
+      const id = BigInt(projectId);
+      const data = { status: VideoProjectStatus.failed };
+      if (kind === 'clan-event') {
+        await this.prisma.clanEventVideo.updateMany({ where: { id }, data });
+      } else {
+        await this.prisma.clanMigrationVideo.updateMany({ where: { id }, data });
+      }
+    } catch (err: any) {
+      this.logger.error(`视频项目失败状态未写入：${err?.message ?? err}`);
+    }
   }
 
   /**

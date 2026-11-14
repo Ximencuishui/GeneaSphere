@@ -10,6 +10,7 @@
     "dev:server": "pnpm --filter server dev",
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
+    "test:family-affairs": "pnpm --filter server exec jest \"family-event|clan-event-video|clan-migration-video|migration.service.spec\" --no-coverage && pnpm --filter web exec vitest run src/views/admin/family-event-payload.spec.ts src/views/admin/family-event-generate.spec.ts src/views/admin/video-playback.spec.ts",
     "check:encoding": "node scripts/check-encoding.mjs",
     "lint:encoding": "node scripts/check-encoding.mjs",
     "refresh:demo": "powershell -ExecutionPolicy Bypass -File scripts/refresh-demo.ps1",

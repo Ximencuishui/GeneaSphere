@@ -203,21 +203,13 @@ def handle_puppeteer(job: dict) -> dict:
 
 def handle_video(job: dict) -> dict:
     """
-    处理视频生成任务
-    job.payload 包含视频生成所需参数
-    具体实现取决于你现有的视频生成逻辑
+    视频生成尚未实现。
+    process_job 不读取返回值里的 status：正常返回会 callback completed，
+    只有抛出异常才会 callback failed。阶段一必须抛出。
     """
-    payload = job["payload"]
-    log(f"视频生成任务: {json.dumps(payload, ensure_ascii=False)[:200]}")
-
-    # TODO: 接入你现有的视频生成逻辑
-    # 这里只是占位，你需要根据实际的视频生成工具来实现
-    log("⚠ 视频生成功能尚未实现，请在此添加你的视频生成逻辑")
-
-    return {
-        "status": "not_implemented",
-        "message": "视频生成功能待实现",
-    }
+    payload = job.get("payload")
+    log(f"视频生成任务尚未实现: {json.dumps(payload, ensure_ascii=False)[:200]}")
+    raise NotImplementedError("视频生成尚未实现，阶段一不产出文件")
 
 
 def handle_image_process(job: dict) -> dict:

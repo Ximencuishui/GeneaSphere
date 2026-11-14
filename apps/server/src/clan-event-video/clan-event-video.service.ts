@@ -6,7 +6,6 @@ import {
 import { PrismaService } from '@geneasphere/db';
 import { VideoProjectStatus, FamilyEventType, Prisma } from '@prisma/client';
 import { CreateClanEventVideoDto } from './dto/create-clan-event-video.dto';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
  * 家族大事件视频服务
@@ -56,38 +55,36 @@ export class ClanEventVideoService {
       },
     });
 
-    // 异步处理
-    this.processAsync(project.id, events.length).catch((err) => {
-      this.logger.error(`大事件视频 ${project.id} 异步处理失败: ${err?.message}`);
-    });
+    try {
+      await this.prisma.heavyJob.create({
+        data: {
+          type: 'video',
+          status: 'pending',
+          userId,
+          clanId,
+          payload: {
+            kind: 'clan-event',
+            projectId: project.id.toString(),
+          },
+        },
+      });
+    } catch (err) {
+      await this.markProjectFailed(project.id);
+      throw err;
+    }
 
     return this.toResponse(project);
   }
 
-  /**
-   * 异步模拟视频生成
-   */
-  private async processAsync(projectId: bigint, eventCount: number) {
-    const processingMs = Math.min(Math.max(eventCount * 800, 5000), 60000);
-    await new Promise((r) => setTimeout(r, processingMs));
-
-    const uuid = uuidv4().replace(/-/g, '');
-    const key = `event-videos/${projectId}/${uuid}.mp4`;
-    const useCos = process.env.COS_ENABLED === 'true';
-    const videoUrl = useCos
-      ? `https://cdn.xungenlu.cn/${key}`
-      : `/storage/${key.replace(/\//g, '_')}`;
-
-    await this.prisma.clanEventVideo.update({
-      where: { id: projectId },
-      data: {
-        status: VideoProjectStatus.completed,
-        video_url: videoUrl,
-        duration_seconds: Math.min(eventCount * 8, 600), // 每个事件约 8 秒
-        file_size: BigInt(Math.floor(eventCount * 1024 * 1024 * 1.5)),
-        completed_at: new Date(),
-      },
-    });
+  private async markProjectFailed(projectId: bigint) {
+    try {
+      await this.prisma.clanEventVideo.update({
+        where: { id: projectId },
+        data: { status: VideoProjectStatus.failed },
+      });
+    } catch (err: any) {
+      this.logger.error(`大事件视频 ${projectId} 标记失败未写入：${err?.message ?? err}`);
+    }
   }
 
   /**
@@ -180,18 +177,31 @@ export class ClanEventVideoService {
   }
 
   /**
-   * 统一响应
+   * 统一响应。ClanEventVideo 的 BigInt 列是 id、clan_id、file_size。
+   * id / clan_id 转字符串；file_size 与册谱文档 toResponse 一样转 Number。
+   * 展开后若还剩 BigInt，一律转字符串，避免 JSON.stringify 抛错。
    */
-  private toResponse<T extends { id: bigint; file_size: any; event_type_filter: any; created_at: Date; completed_at?: Date | null }>(
-    p: T,
-  ) {
-    return {
+  private toResponse<T extends {
+    id: bigint | string;
+    clan_id: bigint | string;
+    file_size?: bigint | number | null;
+    event_type_filter?: unknown;
+    created_at: Date | string;
+    completed_at?: Date | string | null;
+  }>(p: T) {
+    const response: Record<string, unknown> = {
       ...p,
       id: p.id.toString(),
-      file_size: p.file_size ? Number(p.file_size) : null,
+      clan_id: p.clan_id.toString(),
+      file_size: p.file_size == null ? null : Number(p.file_size),
       event_type_filter: p.event_type_filter ?? [],
-      created_at: p.created_at.toISOString(),
-      completed_at: p.completed_at ? p.completed_at.toISOString() : null,
+      created_at: p.created_at instanceof Date ? p.created_at.toISOString() : p.created_at,
+      completed_at:
+        p.completed_at instanceof Date ? p.completed_at.toISOString() : (p.completed_at ?? null),
     };
+    for (const [key, value] of Object.entries(response)) {
+      if (typeof value === 'bigint') response[key] = value.toString();
+    }
+    return response;
   }
 }
