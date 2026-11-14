@@ -14,8 +14,8 @@ const PICSUM_BASE = '/api/public/pic/v2'
 /** 管理员演示账号头像 */
 export const ADMIN_AVATAR = `${PICSUM_BASE}/geneasphere-admin-zhuxi/200/200`
 
-/** 族员演示账号（朱小小）头像 */
-export const MEMBER_AVATAR = `${PICSUM_BASE}/geneasphere-member-zhuxiaoxiao/200/200`
+/** 族员演示账号（朱小小）头像（本地实拍生成图，文件在 apps/web/public/portraits/zhuxiaoxiao） */
+export const MEMBER_AVATAR = '/portraits/zhuxiaoxiao/avatar-200.jpg'
 
 /** 历史核心人物头像（朱熹及 27 位已知人物） */
 export const HISTORICAL_AVATAR = (idx: number, gender: 'male' | 'female') =>
@@ -39,15 +39,15 @@ export const SCENERY_IMAGES = {
   fuzhou: `${PICSUM_BASE}/fuzhou-3lanes/640/360`,
 }
 
-/** 朱小小个人简介配图（朱熹后裔大学生活） */
+/** 朱小小个人简介配图（朱熹后裔大学生活；本地实拍生成图，文件在 apps/web/public/portraits/zhuxiaoxiao） */
 export const ZHUXIAOXIAO_GALLERY = [
-  `${PICSUM_BASE}/zhuxiaoxiao-campus-1/640/360`,
-  `${PICSUM_BASE}/zhuxiaoxiao-xiamen-univ/640/360`,
-  `${PICSUM_BASE}/zhuxiaoxiao-genealogy-work/640/360`,
+  '/portraits/zhuxiaoxiao/gallery-campus-1.jpg',
+  '/portraits/zhuxiaoxiao/gallery-xiamen-univ.jpg',
+  '/portraits/zhuxiaoxiao/gallery-genealogy-work.jpg',
 ]
 
-/** 家族封面图 */
-export const CLAN_COVER_IMAGE = `${PICSUM_BASE}/geneasphere-clan-zhuxi-cover/1200/400`
+/** 家族封面横幅（本地生成图，文件在 apps/web/public/portraits） */
+export const CLAN_COVER_IMAGE = '/portraits/clan-cover.jpg'
 
 /**
  * 能核对到公有领域肖像的名人。文件在 apps/web/public/portraits。
@@ -81,5 +81,5 @@ export const DEMO_MEDIA_IMAGES = {
   // 肖像
   zhuxiPortrait: ZHU_XI_PORTRAIT,
   zhuquanPortrait: `${PICSUM_BASE}/zhuxi-zhuquan-portrait/600/800`,
-  zhuxiaoxiaoPhoto: `${PICSUM_BASE}/zhuxi-zhuxiaoxiao-photo/600/800`,
+  zhuxiaoxiaoPhoto: '/portraits/zhuxiaoxiao/portrait-600x800.jpg',
 }

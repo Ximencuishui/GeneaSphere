@@ -6,6 +6,7 @@ import { PrismaService } from '@geneasphere/db';
 import { Role } from '@prisma/client';
 import { serializeBigInt } from '../../common/bigint-serializer';
 import { refreshFamilyRulesVolume } from '../../cepu/clan-rules';
+import { GenealogyEditionService } from '../../genealogy-edition/genealogy-edition.service';
 
 @ApiTags('admin/settings')
 @Controller('api/admin/settings')
@@ -15,6 +16,7 @@ export class SettingsController {
   constructor(
     private readonly adminService: AdminService,
     private readonly prisma: PrismaService,
+    private readonly edition: GenealogyEditionService,
   ) {}
 
   // ==================== 隐私配置 ====================
@@ -142,7 +144,7 @@ export class SettingsController {
   ) {
     const userId = req.user.userId;
     const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
-
+    await this.edition.assertWritable(clanId);
 
     const xipai = await this.prisma.xipai.create({
       data: {
@@ -187,6 +189,7 @@ export class SettingsController {
     }
 
     await this.adminService.requireAdmin(xipai.clan_id, userId);
+    await this.edition.assertWritable(xipai.clan_id);
 
     const updated = await this.prisma.xipai.update({
       where: { id: xipaiId },
@@ -228,6 +231,7 @@ export class SettingsController {
     }
 
     await this.adminService.requireAdmin(xipai.clan_id, userId);
+    await this.edition.assertWritable(xipai.clan_id);
 
     await this.prisma.xipai.delete({
       where: { id: xipaiId },
@@ -468,7 +472,8 @@ const [photos, videos, others] = await Promise.all([
   ) {
     const userId = req.user.userId;
     const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
-
+    const touchesPublishedCopy = ['name', 'slogan', 'origin_place', 'cover_url', 'rules'].some((key) => body[key] !== undefined);
+    if (touchesPublishedCopy) await this.edition.assertWritable(clanId);
 
     const updateData: any = {};
 

@@ -166,18 +166,18 @@ BEGIN
 
   IF NOT EXISTS (SELECT 1 FROM media_archives WHERE clan_id = v_clan_id AND file_url = 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800') THEN
     INSERT INTO media_archives (clan_id, uploader_id, file_url, display_url, thumb_url, taken_year, taken_location, description, category, media_type, file_size, album_id, privacy_level)
-    VALUES (v_clan_id, v_creator_id, 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800', 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800', 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800', 1260, '江西婺源', '朱铨画像，婺源朱氏始迁祖', '肖像', 'image', 0, v_album_xianzu, 'clan')
+    VALUES (v_clan_id, v_creator_id, 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800', 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800', 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800', 1260, '江西婺源', '朱铨，婺源朱氏始迁祖', '肖像', 'image', 0, v_album_xianzu, 'clan')
     RETURNING id INTO v_img_zhuquan;
   ELSE
     SELECT id INTO v_img_zhuquan FROM media_archives WHERE clan_id = v_clan_id AND file_url = 'https://picsum.photos/seed/zhuxi-zhuquan-portrait/600/800';
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM media_archives WHERE clan_id = v_clan_id AND file_url = 'https://picsum.photos/seed/zhuxi-zhuxiaoxiao-photo/600/800') THEN
+  IF NOT EXISTS (SELECT 1 FROM media_archives WHERE clan_id = v_clan_id AND file_url = '/portraits/zhuxiaoxiao/portrait-600x800.jpg') THEN
     INSERT INTO media_archives (clan_id, uploader_id, file_url, display_url, thumb_url, taken_year, taken_location, description, category, media_type, file_size, album_id, privacy_level)
-    VALUES (v_clan_id, v_creator_id, 'https://picsum.photos/seed/zhuxi-zhuxiaoxiao-photo/600/800', 'https://picsum.photos/seed/zhuxi-zhuxiaoxiao-photo/600/800', 'https://picsum.photos/seed/zhuxi-zhuxiaoxiao-photo/600/800', 2024, '福建武夷山', '朱熹第 30 世孙朱小小', '肖像', 'image', 0, v_album_xianzu, 'clan')
+    VALUES (v_clan_id, v_creator_id, '/portraits/zhuxiaoxiao/portrait-600x800.jpg', '/portraits/zhuxiaoxiao/portrait-600x800.jpg', '/portraits/zhuxiaoxiao/portrait-600x800.jpg', 2024, '福建武夷山', '朱熹第 36 世孙朱小小', '肖像', 'image', 0, v_album_xianzu, 'clan')
     RETURNING id INTO v_img_zhuxiaoxiao;
   ELSE
-    SELECT id INTO v_img_zhuxiaoxiao FROM media_archives WHERE clan_id = v_clan_id AND file_url = 'https://picsum.photos/seed/zhuxi-zhuxiaoxiao-photo/600/800';
+    SELECT id INTO v_img_zhuxiaoxiao FROM media_archives WHERE clan_id = v_clan_id AND file_url = '/portraits/zhuxiaoxiao/portrait-600x800.jpg';
   END IF;
 
   -- 家族聚会

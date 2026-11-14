@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminService } from '../admin/admin.service';
 import { GenealogyDocumentService } from './genealogy-document.service';
 import { CreateGenealogyDocumentDto } from './dto/create-genealogy-document.dto';
 import { GenealogyDocumentStyle } from '@prisma/client';
@@ -25,6 +26,7 @@ export class GenealogyDocumentController {
   constructor(
     private readonly service: GenealogyDocumentService,
     private readonly clanResolver: ClanResolverService,
+    private readonly admin: AdminService,
   ) {}
 
   @Get(':clanSlug')
@@ -61,6 +63,20 @@ export class GenealogyDocumentController {
     return this.service.diff(clanId, this.toBigInt(idA), this.toBigInt(idB));
   }
 
+  @Get(':clanSlug/print-jobs/:jobId')
+  @ApiOperation({ summary: '查询册谱印刷工作项状态' })
+  async printJob(@Request() req, @Param('clanSlug') clanSlug: string, @Param('jobId') jobId: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
+    return this.service.getPrintJob(clanId, this.toBigInt(jobId));
+  }
+
+  @Get(':clanSlug/render-jobs/:jobId')
+  @ApiOperation({ summary: '查询册谱 PDF 渲染任务' })
+  async renderJob(@Param('clanSlug') clanSlug: string, @Param('jobId') jobId: string) {
+    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    return this.service.getRenderJob(clanId, jobId);
+  }
+
   @Get(':clanSlug/:id')
   @ApiOperation({ summary: '查询单个族谱文档' })
   async findOne(@Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
@@ -68,21 +84,35 @@ export class GenealogyDocumentController {
     return this.service.findOne(clanId, this.toBigInt(idStr));
   }
 
+  @Post(':clanSlug/:id/print-jobs')
+  @ApiOperation({ summary: '为已生成的册谱 PDF 创建印刷工作项' })
+  async createPrintJob(@Request() req, @Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
+    return this.service.createPrintJob(clanId, req.user.userId, this.toBigInt(idStr));
+  }
+
+  @Post(':clanSlug/:id/retry')
+  @ApiOperation({ summary: '重试对象存储失败的册谱 PDF，从渲染链路重新进入' })
+  async retry(@Request() req, @Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
+    return this.service.retry(clanId, req.user.userId, this.toBigInt(idStr));
+  }
+
   @Post(':clanSlug')
-  @ApiOperation({ summary: '生成族谱文档并保存为新版本' })
+  @ApiOperation({ summary: '提交册谱 PDF 渲染任务，立即返回 job id' })
   async create(
     @Request() req,
     @Param('clanSlug') clanSlug: string,
     @Body() dto: CreateGenealogyDocumentDto,
   ) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
-    return this.service.create(clanId, req.user.userId, dto);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
+    return this.service.enqueue(clanId, req.user.userId, dto);
   }
 
   @Delete(':clanSlug/:id')
   @ApiOperation({ summary: '删除族谱文档' })
-  async delete(@Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+  async delete(@Request() req, @Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.delete(clanId, this.toBigInt(idStr));
   }
 

@@ -135,6 +135,7 @@ describe('PdfImportService', () => {
       billing,
       { getDriverType: () => 'local' } as never,
       new PedigreeService({} as never),
+      { assertWritable: async () => undefined } as never,
     );
   }
 

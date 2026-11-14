@@ -39,7 +39,7 @@ describe('TreeService', () => {
     };
 
     // 双写统一入口（决策清单 §H1）使用同一个 prisma mock
-    service = new TreeService(prisma, new PedigreeService(prisma));
+    service = new TreeService(prisma, new PedigreeService(prisma), { shouldReadSnapshot: async () => false, assertWritable: async () => undefined } as never);
   });
 
   describe('createPerson', () => {

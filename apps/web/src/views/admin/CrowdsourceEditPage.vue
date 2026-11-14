@@ -185,19 +185,42 @@ async function loadSubmissions() {
       params: { status: submissionFilter.value },
     })
     const rows = data?.data ?? data ?? []
-    submissionList.value = rows.map((row: any) => ({
-      ...row,
-      member_name: row.member_name || row.requester_user_id,
-      field: row.field || row.field_name,
-      before: row.before ?? row.old_value ?? '',
-      after: row.after ?? row.new_value ?? '',
-      submitted_at: row.submitted_at || row.created_at,
-      status: String(row.status || '').toLowerCase(),
-    }))
+    submissionList.value = rows.map((row: any) => {
+      const fieldName = row.field || row.field_name
+      const labels: Record<string, string> = {
+        generation_char: '字辈用字',
+        contact_phone: '联系电话',
+        biography: '生平',
+        extra_info: '补充资料',
+      }
+      const after = row.after ?? row.new_value ?? ''
+      const split = fieldName === 'extra_info'
+        ? String(after).split('；').map((part: string) => part.trim()).filter(Boolean).join('\n')
+        : after
+      return {
+        ...row,
+        member_name: row.member_name || row.requester_user_id,
+        field: labels[fieldName] || fieldName,
+        before: row.before ?? row.old_value ?? '',
+        after: split,
+        submitted_at: row.submitted_at || row.created_at,
+        status: String(row.status || '').toLowerCase(),
+      }
+    })
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '加载审核列表失败')
   } finally {
     submissionLoading.value = false
+  }
+}
+
+async function confirmRevise() {
+  try {
+    await axios.post(`/api/genealogy/${clanSlug.value}/edition/confirm`, { stage: 'revise' })
+    ElMessage.success('本轮勘误已确认')
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || '确认失败')
   }
 }
 
@@ -293,8 +316,9 @@ onMounted(() => {
           <template #header>
             <div class="card-header">
               <h2>汇总勘误、修订谱稿</h2>
-              <p class="review-hint">族人只能提交勘误申请，主修审核通过后才写入谱库。</p>
+              <p class="review-hint">族人只能提交勘误申请。未开下一轮时不能通过。采纳后才写入修谱稿。</p>
               <ElButton size="small" @click="treeEditorOpen = true">世系&人物编辑</ElButton>
+              <ElButton size="small" type="success" @click="confirmRevise">确认本轮勘误已处理完</ElButton>
               <ElSelect v-model="submissionFilter" size="small" style="width: 120px;" @change="loadSubmissions">
                 <ElOption label="待审核" value="pending" />
                 <ElOption label="已通过" value="approved" />
@@ -390,7 +414,7 @@ onMounted(() => {
       append-to-body
       destroy-on-close
     >
-      <iframe v-if="treeEditorOpen" class="tree-tool-frame" :src="`/tree/${clanSlug}`" />
+      <iframe v-if="treeEditorOpen" class="tree-tool-frame" :src="`/tree/${clanSlug}?draft=1`" />
     </ElDialog>
   </div>
 </template>

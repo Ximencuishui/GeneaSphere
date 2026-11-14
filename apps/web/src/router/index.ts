@@ -270,6 +270,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings/storage', name: 'admin-storage-settings', component: () => import('@/views/admin/StoragePage.vue'), meta: { title: '云存储', requiresAuth: true, requiresAdmin: true } },
       { path: 'print', name: 'admin-print', component: () => import('@/views/admin/OrdersPage.vue'), meta: { title: '印刷', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/data', name: 'admin-genealogy-data', component: () => import('@/views/admin/GenealogyDataPage.vue'), meta: { title: '族谱数据', requiresAuth: true, requiresAdmin: true } },
+      { path: 'genealogy/manuscript', name: 'admin-genealogy-manuscript', component: () => import('@/views/admin/GenealogyManuscriptPage.vue'), meta: { title: '谱稿正文', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/pdf-import', redirect: (to) => `/zupu/${to.params.slug}/genealogy/data?tab=digitize&import=1${to.query.taskId ? `&taskId=${to.query.taskId}` : ''}` },
       { path: 'genealogy/errata', name: 'admin-genealogy-errata', component: () => import('@/views/admin/CrowdsourceEditPage.vue'), meta: { title: '族人勘误', requiresAuth: true, requiresAdmin: true } },
       { path: 'genealogy/crowdsource', redirect: (to) => {

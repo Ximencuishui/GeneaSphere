@@ -90,6 +90,16 @@ async function loadDraftList() {
   }
 }
 
+async function confirmStage(stage: 'project' | 'digitize' | 'review' | 'revise') {
+  try {
+    await axios.post(`/api/genealogy/${clanSlug.value}/edition/confirm`, { stage })
+    ElMessage.success('本轮环节已确认')
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || '确认失败')
+  }
+}
+
 async function handleSaveDraft() {
   if (!newForm.value.name.trim()) {
     ElMessage.warning('请输入族谱名称')
@@ -322,6 +332,7 @@ onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', loadF
             </ElFormItem>
             <ElFormItem>
               <ElButton type="primary" :loading="draftSaving" @click="handleSaveDraft">保存草稿</ElButton>
+              <ElButton @click="confirmStage('project')">确认本轮项目</ElButton>
               <ElButton type="success" @click="handleGoFinalize">提交定谱</ElButton>
               <ElButton @click="handleBackup">下载备份</ElButton>
             </ElFormItem>
@@ -348,6 +359,7 @@ onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', loadF
             <ElButton v-if="!showUploader" type="primary" @click="openUploader()">上传旧谱 PDF</ElButton>
             <ElButton v-else @click="closeUploader">返回项目列表</ElButton>
             <ElButton @click="loadDigitizeList">刷新</ElButton>
+            <ElButton type="success" @click="confirmStage('digitize')">提交谱稿初审</ElButton>
           </div>
           <PdfImportPage v-if="showUploader" :key="String(route.query.taskId || 'new')" class="embedded-import" />
           <ElTable v-loading="digitizeLoading" :data="digitizeList" empty-text="暂无旧谱电子化项目">

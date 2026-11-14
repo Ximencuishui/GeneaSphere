@@ -3,10 +3,14 @@ import { PrismaService } from '@geneasphere/db';
 import { FinalizeGenealogyDto } from './dto/finalize-genealogy.dto';
 import { Prisma } from '@prisma/client';
 import { loadXiupu, saveXiupu } from '../genealogy-workflow/xiupu-settings';
+import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
 
 @Injectable()
 export class GenealogyFinalizeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly edition: GenealogyEditionService,
+  ) {}
 
   async finalize(clanId: bigint, userId: string, dto: FinalizeGenealogyDto) {
     try {
@@ -19,7 +23,7 @@ export class GenealogyFinalizeService {
           });
           const personCount = await tx.person.count({ where: { clan_id: clanId } });
 
-          return tx.genealogyDocument.create({
+          const created = await tx.genealogyDocument.create({
             data: {
               clan_id: clanId,
               created_by: userId,
@@ -34,8 +38,10 @@ export class GenealogyFinalizeService {
               },
             },
           });
+          await this.edition.publish(tx, clanId, userId, created.id, dto.version_name.trim());
+          return created;
         },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120000, maxWait: 20000 },
       );
       const operator_name = await this.operatorName(userId);
       await saveXiupu(this.prisma, clanId, (current) => ({
@@ -88,11 +94,13 @@ export class GenealogyFinalizeService {
 
   async unlock(clanId: bigint, userId: string) {
     const operator_name = await this.operatorName(userId);
+    const published = await this.edition.published(clanId);
+    if (published) await this.edition.openRound(clanId, userId, 'keep');
     await saveXiupu(this.prisma, clanId, (current) => ({
       ...current,
       lock: null,
       final_reject: {
-        reason: '定稿已解锁，本次定稿记录作废',
+        reason: '已解锁并打开下一轮修谱稿',
         at: new Date().toISOString(),
         operator_name,
       },

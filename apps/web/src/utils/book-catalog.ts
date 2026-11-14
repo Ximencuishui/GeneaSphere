@@ -10,6 +10,7 @@ export interface CatalogVolume {
   id: string;
   title: string;
   type: string;
+  catalog_slot?: string | null;
   config?: { layout?: string; gender_filter?: string } | null;
 }
 
@@ -70,10 +71,12 @@ export function buildBookCatalog(volumes: readonly CatalogVolume[], profile: Boo
     if (found) used.add(found.id);
     return found;
   };
-  const preface = take((volume) => volume.type === 'document' && (volume.title.includes('谱序') || volume.title.includes('源流')));
-  const lineage = take((volume) => isLineageVolume(volume));
-  const biography = take((volume) => isBiographyVolume(volume));
-  const ladies = take((volume) => isLadiesVolume(volume));
+  const bySlot = (slot: string, fallback: (volume: CatalogVolume) => boolean) =>
+    take((volume) => volume.catalog_slot === slot) ?? take(fallback);
+  const preface = bySlot('preface', (volume) => volume.type === 'document' && (volume.title.includes('谱序') || volume.title.includes('源流')));
+  const lineage = bySlot('lineage', (volume) => isLineageVolume(volume));
+  const biography = bySlot('biography', (volume) => isBiographyVolume(volume));
+  const ladies = bySlot('ladies', (volume) => isLadiesVolume(volume));
 
   const child = (
     key: string,
@@ -91,8 +94,8 @@ export function buildBookCatalog(volumes: readonly CatalogVolume[], profile: Boo
   });
 
   if (profile === 'standard') {
-    const rules = RULE_SLOTS.map((slot) => take((volume) => volume.type === 'document' && slot.test(volume.title)));
-    const appendix = APPENDIX_SLOTS.map((slot) => take((volume) => volume.type === 'document' && slot.test(volume.title)));
+    const rules = RULE_SLOTS.map((slot) => bySlot(slot.key, (volume) => volume.type === 'document' && slot.test(volume.title)));
+    const appendix = APPENDIX_SLOTS.map((slot) => bySlot(slot.key, (volume) => volume.type === 'document' && slot.test(volume.title)));
     return [
       group('front', '卷首｜人名索引、字辈索引', '卷首', 'book-front'),
       { key: 'index', text: '人名索引', depth: 1, marker: 'mid', kind: 'index', anchor: 'book-index' },

@@ -1,198 +1,182 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
 const route = useRoute()
 const clanSlug = computed(() => String(route.params.slug ?? '1'))
 
-const list = ref<any[]>([])
-const total = ref(0)
+interface OldPdf {
+  kind: 'edition' | 'source'
+  title: string
+  origin: string
+  at: string | null
+  document_id: string | null
+  task_id: string | null
+  file_url: string | null
+  page_count: number | null
+  file_size: string | null
+  print_job: { id: string; status: string } | null
+}
+
+const list = ref<OldPdf[]>([])
 const loading = ref(false)
-const page = ref(1)
-const pageSize = ref(10)
-const styleFilter = ref<string>('')
-
-const styleOptions = [
-  { value: '', label: '全部' },
-  { value: 'traditional', label: '传统悬挂式' },
-  { value: 'modern', label: '现代图文混排' },
-  { value: 'simple', label: '简约列表式' },
-]
-
-const diffDialogVisible = ref(false)
-const diffResult = ref<any>(null)
+const printingId = ref('')
 
 async function loadList() {
   loading.value = true
   try {
-    const res = await axios.get(`/api/genealogy-documents/${clanSlug.value}`, {
-      params: {
-        style: styleFilter.value || undefined,
-        page: page.value,
-        pageSize: pageSize.value,
-      },
-    })
-    list.value = res.data?.items ?? []
-    total.value = res.data?.total ?? 0
+    const res = await axios.get(`/api/genealogy/${clanSlug.value}/published-pdfs`)
+    list.value = res.data?.data ?? res.data ?? []
   } catch (err: any) {
-    ElMessage.error(`加载失败：${err?.response?.data?.message ?? err.message}`)
+    ElMessage.error(err?.response?.data?.message || '旧谱加载失败')
   } finally {
     loading.value = false
   }
 }
 
-function handleView(item: any) {
+async function sourceBlob(item: OldPdf) {
+  const response = await axios.get(`/api/genealogy/${clanSlug.value}/source-pdfs/${item.task_id}`, {
+    responseType: 'blob',
+  })
+  const payload = response instanceof Blob ? response : response.data
+  if (payload instanceof Blob) return payload
+  return new Blob([payload], { type: 'application/pdf' })
+}
+
+async function errorText(err: any, fallback: string) {
+  const data = err?.response?.data
+  if (data instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await data.text())
+      const message = parsed?.message
+      if (typeof message === 'string' && message) return message
+      if (Array.isArray(message) && message.length) return message.join('；')
+    } catch {
+      return fallback
+    }
+  }
+  return data?.message || fallback
+}
+
+async function handleView(item: OldPdf) {
   if (item.file_url) {
     window.open(item.file_url, '_blank')
-  } else {
-    ElMessage.warning('文件 URL 不可用')
-  }
-}
-
-function handleDownload(item: any) {
-  if (!item.file_url) return
-  const link = document.createElement('a')
-  link.href = item.file_url
-  link.download = `${item.version_name}.pdf`
-  link.click()
-}
-
-async function handleDelete(item: any) {
-  try {
-    await ElMessageBox.confirm(
-      `确认删除版本 v${item.version_number} "${item.version_name}"？此操作不可恢复。`,
-      '删除确认',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
-    )
-  } catch {
     return
   }
   try {
-    await axios.delete(`/api/genealogy-documents/${clanSlug.value}/${item.id}`)
-    ElMessage.success('已删除')
-    loadList()
+    const url = URL.createObjectURL(await sourceBlob(item))
+    window.open(url, '_blank')
   } catch (err: any) {
-    ElMessage.error(`删除失败：${err?.response?.data?.message ?? err.message}`)
+    ElMessage.error(await errorText(err, '无法预览这份旧谱'))
   }
 }
 
-const selectedForDiff = ref<string[]>([])
-
-async function handleDiff() {
-  if (selectedForDiff.value.length !== 2) {
-    ElMessage.warning('请选择两个版本进行对比')
+async function handleDownload(item: OldPdf) {
+  const name = item.title.endsWith('.pdf') ? item.title : `${item.title}.pdf`
+  if (item.file_url) {
+    const link = document.createElement('a')
+    link.href = item.file_url
+    link.download = name
+    link.click()
     return
   }
   try {
-    const res = await axios.get(`/api/genealogy-documents/${clanSlug.value}/diff`, {
-      params: { idA: selectedForDiff.value[0], idB: selectedForDiff.value[1] },
-    })
-    diffResult.value = res.data
-    diffDialogVisible.value = true
+    const url = URL.createObjectURL(await sourceBlob(item))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   } catch (err: any) {
-    ElMessage.error(`对比失败：${err?.response?.data?.message ?? err.message}`)
+    ElMessage.error(await errorText(err, '无法下载这份旧谱'))
   }
 }
 
-function formatBytes(b: number | null) {
-  if (!b) return '-'
-  if (b < 1024) return `${b} B`
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(2)} KB`
-  return `${(b / 1024 / 1024).toFixed(2)} MB`
+async function handlePrint(item: OldPdf) {
+  const key = item.document_id || item.task_id || ''
+  printingId.value = key
+  try {
+    if (item.kind === 'source') {
+      await axios.post(`/api/genealogy/${clanSlug.value}/source-pdfs/${item.task_id}/print`)
+    } else {
+      await axios.post(`/api/genealogy-documents/${clanSlug.value}/${item.document_id}/print-jobs`)
+    }
+    ElMessage.success('已创建印刷工作项')
+    await loadList()
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || '下单印刷失败')
+  } finally {
+    printingId.value = ''
+  }
 }
 
-function styleLabel(s: string) {
-  return styleOptions.find((o) => o.value === s)?.label ?? s
+function formatBytes(value: string | number | null) {
+  const bytes = typeof value === 'string' ? Number(value) : value
+  if (!bytes) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
-onMounted(() => {
-  loadList()
-})
+function printLabel(job: OldPdf['print_job']) {
+  if (!job) return '未下单'
+  if (job.status === 'PENDING') return '待印刷'
+  return job.status
+}
+
+onMounted(loadList)
 </script>
 
 <template>
   <div class="page-container">
-    <!-- 修谱工作流（顶部一目了然） -->
     <GenealogyWorkflowBar />
-    <h2 class="page-title">族谱历史版本</h2>
-    <p class="page-desc">查看、下载、对比历史生成的族谱文档版本</p>
+    <h2 class="page-title">旧谱</h2>
+    <p class="page-desc">这里是已定稿的 PDF，以及从旧谱电子化上传的原件。可以预览、下载或下单印刷。要重新生成定稿，去册谱版式渲染。</p>
 
     <div class="toolbar">
-      <ElSelect v-model="styleFilter" placeholder="按风格筛选" clearable style="width: 200px" @change="loadList">
-        <ElOption v-for="opt in styleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-      </ElSelect>
-      <ElButton type="primary" :disabled="selectedForDiff.length !== 2" @click="handleDiff">
-        对比所选版本 ({{ selectedForDiff.length }}/2)
-      </ElButton>
       <ElButton @click="loadList">刷新</ElButton>
     </div>
 
-    <ElTable
-      v-loading="loading"
-      :data="list"
-      border
-      stripe
-      @selection-change="(rows: any[]) => selectedForDiff = rows.map(r => r.id)"
-    >
-      <ElTableColumn type="selection" width="50" />
-      <ElTableColumn label="版本号" width="80">
-        <template #default="{ row }">v{{ row.version_number }}</template>
-      </ElTableColumn>
-      <ElTableColumn prop="version_name" label="版本名称" />
-      <ElTableColumn label="风格" width="120">
+    <ElTable v-loading="loading" :data="list" border stripe empty-text="还没有旧谱 PDF">
+      <ElTableColumn prop="title" label="名称" />
+      <ElTableColumn label="来源" width="120">
         <template #default="{ row }">
-          <ElTag size="small">{{ styleLabel(row.style) }}</ElTag>
+          <ElTag size="small" :type="row.kind === 'source' ? 'warning' : row.origin === '当前定稿' ? 'success' : 'info'">
+            {{ row.origin }}
+          </ElTag>
         </template>
       </ElTableColumn>
-      <ElTableColumn label="页数" width="80" prop="page_count" />
+      <ElTableColumn label="页数" width="80">
+        <template #default="{ row }">{{ row.page_count ?? '—' }}</template>
+      </ElTableColumn>
       <ElTableColumn label="文件大小" width="120">
         <template #default="{ row }">{{ formatBytes(row.file_size) }}</template>
       </ElTableColumn>
-      <ElTableColumn label="生成时间" width="180">
+      <ElTableColumn label="时间" width="180">
         <template #default="{ row }">
-          {{ new Date(row.created_at).toLocaleString('zh-CN') }}
+          {{ row.at ? new Date(row.at).toLocaleString('zh-CN') : '—' }}
         </template>
       </ElTableColumn>
-      <ElTableColumn label="操作" width="280" fixed="right">
+      <ElTableColumn label="印刷" width="100">
+        <template #default="{ row }">{{ printLabel(row.print_job) }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="操作" width="240" fixed="right">
         <template #default="{ row }">
           <ElButton size="small" @click="handleView(row)">预览</ElButton>
           <ElButton size="small" type="primary" @click="handleDownload(row)">下载</ElButton>
-          <ElButton size="small" type="danger" @click="handleDelete(row)">删除</ElButton>
+          <ElButton
+            size="small"
+            type="success"
+            :loading="printingId === (row.document_id || row.task_id)"
+            @click="handlePrint(row)"
+          >
+            印刷
+          </ElButton>
         </template>
       </ElTableColumn>
     </ElTable>
-
-    <ElPagination
-      v-model:current-page="page"
-      v-model:page-size="pageSize"
-      :total="total"
-      :page-sizes="[10, 20, 50]"
-      layout="total, sizes, prev, pager, next, jumper"
-      class="pagination"
-      @current-change="loadList"
-      @size-change="loadList"
-    />
-
-    <ElDialog v-model="diffDialogVisible" title="版本对比" width="640px">
-      <div v-if="diffResult" class="diff-content">
-        <h4>{{ diffResult.version_a.version_name }} → {{ diffResult.version_b.version_name }}</h4>
-        <ElDescriptions :column="1" border>
-          <ElDescriptionsItem label="版本号差异">
-            +{{ diffResult.diff.version_number_diff }}
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="页数差异">
-            <span :class="{ increased: diffResult.diff.page_count_diff > 0, decreased: diffResult.diff.page_count_diff < 0 }">
-              {{ diffResult.diff.page_count_diff > 0 ? '+' : '' }}{{ diffResult.diff.page_count_diff }}
-            </span>
-          </ElDescriptionsItem>
-          <ElDescriptionsItem label="文件大小差异">
-            {{ formatBytes(diffResult.diff.file_size_diff) }}
-          </ElDescriptionsItem>
-        </ElDescriptions>
-      </div>
-    </ElDialog>
   </div>
 </template>
 
@@ -201,8 +185,4 @@ onMounted(() => {
 .page-title { margin: 0 0 8px; font-size: 22px; color: #303133; }
 .page-desc { margin: 0 0 16px; color: #909399; font-size: 14px; }
 .toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
-.pagination { margin-top: 16px; justify-content: flex-end; display: flex; }
-.diff-content h4 { margin: 0 0 12px; }
-.increased { color: #67C23A; }
-.decreased { color: #F56C6C; }
 </style>

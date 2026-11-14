@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { assertPedigreeUnlocked } from '../genealogy-workflow/xiupu-settings';
+import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
 import {
   InviteQrcodeStatus,
   VerificationStatus,
@@ -59,6 +60,7 @@ export class InviteService {
     private readonly notification: NotificationService,
     private readonly admin: AdminService,
     private readonly cosService: CosService,
+    private readonly edition: GenealogyEditionService,
   ) {}
 
   // ==================== 邀请二维码（管理端） ====================
@@ -284,6 +286,7 @@ export class InviteService {
     }
 
     if (decision.status === ModificationStatus.APPROVED) {
+      await this.edition.assertWritable(record.clan_id);
       await assertPedigreeUnlocked(this.prisma, record.clan_id);
     }
 
@@ -298,38 +301,17 @@ export class InviteService {
         },
       });
 
-      // 审核通过时同步更新 Person 字段
       if (decision.status === ModificationStatus.APPROVED) {
-        const data: Prisma.PersonUpdateInput = {};
-        switch (record.field_name) {
-          case 'full_name':
-            data.full_name = record.new_value;
-            break;
-          case 'gender':
-            data.gender = record.new_value === 'female' ? Gender.female : Gender.male;
-            break;
-          case 'birth_year':
-            const year = parseInt(record.new_value, 10);
-            if (!Number.isNaN(year)) {
-              data.birth_date = new Date(`${year}-01-01`);
-            }
-            break;
-          case 'birth_place':
-            data.birth_place = record.new_value;
-            break;
-          case 'death_place':
-            data.death_place = record.new_value;
-            break;
-          default:
-            // 其它字段暂不处理
-            break;
-        }
-        if (Object.keys(data).length > 0) {
-          await tx.person.update({
-            where: { id: record.person_id },
-            data,
-          });
-        }
+        await this.edition.applyRequest(tx, {
+          id: record.id,
+          clan_id: record.clan_id,
+          person_id: record.person_id,
+          field_name: record.field_name,
+          new_value: record.new_value,
+          target_kind: record.target_kind,
+          target_ref: record.target_ref,
+          catalog_slot: record.catalog_slot,
+        });
       }
 
       return updated;

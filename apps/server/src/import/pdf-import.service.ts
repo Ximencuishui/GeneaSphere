@@ -12,6 +12,7 @@ import {
   isInsufficientBalance,
 } from './ocr-billing.service';
 import { PedigreeService } from '../pedigree/pedigree.service';
+import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
 import { extractPersonsFromText, PdfPersonRecord } from './pdf-person-parser';
 import { PdfParseQueue } from './pdf-parse-queue';
 import {
@@ -88,6 +89,7 @@ export class PdfImportService implements OnModuleInit {
     private readonly ocrBilling: OcrBillingService,
     private readonly cosService: CosService,
     private readonly pedigreeService: PedigreeService,
+    private readonly edition: GenealogyEditionService,
   ) {}
 
   async onModuleInit() {
@@ -758,6 +760,7 @@ export class PdfImportService implements OnModuleInit {
     records: PdfPersonRecord[],
     strategy: DuplicateStrategy,
   ): Promise<PdfImportResult> {
+    await this.edition.assertWritable(clanId);
     return this.prisma.$transaction(async (tx) => {
       const names = [...new Set(records.map((item) => item.fullName.trim()))];
       const existingRows = await tx.person.findMany({

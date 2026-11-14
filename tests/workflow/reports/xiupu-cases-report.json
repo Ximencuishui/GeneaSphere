@@ -1,0 +1,411 @@
+{
+  "base": "http://127.0.0.1:3101",
+  "finished_at": "2026-11-13T13:16:08.083Z",
+  "total": 67,
+  "failed": 0,
+  "passed": 67,
+  "checks": [
+    {
+      "id": "ENV",
+      "name": "接口健康",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "id": "ENV",
+      "name": "族长演示登录",
+      "ok": true,
+      "detail": "status=201"
+    },
+    {
+      "id": "ENV",
+      "name": "主修演示登录",
+      "ok": true,
+      "detail": "status=201"
+    },
+    {
+      "id": "S01",
+      "name": "project 为 done，digitize 为 current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "S01",
+      "name": "进度 1/8",
+      "ok": true,
+      "detail": "done=1 progress=13"
+    },
+    {
+      "id": "S01",
+      "name": "默认严格串行，其后节点置灰",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "S03",
+      "name": "谱稿初审悬停指向旧谱电子化",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "F01",
+      "name": "只把当前族谱改成自由补录",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "F01",
+      "name": "自由模式不再因前置置灰",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "F01",
+      "name": "未置灰节点悬停用自身说明",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "F02",
+      "name": "自由模式仍禁止未锁谱生成册谱",
+      "ok": true,
+      "detail": "请先完成终审定稿锁谱，再生成册谱"
+    },
+    {
+      "id": "L03",
+      "name": "未锁谱生成接口返回同一句提示",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P01",
+      "name": "旧谱电子化变为 suspended",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P01",
+      "name": "其后节点置灰且悬停为搁置文案",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P01",
+      "name": "搁置不计入 done",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P02",
+      "name": "取消搁置后旧谱电子化回到 current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P02",
+      "name": "其后节点仍按串行置灰",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "S02",
+      "name": "排在未完成节点后的册谱即使已有卷宗也置灰",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "S02",
+      "name": "有人物后旧谱电子化完成，谱稿初审成为 current",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "S02",
+      "name": "初审、下发、汇总勘误完成后终审定稿成为 current",
+      "ok": true,
+      "detail": "project:done,digitize:done,internal_review:done,errata_notice:done,errata_revise:done,lock:current,render:todo,print:todo"
+    },
+    {
+      "id": "S02",
+      "name": "终审定稿接口锁谱",
+      "ok": true,
+      "detail": "status=201 "
+    },
+    {
+      "id": "L04",
+      "name": "族长看到已锁谱且可解锁",
+      "ok": true,
+      "detail": "{\"locked\":true,\"locked_at\":\"2026-11-13T13:14:32.326Z\",\"operator_name\":\"演示用户·管理员\",\"version_name\":\"用例定稿\",\"can_unlock\":true}"
+    },
+    {
+      "id": "L01",
+      "name": "主修账号 can_unlock 为 false",
+      "ok": true,
+      "detail": "{\"locked\":true,\"locked_at\":\"2026-11-13T13:14:32.326Z\",\"operator_name\":\"演示用户·管理员\",\"version_name\":\"用例定稿\",\"can_unlock\":false}"
+    },
+    {
+      "id": "L01",
+      "name": "主修调用解锁被拒绝",
+      "ok": true,
+      "detail": "status=403"
+    },
+    {
+      "id": "L04",
+      "name": "锁谱后不能改人物核心信息",
+      "ok": true,
+      "detail": "谱系已终审锁稿，不能修改世系和人物核心信息。如需修改，请由族长解锁。"
+    },
+    {
+      "id": "L04",
+      "name": "锁谱后勘误通过不能入库",
+      "ok": true,
+      "detail": "谱系已终审锁稿，不能修改世系和人物核心信息。如需修改，请由族长解锁。"
+    },
+    {
+      "id": "S02",
+      "name": "八个节点全部 done，进度 100",
+      "ok": true,
+      "detail": "done=8 current=null"
+    },
+    {
+      "id": "L02",
+      "name": "解锁接口成功且锁记录清空",
+      "ok": true,
+      "detail": "status=201 lock=todo"
+    },
+    {
+      "id": "L02",
+      "name": "流程回流到汇总勘误",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "L02",
+      "name": "解锁后的处理要求指向汇总勘误",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "L02",
+      "name": "解锁后可以修改人物",
+      "ok": true,
+      "detail": "status=200 "
+    },
+    {
+      "id": "R04",
+      "name": "终审驳回后 lock 为 todo",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R04",
+      "name": "汇总勘误变为终审回流",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R04",
+      "name": "其后节点置灰，悬停指向汇总勘误",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R04",
+      "name": "驳回处理要求是修订后再终审",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R01",
+      "name": "旧谱电子化变为谱稿初审回流",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R01",
+      "name": "谱稿初审本身不是 returned，但被串行拦住",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R01",
+      "name": "驳回原因和处理要求",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R01",
+      "name": "后续节点悬停指向旧谱电子化",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T01",
+      "name": "3 个 done 且存在回流时进度为 38%",
+      "ok": true,
+      "detail": "done=3 progress=38"
+    },
+    {
+      "id": "P03",
+      "name": "回流节点搁置后 status 为 suspended 且保留 returned 标记",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P03",
+      "name": "搁置期间后置悬停用搁置文案",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P03",
+      "name": "取消搁置后回到 returned，驳回原因还在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R02",
+      "name": "重新送审后旧谱电子化 done、谱稿初审 current、驳回条清除",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R02",
+      "name": "谱稿初审之后继续置灰",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R02",
+      "name": "没有其他回流时进度旁不再需要警告",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R02",
+      "name": "仍有勘误回流时警告条件保留",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R03",
+      "name": "勘误驳回落在汇总勘误",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R03",
+      "name": "终审、册谱、印刷置灰",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R03",
+      "name": "处理要求写明主修审核后才入库",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R02",
+      "name": "更晚的新驳回再次回流旧谱电子化",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "F03",
+      "name": "自由模式仍标记回流，后置节点可跳转",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T02",
+      "name": "未完成前置的悬停",
+      "ok": true,
+      "detail": "请先完成上一环节：旧谱电子化"
+    },
+    {
+      "id": "T02",
+      "name": "回流前置的悬停带驳回来源和目标",
+      "ok": true,
+      "detail": "谱稿初审环节已驳回，请先处理：旧谱电子化"
+    },
+    {
+      "id": "T02",
+      "name": "搁置前置的悬停",
+      "ok": true,
+      "detail": "本项目当前已搁置，恢复流转后才可继续推进"
+    },
+    {
+      "id": "T01",
+      "name": "进度警告原文在工作流条",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "T02",
+      "name": "前端悬停包含回流和搁置两个分支",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P01",
+      "name": "搁置按钮和标题标签文案",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P01",
+      "name": "谱稿初审页也有搁置常驻提示",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "R01",
+      "name": "旧谱电子化页有重新送审按钮",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "L02",
+      "name": "解锁确认文案与按钮只对族长显示",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "L03",
+      "name": "册谱页未锁谱提示并禁用生成预览",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "C01",
+      "name": "世系编辑是弹窗且不跳进树谱路由",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "C02",
+      "name": "旧勘误地址按 tab 转到新勘误或谱稿初审",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "C02",
+      "name": "旧生成地址转到册谱版式渲染",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "C03",
+      "name": "工作流随完整路由刷新，页面按 fullPath 区分",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "REG",
+      "name": "家族管理仍保留内部初审菜单名",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}

@@ -326,7 +326,7 @@ export class DemoSeedService implements OnModuleInit {
       const isFirstCreate = !demoClan;
       if (!demoClan) {
         demoClan = await this.prisma.clan.create({
-          data: { name: '朱熹族谱（演示）', slug: 'zhuxi-demo', description: this.buildClanDescription(), admin_user: { connect: { id: demoUser.id } } },
+          data: { name: '朱熹族谱（演示）', slug: 'zhuxi-demo', description: this.buildClanDescription(), cover_url: CLAN_COVER_IMAGE, admin_user: { connect: { id: demoUser.id } } },
         });
         await this.prisma.clanMember.create({ data: { clan_id: demoClan.id, user_id: demoUser.id, role: 'OWNER' } });
         const stats = await this.createDemoZhuXiGenealogy(demoClan.id);
@@ -338,6 +338,11 @@ export class DemoSeedService implements OnModuleInit {
         if (!demoClan.slug) {
           await this.prisma.clan.update({ where: { id: demoClan.id }, data: { slug: 'zhuxi-demo' } });
           this.logger.log(`  ✅ 补齐 demo 家族 slug=zhuxi-demo`);
+        }
+        // [2026-11-13] 老库兼容：补齐为空的家族封面横幅。
+        if (!demoClan.cover_url) {
+          await this.prisma.clan.update({ where: { id: demoClan.id }, data: { cover_url: CLAN_COVER_IMAGE } });
+          this.logger.log('  ✅ 补齐 demo 家族封面横幅');
         }
       }
       const existingMemberClan = await this.prisma.clanMember.findUnique({ where: { clan_id_user_id: { clan_id: demoClan.id, user_id: demoMemberUser.id } } });
@@ -355,7 +360,7 @@ export class DemoSeedService implements OnModuleInit {
             clan_id: demoClan.id,
             full_name: '朱小小',
             gender: 'male' as Gender,
-            birth_date: new Date('2000-01-01'),
+            birth_date: new Date('2000-03-15'),
             death_date: null,
             is_living: true,
             birth_place: '福建武夷山',
@@ -423,6 +428,9 @@ export class DemoSeedService implements OnModuleInit {
       // 朱熹等有公有领域肖像的名人，把头像从占位图换成仓库里的开源画像。
       await this.ensureFamousPortraits(demoClan.id);
 
+      // [2026-11-13] 朱小小演示素材：把老库里残留的占位图头像/旧占位媒体换成本地生成图（幂等）。
+      await this.ensureZhuxiaoxiaoAssets({ clanId: demoClan.id, memberUserId: demoMemberUser.id.toString(), memberPersonId: zhuxiaoxiao.id });
+
       // [2026-08-24] 补齐图片影像类演示数据：相册、影像、人物关联、家族大事件、迁徙地点配图
       await this.seedMediaDemoData(demoClan.id, demoUser.id.toString());
 
@@ -482,7 +490,125 @@ export class DemoSeedService implements OnModuleInit {
       where: { clan_id: clanId, name: '历代先祖' },
       data: { cover_url: ZHU_XI_AVATAR },
     });
+    // [2026-11-13] 朱铨无开源肖像，配图为剪影占位，描述不再称"画像"（存量库口径修正）。
+    await this.prisma.mediaArchive.updateMany({
+      where: { clan_id: clanId, description: '朱铨画像，婺源朱氏始迁祖', deleted_at: null },
+      data: { description: '朱铨，婺源朱氏始迁祖' },
+    });
     this.logger.log('  ✅ 名人肖像已换成公有领域画像（朱熹）');
+  }
+
+  /**
+   * [2026-11-13] 朱小小演示素材本地落地（幂等刷新）。
+   *
+   * 老库是在图片常量仍指向占位图接口（/api/public/pic/v2/...）时种下的：
+   * - 用户/Person 头像只在「为空」时补齐，已有旧占位头像不会被覆盖；
+   * - 媒体按 file_url 去重，旧占位记录不会被新本地路径顶替。
+   * 这里按「旧占位 URL 前缀 + 朱小小专属描述」双口径定位，把残留占位记录
+   * 统一替换为仓库本地生成图；新库常量已是本地路径，此方法为空操作。
+   */
+  private async ensureZhuxiaoxiaoAssets(input: {
+    clanId: bigint;
+    memberUserId: string;
+    memberPersonId: bigint;
+  }) {
+    const { clanId, memberUserId, memberPersonId } = input;
+
+    // 1) 族员账号头像 + Person 头像/缩略图：存量占位或空值都刷成本地图。
+    await this.prisma.user.update({
+      where: { id: memberUserId },
+      data: { avatar_url: MEMBER_AVATAR },
+    });
+    await this.prisma.person.update({
+      where: { id: memberPersonId },
+      data: { avatar_url: MEMBER_AVATAR, thumbnail_url: MEMBER_AVATAR },
+    });
+
+    // [2026-11-13] 老库兜底：Person 若仍停留在初值占位生日 2000-01-01，按档案校准为 2000-03-15；已是正确日期则不动。
+    const currentPerson = await this.prisma.person.findUnique({
+      where: { id: memberPersonId },
+      select: { birth_date: true },
+    });
+    if (currentPerson && (currentPerson.birth_date == null || currentPerson.birth_date.toISOString().startsWith('2000-01-01'))) {
+      await this.prisma.person.update({
+        where: { id: memberPersonId },
+        data: { birth_date: new Date('2000-03-15') },
+      });
+    }
+
+    // 2) 相册三张：按描述精确定位本家族内朱小小自摄照片，替换旧占位 URL。
+    const galleryByDesc = [
+      { description: '厦门大学校园，入学那年在芙蓉湖边', url: ZHUXIAOXIAO_GALLERY[0] },
+      { description: '软件工程系毕业照', url: ZHUXIAOXIAO_GALLERY[1] },
+      { description: '在五夫整理旧谱和扫描件', url: ZHUXIAOXIAO_GALLERY[2] },
+    ];
+    for (const item of galleryByDesc) {
+      await this.prisma.mediaArchive.updateMany({
+        where: { clan_id: clanId, description: item.description, deleted_at: null },
+        data: { file_url: item.url, display_url: item.url, thumb_url: item.url },
+      });
+    }
+
+    // 3) 「历代先祖」相册里的朱小小竖版肖像：按描述定位，替换旧占位 URL。
+    await this.prisma.mediaArchive.updateMany({
+      where: { clan_id: clanId, description: '朱熹第 36 世孙朱小小', deleted_at: null },
+      data: {
+        file_url: DEMO_MEDIA_IMAGES.zhuxiaoxiaoPhoto,
+        display_url: DEMO_MEDIA_IMAGES.zhuxiaoxiaoPhoto,
+        thumb_url: DEMO_MEDIA_IMAGES.zhuxiaoxiaoPhoto,
+      },
+    });
+
+    // 4) 兜底：老库若仍残留按旧 seed 生成的占位图，按 URL 前缀 + 关键词清掉头像/媒体口径。
+    const legacyUrlPattern = {
+      OR: [
+        { file_url: { contains: 'geneasphere-member-zhuxiaoxiao' } },
+        { file_url: { contains: 'zhuxiaoxiao-campus-1' } },
+        { file_url: { contains: 'zhuxiaoxiao-xiamen-univ' } },
+        { file_url: { contains: 'zhuxiaoxiao-genealogy-work' } },
+        { file_url: { contains: 'zhuxi-zhuxiaoxiao-photo' } },
+      ],
+    };
+    const legacyMedia = await this.prisma.mediaArchive.findMany({
+      where: { clan_id: clanId, ...legacyUrlPattern, deleted_at: null },
+      select: { id: true, file_url: true, description: true },
+    });
+    const pickLegacyUrl = (fileUrl: string) =>
+      fileUrl.includes('zhuxiaoxiao-campus-1')
+        ? ZHUXIAOXIAO_GALLERY[0]
+        : fileUrl.includes('zhuxiaoxiao-xiamen-univ')
+          ? ZHUXIAOXIAO_GALLERY[1]
+          : fileUrl.includes('zhuxiaoxiao-genealogy-work')
+            ? ZHUXIAOXIAO_GALLERY[2]
+            : DEMO_MEDIA_IMAGES.zhuxiaoxiaoPhoto;
+    for (const row of legacyMedia) {
+      const url = pickLegacyUrl(row.file_url);
+      await this.prisma.mediaArchive.update({
+        where: { id: row.id },
+        data: { file_url: url, display_url: url, thumb_url: url },
+      });
+    }
+
+    // 5) 族员个人相册（user_photos）同样按旧占位 URL/描述刷新，避免个人空间残留旧图。
+    for (const item of galleryByDesc) {
+      await this.prisma.userPhoto.updateMany({
+        where: { user_id: memberUserId, description: item.description },
+        data: { file_url: item.url, thumbnail_url: item.url },
+      });
+    }
+    const legacyPhotos = await this.prisma.userPhoto.findMany({
+      where: { user_id: memberUserId, ...legacyUrlPattern },
+      select: { id: true, file_url: true },
+    });
+    for (const row of legacyPhotos) {
+      const url = pickLegacyUrl(row.file_url);
+      await this.prisma.userPhoto.update({
+        where: { id: row.id },
+        data: { file_url: url, thumbnail_url: url },
+      });
+    }
+
+    this.logger.log('  ✅ 朱小小演示素材已对齐本地生成图（幂等）');
   }
 
   /**
@@ -1268,7 +1394,7 @@ export class DemoSeedService implements OnModuleInit {
       { key: 'ancestorWorship2', album: '祭祖大典', category: '活动', taken_year: 2023, taken_location: '江西婺源', description: '冬至婺源支祭祖典礼' },
       // 历代先祖
       { key: 'zhuxiPortrait', album: '历代先祖', category: '肖像', taken_year: 1200, taken_location: '福建建阳', description: '朱熹画像' },
-      { key: 'zhuquanPortrait', album: '历代先祖', category: '肖像', taken_year: 1260, taken_location: '江西婺源', description: '朱铨画像，婺源朱氏始迁祖' },
+      { key: 'zhuquanPortrait', album: '历代先祖', category: '肖像', taken_year: 1260, taken_location: '江西婺源', description: '朱铨，婺源朱氏始迁祖' },
       { key: 'zhuxiaoxiaoPhoto', album: '历代先祖', category: '肖像', taken_year: 2024, taken_location: '福建武夷山', description: '朱熹第 36 世孙朱小小' },
       // 家族聚会
       { key: 'familyReunion', album: '家族聚会', category: '活动', taken_year: 2024, taken_location: '福建厦门', description: '海峡两岸朱氏宗亲联谊会' },

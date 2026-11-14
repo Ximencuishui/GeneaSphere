@@ -39,6 +39,7 @@ import { GenealogyCrowdsourceModule } from './genealogy-crowdsource/genealogy-cr
 import { GenealogyDraftModule } from './genealogy-draft/genealogy-draft.module';
 import { GenealogyFinalizeModule } from './genealogy-finalize/genealogy-finalize.module';
 import { GenealogyDigitizeModule } from './genealogy-digitize/genealogy-digitize.module';
+import { GenealogyEditionModule } from './genealogy-edition/genealogy-edition.module';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { GenealogyDigitizeModule } from './genealogy-digitize/genealogy-digitize
     GenealogyDraftModule,
     GenealogyFinalizeModule,
     GenealogyDigitizeModule,
+    GenealogyEditionModule,
   ],
   controllers: [AppController],
   providers: [

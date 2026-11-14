@@ -73,8 +73,11 @@ export class CepuController {
   async getBookProfile(@Param('clanSlug') clanSlug: string, @Req() req: any) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
+    const source = String(req.query?.source || '');
+    const published = source === 'draft' ? null : await this.cepuService.publishedReading(clanId);
+    if (published) return published;
     const [profile, cover] = await Promise.all([
-      this.cepuService.getBookProfile(clanId),
+      this.cepuService.getBookProfile(clanId, source),
       this.cepuService.getBookCover(clanId),
     ]);
     return { profile, cover };
@@ -99,18 +102,18 @@ export class CepuController {
   async generationIndex(@Param('clanSlug') clanSlug: string, @Req() req: any) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
-    const rows = await this.cepuService.listGenerationIndex(clanId);
+    const rows = await this.cepuService.listGenerationIndex(clanId, String(req.query?.source || ''));
     return serializeBigInt(rows);
   }
 
-  /** 卷宗列表（空库自动生成默认卷结构）；登录或有效分享链接可读 */
+  /** 卷宗列表。已定稿读快照，否则读稿；不再自动建卷。登录或有效分享链接可读 */
   @Public()
   @UseGuards(ShareAccessGuard)
   @Get(':clanSlug/volumes')
   async getVolumes(@Param('clanSlug') clanSlug: string, @Req() req: any) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
-    const volumes = await this.cepuService.getVolumes(clanId);
+    const volumes = await this.cepuService.getVolumes(clanId, String(req.query?.source || ''));
     return serializeBigInt(volumes);
   }
 
@@ -121,7 +124,7 @@ export class CepuController {
   async getVolume(@Param('clanSlug') clanSlug: string, @Param('id') id: string, @Req() req: any) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
-    return serializeBigInt(await this.cepuService.getVolume(clanId, BigInt(id)));
+    return serializeBigInt(await this.cepuService.getVolume(clanId, BigInt(id), String(req.query?.source || '')));
   }
 
   /** 新增卷宗（admin） */

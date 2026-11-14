@@ -95,6 +95,9 @@ model User {
   // ==================== 族谱生成与全族视频 ====================
   family_events         FamilyEvent[]
   genealogy_documents   GenealogyDocument[]
+  genealogy_editions_opened    GenealogyEdition[] @relation("EditionOpener")
+  genealogy_editions_published GenealogyEdition[] @relation("EditionPublisher")
+  genealogy_print_jobs  GenealogyPrintJob[]
   clan_migration_videos ClanMigrationVideo[]
   clan_event_videos     ClanEventVideo[]
 
@@ -165,6 +168,7 @@ model Clan {
   // ==================== 族谱生成与全族视频 ====================
   family_events         FamilyEvent[]
   genealogy_documents   GenealogyDocument[]
+  genealogy_print_jobs  GenealogyPrintJob[]
   clan_migration_videos ClanMigrationVideo[]
   clan_event_videos     ClanEventVideo[]
 
@@ -176,6 +180,7 @@ model Clan {
 
   // ==================== 修谱闭环（草稿 / 众包通知 / 旧谱项目）====================
   genealogy_drafts    GenealogyDraft[]
+  genealogy_editions  GenealogyEdition[]
   crowdsource_notices CrowdsourceNotice[]
 
   // ==================== 家族概况：理事会 / 修谱小组（2026-08-20 菜单重构）====================
@@ -326,8 +331,9 @@ model BookVolume {
   sort_order  Int      @default(0) @map("sort_order") // 卷顺序；导出 PDF 严格按此输出
   title      String   @map("title") @db.VarChar(200) // 「卷一 谱序源流」
   type       String   @default("document") @map("type") // document | shilu
-  content    String?  @map("content") @db.Text // 文档卷富文本 HTML；世录卷为 null
-  config     Json?    @map("config") // 世录卷筛选配置
+  content       String?  @map("content") @db.Text // 文档卷富文本 HTML；世录卷为 null
+  catalog_slot  String?  @map("catalog_slot") @db.VarChar(40) // 标准目录槽位；空则仍按标题关键词归入
+  config        Json?    @map("config") // 世录卷筛选配置
   created_by String   @map("created_by")
   created_at DateTime @default(now()) @map("created_at")
   updated_at DateTime @updatedAt @map("updated_at")
@@ -336,6 +342,7 @@ model BookVolume {
   versions   BookVolumeVersion[]
 
   @@index([clan_id, sort_order])
+  @@index([clan_id, catalog_slot])
   @@map("book_volumes")
 }
 
@@ -418,6 +425,8 @@ model PersonBio {
   blood_type       String? @map("blood_type")
   epitaph          String? @map("epitaph") @db.Text
   source_note      String? @map("source_note") @db.Text
+  generation_char  String? @map("generation_char") @db.VarChar(20)
+  contact_phone    String? @map("contact_phone") @db.VarChar(40)
   updated_at    DateTime @updatedAt @map("updated_at")
   person        Person   @relation(fields: [person_id], references: [id], onDelete: Cascade)
 
@@ -1861,20 +1870,26 @@ model Endorsement {
 
 // 族人信息修改申请表
 model PersonModificationRequest {
-  id                BigInt             @id @default(autoincrement()) @map("id")
-  person_id         BigInt             @map("person_id")
-  clan_id           BigInt             @map("clan_id")
-  requester_user_id String             @map("requester_user_id")
-  field_name        String             @map("field_name")
-  old_value         String?            @map("old_value")
-  new_value         String             @map("new_value")
-  reason            String?            @map("reason")
-  status            ModificationStatus @default(PENDING) @map("status")
-  reviewer_id       String?            @map("reviewer_id")
-  reviewed_at       DateTime?          @map("reviewed_at")
-  reject_reason     String?            @map("reject_reason")
-  created_at        DateTime           @default(now()) @map("created_at")
-  updated_at        DateTime           @updatedAt @map("updated_at")
+  id                   BigInt             @id @default(autoincrement()) @map("id")
+  person_id            BigInt?            @map("person_id")
+  clan_id              BigInt             @map("clan_id")
+  requester_user_id    String             @map("requester_user_id")
+  field_name           String             @map("field_name")
+  old_value            String?            @map("old_value")
+  new_value            String             @map("new_value")
+  reason               String?            @map("reason")
+  status               ModificationStatus @default(PENDING) @map("status")
+  reviewer_id          String?            @map("reviewer_id")
+  reviewed_at          DateTime?          @map("reviewed_at")
+  reject_reason        String?            @map("reject_reason")
+  target_kind          String             @default("person") @map("target_kind") @db.VarChar(20)
+  target_ref           String?            @map("target_ref") @db.VarChar(80)
+  catalog_slot         String?            @map("catalog_slot") @db.VarChar(40)
+  filed_edition_id     BigInt?            @map("filed_edition_id")
+  revision_edition_id  BigInt?            @map("revision_edition_id")
+  applied_at           DateTime?          @map("applied_at")
+  created_at           DateTime           @default(now()) @map("created_at")
+  updated_at           DateTime           @updatedAt @map("updated_at")
 
   requester User @relation("ModificationRequester", fields: [requester_user_id], references: [id], onDelete: Cascade)
 
@@ -2359,6 +2374,12 @@ enum GenealogyDocumentStyle {
   simple // 简约列表式
 }
 
+// 族谱 PDF 落库状态。对象存储失败时保留文档行，file_url 为空，允许原行重试。
+enum GenealogyDocumentStorageStatus {
+  READY
+  GENERATION_STORAGE_FAILED
+}
+
 // 家族大事件表
 model FamilyEvent {
   id          BigInt          @id @default(autoincrement()) @map("id")
@@ -2388,20 +2409,50 @@ model GenealogyDocument {
   clan_id        BigInt                 @map("clan_id")
   version_name   String                 @map("version_name") @db.VarChar(200)
   version_number Int                    @default(1) @map("version_number")
-  file_url       String?                @map("file_url") @db.VarChar(500)
-  file_size      BigInt?                @map("file_size")
-  page_count     Int?                   @map("page_count")
-  style          GenealogyDocumentStyle @default(traditional) @map("style")
+  file_url       String?                         @map("file_url") @db.VarChar(500)
+  file_size      BigInt?                         @map("file_size")
+  page_count     Int?                            @map("page_count")
+  style          GenealogyDocumentStyle          @default(traditional) @map("style")
+  storage_status GenealogyDocumentStorageStatus  @default(READY) @map("storage_status")
   scope_summary  Json?                  @map("scope_summary") // 范围摘要：{branch, generation_range, person_count}
   created_by     String                 @map("created_by")
   created_at     DateTime               @default(now()) @map("created_at")
 
-  clan    Clan @relation(fields: [clan_id], references: [id], onDelete: Cascade)
-  creator User @relation(fields: [created_by], references: [id], onDelete: Cascade)
+  clan       Clan                @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  creator    User                @relation(fields: [created_by], references: [id], onDelete: Cascade)
+  print_jobs GenealogyPrintJob[]
+  editions   GenealogyEdition[]
 
   @@unique([clan_id, version_number])
   @@index([clan_id, created_at])
   @@map("genealogy_documents")
+}
+
+// 册谱 PDF 的印刷工作项。本轮只创建 PENDING，不接支付和印刷厂。
+enum GenealogyPrintJobStatus {
+  PENDING
+}
+
+model GenealogyPrintJob {
+  id                    BigInt                  @id @default(autoincrement()) @map("id")
+  clan_id               BigInt                  @map("clan_id")
+  document_id           BigInt?                 @map("document_id")
+  source_task_id        String?                 @map("source_task_id") @db.VarChar(40)
+  user_id               String                  @map("user_id")
+  status                GenealogyPrintJobStatus @default(PENDING) @map("status")
+  layout_params         Json                    @map("layout_params")
+  document_generated_at DateTime                @map("document_generated_at")
+  created_at            DateTime                @default(now()) @map("created_at")
+  updated_at            DateTime                @updatedAt @map("updated_at")
+
+  clan     Clan                @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  document GenealogyDocument?  @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  user     User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, created_at])
+  @@index([document_id])
+  @@index([source_task_id])
+  @@map("genealogy_print_jobs")
 }
 
 // 全族迁徙视频项目表
@@ -2454,6 +2505,109 @@ model ClanEventVideo {
   @@index([clan_id, created_at])
   @@index([status, created_at])
   @@map("clan_event_videos")
+}
+
+// 一轮修谱一头。稿仍写在人物和卷宗表上；published 行下的子表是族谱只读的定稿快照。
+enum GenealogyEditionStatus {
+  draft
+  published
+  superseded
+  backup
+}
+
+model GenealogyEdition {
+  id                      BigInt                 @id @default(autoincrement()) @map("id")
+  clan_id                 BigInt                 @map("clan_id")
+  version_number          Int                    @map("version_number")
+  version_name            String                 @map("version_name") @db.VarChar(200)
+  status                  GenealogyEditionStatus @map("status")
+  based_on_edition_id     BigInt?                @map("based_on_edition_id")
+  genealogy_document_id   BigInt?                @map("genealogy_document_id")
+  book_profile            String                 @default("compact") @map("book_profile") @db.VarChar(20)
+  rules_text              String?                @map("rules_text") @db.Text
+  cover_json              Json?                  @map("cover_json")
+  content_hash            String                 @default("") @map("content_hash") @db.VarChar(64)
+  diverged                Boolean                @default(false) @map("diverged")
+  project_submitted_at    DateTime?              @map("project_submitted_at")
+  digitize_confirmed_at   DateTime?              @map("digitize_confirmed_at")
+  review_confirmed_at     DateTime?              @map("review_confirmed_at")
+  revise_confirmed_at     DateTime?              @map("revise_confirmed_at")
+  opened_at               DateTime?              @map("opened_at")
+  opened_by               String?                @map("opened_by")
+  published_at            DateTime?              @map("published_at")
+  published_by            String?                @map("published_by")
+  created_at              DateTime               @default(now()) @map("created_at")
+
+  clan       Clan                @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  based_on   GenealogyEdition?   @relation("EditionBase", fields: [based_on_edition_id], references: [id])
+  derived    GenealogyEdition[]  @relation("EditionBase")
+  document   GenealogyDocument?  @relation(fields: [genealogy_document_id], references: [id])
+  opener     User?               @relation("EditionOpener", fields: [opened_by], references: [id])
+  publisher  User?               @relation("EditionPublisher", fields: [published_by], references: [id])
+  volumes    GenealogyEditionVolume[]
+  persons    GenealogyEditionPerson[]
+  links      GenealogyEditionLink[]
+  xipai      GenealogyEditionXipai[]
+
+  @@index([clan_id, status])
+  @@index([clan_id, version_number])
+  @@map("genealogy_editions")
+}
+
+model GenealogyEditionVolume {
+  id               BigInt   @id @default(autoincrement()) @map("id")
+  edition_id       BigInt   @map("edition_id")
+  catalog_slot     String?  @map("catalog_slot") @db.VarChar(40)
+  sort_order       Int      @default(0) @map("sort_order")
+  title            String   @map("title") @db.VarChar(200)
+  type             String   @map("type") @db.VarChar(20)
+  content          String?  @map("content") @db.Text
+  config           Json?    @map("config")
+  source_volume_id BigInt?  @map("source_volume_id")
+  edition          GenealogyEdition @relation(fields: [edition_id], references: [id], onDelete: Cascade)
+
+  @@index([edition_id, sort_order])
+  @@map("genealogy_edition_volumes")
+}
+
+model GenealogyEditionPerson {
+  id               BigInt   @id @default(autoincrement()) @map("id")
+  edition_id       BigInt   @map("edition_id")
+  source_person_id BigInt   @map("source_person_id")
+  payload          Json     @map("payload")
+  edition          GenealogyEdition @relation(fields: [edition_id], references: [id], onDelete: Cascade)
+
+  @@unique([edition_id, source_person_id])
+  @@map("genealogy_edition_persons")
+}
+
+model GenealogyEditionLink {
+  id               BigInt  @id @default(autoincrement()) @map("id")
+  edition_id       BigInt  @map("edition_id")
+  kind             String  @map("kind") @db.VarChar(20)
+  left_person_id   BigInt  @map("left_person_id")
+  right_person_id  BigInt  @map("right_person_id")
+  family_key       String? @map("family_key") @db.VarChar(40)
+  birth_order      Int?    @map("birth_order")
+  child_type       String? @map("child_type") @db.VarChar(20)
+  marriage_order   Int?    @map("marriage_order")
+  union_type       String? @map("union_type") @db.VarChar(20)
+  edition          GenealogyEdition @relation(fields: [edition_id], references: [id], onDelete: Cascade)
+
+  @@index([edition_id, kind])
+  @@map("genealogy_edition_links")
+}
+
+model GenealogyEditionXipai {
+  id         BigInt  @id @default(autoincrement()) @map("id")
+  edition_id BigInt  @map("edition_id")
+  generation Int     @map("generation")
+  character  String  @map("character") @db.VarChar(20)
+  note       String? @map("note") @db.Text
+  edition    GenealogyEdition @relation(fields: [edition_id], references: [id], onDelete: Cascade)
+
+  @@unique([edition_id, generation])
+  @@map("genealogy_edition_xipai")
 }
 
 // =================== 修谱闭环：草稿 / 众包通知 / 旧谱电子化项目 ===================

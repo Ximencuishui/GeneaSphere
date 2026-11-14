@@ -10,6 +10,7 @@ import { nameIndexCss, renderNameIndexBook } from './name-index-html';
 import { catalogCss, renderCatalogBook, renderGenerationIndex, renderPlaceholder } from './catalog-html';
 import { buildBookCatalog, isBiographyVolume, isLadiesVolume, isLineageVolume, type BookProfile, type CatalogEntry } from './book-catalog';
 import { htmlToRules, isFamilyRulesTitle, rulesToHtml } from './clan-rules';
+import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
 
 /**
  * 册谱服务（《册谱模块需求文档（PRD）》一期核心闭环）
@@ -110,7 +111,10 @@ export class CepuService {
     'C:\\Program Files\\Chromium\\Application\\chrome.exe',
   ].filter((p): p is string => !!p);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly edition: GenealogyEditionService,
+  ) {}
 
   /** 探测可用浏览器（Edge/Chrome），找不到抛明确错误 */
   private findBrowserPath(): string {
@@ -177,7 +181,15 @@ export class CepuService {
     };
   }
 
-  async getBookProfile(clanId: bigint): Promise<BookProfile> {
+  async publishedReading(clanId: bigint) {
+    return this.edition.publishedCover(clanId);
+  }
+
+  async getBookProfile(clanId: bigint, source?: string): Promise<BookProfile> {
+    if (source !== 'draft') {
+      const published = await this.edition.publishedCover(clanId);
+      if (published) return published.profile as BookProfile;
+    }
     const clan = await this.prisma.clan.findUnique({
       where: { id: clanId },
       select: { settings_json: true },
@@ -187,6 +199,7 @@ export class CepuService {
   }
 
   async setBookProfile(clanId: bigint, profile: BookProfile) {
+    await this.edition.assertWritable(clanId);
     const clan = await this.prisma.clan.findUnique({
       where: { id: clanId },
       select: { settings_json: true },
@@ -203,7 +216,11 @@ export class CepuService {
     return { profile };
   }
 
-  async listGenerationIndex(clanId: bigint) {
+  async listGenerationIndex(clanId: bigint, source?: string) {
+    if (source !== 'draft') {
+      const published = await this.edition.publishedXipai(clanId);
+      if (published) return published;
+    }
     const rows = await this.prisma.xipai.findMany({
       where: { clan_id: clanId },
       orderBy: { generation: 'asc' },
@@ -215,63 +232,11 @@ export class CepuService {
     }));
   }
 
-  /** 卷宗列表；空库时自动生成默认卷结构（PRD §2.2 示例） */
-  async getVolumes(clanId: bigint) {
-    const existing = await this.prisma.bookVolume.findMany({
-      where: { clan_id: clanId },
-      orderBy: { sort_order: 'asc' },
-    });
-    if (existing.length > 0) return this.ensureBiographyVolume(clanId, existing);
-
-    const defaults = [
-      { sort_order: 1, title: '卷一 谱序源流', type: 'document', content: '<p>（此处录入谱序、凡例、修谱人员名单）</p>' },
-      { sort_order: 2, title: '卷二 世系录', type: 'shilu', config: { gender_filter: 'male' } },
-      { sort_order: 3, title: '卷三 人物传', type: 'shilu', config: { layout: 'biography', gender_filter: 'male' } },
-      { sort_order: 4, title: '卷四 闺秀录', type: 'shilu', config: { gender_filter: 'female' } },
-      { sort_order: 5, title: '卷五 艺文墓志', type: 'document', content: '<p>（此处录入艺文、墓志铭、祠堂记、坟茔志）</p>' },
-    ];
-    await this.prisma.bookVolume.createMany({
-      data: defaults.map((d) => ({
-        clan_id: clanId,
-        sort_order: d.sort_order,
-        title: d.title,
-        type: d.type as string,
-        content: d.content,
-        config: (d.config as object | undefined) ?? undefined,
-        created_by: 'system',
-      })),
-    });
-    return this.prisma.bookVolume.findMany({
-      where: { clan_id: clanId },
-      orderBy: { sort_order: 'asc' },
-    });
-  }
-
-  /** 已有卷宗的家族补一册人物传，插在世系录后面。已有则不动。 */
-  private async ensureBiographyVolume(clanId: bigint, volumes: { id: bigint; sort_order: number; title: string; type: string; config: unknown }[]) {
-    const exists = volumes.some((volume) => {
-      const layout = (volume.config as ShiluConfig | null)?.layout;
-      return layout === 'biography' || String(volume.title).includes('人物传');
-    });
-    if (exists) return volumes;
-    const lineage = volumes.find((volume) => volume.type === 'shilu' && String(volume.title).includes('世系录'));
-    const anchor = lineage?.sort_order ?? volumes.reduce((max, volume) => Math.max(max, volume.sort_order), 0);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.bookVolume.updateMany({
-        where: { clan_id: clanId, sort_order: { gt: anchor } },
-        data: { sort_order: { increment: 1 } },
-      });
-      await tx.bookVolume.create({
-        data: {
-          clan_id: clanId,
-          sort_order: anchor + 1,
-          title: '卷三 人物传',
-          type: 'shilu',
-          config: { layout: 'biography', gender_filter: 'male' },
-          created_by: 'system',
-        },
-      });
-    });
+  /** 卷宗列表。已定稿的家族读快照；打开册谱不再自动建卷。 */
+  async getVolumes(clanId: bigint, source?: string) {
+    if (source !== 'draft' && await this.edition.shouldReadSnapshot(clanId)) {
+      return (await this.edition.listVolumes(clanId)) ?? [];
+    }
     return this.prisma.bookVolume.findMany({
       where: { clan_id: clanId },
       orderBy: { sort_order: 'asc' },
@@ -279,6 +244,7 @@ export class CepuService {
   }
 
   async createVolume(clanId: bigint, userId: string, body: { title: string; type?: string; content?: string; config?: any }) {
+    await this.edition.assertWritable(clanId);
     if (!body.title?.trim()) throw new BadRequestException('卷标题不能为空');
     const maxOrder = await this.prisma.bookVolume.aggregate({
       where: { clan_id: clanId },
@@ -305,6 +271,7 @@ export class CepuService {
   async updateVolume(volumeId: bigint, userId: string, body: { title?: string; content?: string; config?: any }) {
     const volume = await this.prisma.bookVolume.findUnique({ where: { id: volumeId } });
     if (!volume) throw new NotFoundException('卷宗不存在');
+    await this.edition.assertWritable(volume.clan_id);
     // [二期 2026-08-20] 变更后写入新版本快照（可回滚）
     // - 60 分钟去重窗口：连续保存相同配置不会产生噪声版本
     const nextTitle = body.title ?? volume.title;
@@ -419,11 +386,13 @@ export class CepuService {
   async deleteVolume(volumeId: bigint) {
     const volume = await this.prisma.bookVolume.findUnique({ where: { id: volumeId } });
     if (!volume) throw new NotFoundException('卷宗不存在');
+    await this.edition.assertWritable(volume.clan_id);
     await this.prisma.bookVolume.delete({ where: { id: volumeId } });
   }
 
   /** 重排卷序：ids 数组顺序即新 sort_order */
   async reorderVolumes(clanId: bigint, ids: string[]) {
+    await this.edition.assertWritable(clanId);
     const volumes = await this.prisma.bookVolume.findMany({ where: { clan_id: clanId } });
     const idSet = new Set(volumes.map((v) => v.id.toString()));
     const filtered = ids.filter((id) => idSet.has(id));
@@ -438,7 +407,12 @@ export class CepuService {
   }
 
   /** 单卷内容：文档卷返回 content；世录卷按 config 实时生成条目 */
-  async getVolume(clanId: bigint, volumeId: bigint) {
+  async getVolume(clanId: bigint, volumeId: bigint, source?: string) {
+    if (source !== 'draft') {
+      const snapshot = await this.edition.readVolume(clanId, volumeId);
+      if (snapshot) return snapshot as any;
+      if (await this.edition.shouldReadSnapshot(clanId)) throw new NotFoundException('卷宗不存在');
+    }
     const volume = await this.prisma.bookVolume.findFirst({
       where: { id: volumeId, clan_id: clanId },
     });
@@ -812,6 +786,7 @@ export class CepuService {
   async upsertPersonBio(personId: bigint, body: any) {
     const person = await this.prisma.person.findUnique({ where: { id: personId } });
     if (!person) throw new NotFoundException('人物不存在');
+    await this.edition.assertWritable(person.clan_id);
     const fields = [
       'courtesy_name', 'native_place', 'burial_place', 'achievements',
       'anecdotes', 'biography', 'marital_notes', 'adoption_note', 'premature',
@@ -1281,6 +1256,18 @@ ${sections.join('')}
       + `<div class="shixi-name" style="color:${surnameColor}">${this.esc(e.full_name)}</div>`
       + infoHtml
       + `</div>`;
+  }
+
+  /**
+   * 生成预览的世系表开本。只渲染世系页，不走整本目录、人名索引和人物传。
+   * 人物字段取调用方已经按勾选裁过的 ShiluEntry。
+   */
+  renderShixiPreview(entries: ShiluEntry[], title = '世系表'): { html: string; css: string } {
+    const pages = this.buildShixiTablePages(entries, { layout: 'shixi_table' }, title);
+    const html = pages.length
+      ? pages.join('')
+      : '<p class="vol-content">（该卷暂无世录条目）</p>';
+    return { html, css: this.shixiTableCss() };
   }
 
   /** 世系表卷分页:每 <pageGenCount> 个世代一页;单代人数过多时自动左右双列分页 */

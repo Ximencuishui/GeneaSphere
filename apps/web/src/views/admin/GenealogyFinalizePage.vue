@@ -6,12 +6,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  Share,
-  Download,
-  View,
-  CircleCheckFilled,
-} from '@element-plus/icons-vue'
+import { CircleCheckFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const route = useRoute()
@@ -55,9 +50,35 @@ async function handleReject() {
   }
 }
 
+async function handleOpenRound(choice?: 'overwrite' | 'keep') {
+  try {
+    await axios.post(`/api/genealogy/${clanSlug.value}/edition/open`, choice ? { choice } : {})
+    ElMessage.success('下一轮修谱已打开，族谱仍显示上一版定稿')
+    await loadLock()
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+  } catch (err: any) {
+    const message = err?.response?.data?.message || ''
+    if (String(message).includes('HASH_MISMATCH')) {
+      try {
+        await ElMessageBox.confirm('当前稿和上一版定稿不一致。覆盖会先做备份，再按定稿恢复稿。', '开始下一轮', {
+          confirmButtonText: '以定稿覆盖稿',
+          cancelButtonText: '保留当前稿',
+          distinguishCancelAndClose: true,
+          type: 'warning',
+        })
+        await handleOpenRound('overwrite')
+      } catch (choiceErr: any) {
+        if (choiceErr === 'cancel') await handleOpenRound('keep')
+      }
+      return
+    }
+    ElMessage.error(message || '无法开始下一轮')
+  }
+}
+
 async function handleUnlock() {
   try {
-    await ElMessageBox.confirm('解锁定稿将开放世系、人物核心信息编辑，本次定稿记录作废，是否确认？', '解锁谱系', { type: 'warning' })
+    await ElMessageBox.confirm('解锁会打开下一轮修谱稿。已发布的族谱仍保持这一版定稿，直到再次终审。', '解锁谱系', { type: 'warning' })
     await axios.post(`/api/genealogy/${clanSlug.value}/finalize/unlock`)
     ElMessage.success('谱系已解锁')
     await loadLock()
@@ -228,6 +249,48 @@ async function loadBranches() {
 const generating = ref(false)
 const lastResult = ref<any>(null)
 
+function renderJobClientError(err: any): string {
+  const message = err?.response?.data?.message
+  if (typeof message === 'string' && message.trim()) return message.trim()
+  if (Array.isArray(message)) {
+    const text = message.map((item) => String(item)).filter(Boolean).join('；')
+    if (text) return text
+  }
+  const status = err?.response?.status
+  return status ? `请求失败（${status}）` : '查询渲染任务失败'
+}
+
+function delayUntil(ms: number, deadline: number) {
+  const wait = Math.min(ms, Math.max(0, deadline - Date.now()))
+  return new Promise((resolve) => setTimeout(resolve, wait))
+}
+
+async function waitForRenderJob(jobId: string) {
+  const deadline = Date.now() + 180_000
+  while (Date.now() < deadline) {
+    try {
+      const { data } = await axios.get(
+        `/api/genealogy-documents/${clanSlug.value}/render-jobs/${jobId}`,
+      )
+      if (data.status === 'completed' && data.document) return data.document
+      if (data.status === 'failed') {
+        const code = data.code ? `（${data.code}）` : ''
+        throw new Error(`${data.error || 'PDF 渲染失败'}${code}`)
+      }
+    } catch (err: any) {
+      if (!err?.response) throw err
+      const status = Number(err.response.status)
+      if (status >= 500) {
+        await delayUntil(3_000, deadline)
+        continue
+      }
+      throw new Error(renderJobClientError(err))
+    }
+    await delayUntil(1_000, deadline)
+  }
+  throw new Error('生成超时')
+}
+
 async function handleGenerate() {
   if (!lockInfo.value.locked) {
     ElMessage.warning('请先完成终审定稿锁谱，再生成册谱')
@@ -253,7 +316,8 @@ async function handleGenerate() {
       generation_start: generateForm.generation_start || undefined,
       generation_end: generateForm.generation_end || undefined,
     })
-    lastResult.value = res.data
+    const jobId = res.data?.job_id as string | undefined
+    lastResult.value = jobId ? await waitForRenderJob(jobId) : res.data
     ElMessage.success('族谱文档已生成并保存为新版本')
   } catch (err: any) {
     ElMessage.error(`生成失败：${err?.response?.data?.message ?? err.message}`)
@@ -270,10 +334,6 @@ function handleDownload() {
   link.click()
 }
 
-function handleOrderPrint() {
-  ElMessage.info('跳转到印刷下单（复用现有印刷流程）')
-}
-
 // =========================================================================
 // 底部共用：已定谱版本列表
 // =========================================================================
@@ -286,6 +346,7 @@ interface FinalizedVersion {
   editors: string[]
   description?: string
   file_url?: string
+  storage_status?: string
 }
 
 const versionList = ref<FinalizedVersion[]>([])
@@ -305,6 +366,7 @@ async function loadVersionList() {
         editors: summary.editors ?? [],
         description: summary.description ?? '',
         file_url: it.file_url,
+        storage_status: it.storage_status,
       }
     })
   } catch (err: any) {
@@ -312,38 +374,6 @@ async function loadVersionList() {
     console.warn('加载已定谱版本失败：', err?.response?.data?.message || err?.message)
   } finally {
     versionLoading.value = false
-  }
-}
-
-function handleDownloadPdf(row: any) {
-  if (!row.file_url) {
-    ElMessage.warning('文件 URL 不可用')
-    return
-  }
-  const link = document.createElement('a')
-  link.href = row.file_url
-  link.download = `${row.version_name}.pdf`
-  link.click()
-}
-
-function handleViewPdf(row: any) {
-  if (row.file_url) {
-    window.open(row.file_url, '_blank')
-  } else {
-    ElMessage.warning('文件 URL 不可用')
-  }
-}
-
-async function handleShare(row: any) {
-  if (!row.file_url) {
-    ElMessage.warning('文件 URL 不可用')
-    return
-  }
-  try {
-    await navigator.clipboard.writeText(row.file_url)
-    ElMessage.success('分享链接已复制')
-  } catch {
-    ElMessage.warning('复制失败：' + row.file_url)
   }
 }
 
@@ -452,6 +482,7 @@ watch(isTypeset, (value) => {
               <ElButton type="warning" :loading="finalizing" :disabled="lockInfo.locked" @click="handleFinalize">
                 确认定谱（固化版本）
               </ElButton>
+              <ElButton v-if="lockInfo.locked" @click="handleOpenRound()">开始下一轮修谱</ElButton>
               <ElButton v-if="lockInfo.locked" @click="handleReject">退回修订</ElButton>
               <ElButton v-if="lockInfo.locked && lockInfo.can_unlock" @click="handleUnlock">解锁谱系</ElButton>
               <ElButton @click="router.push(`/zupu/${clanSlug}/genealogy/data`)">
@@ -706,14 +737,6 @@ watch(isTypeset, (value) => {
               >
                 下载 PDF
               </ElButton>
-              <ElButton
-                v-if="lastResult"
-                type="success"
-                size="large"
-                @click="handleOrderPrint"
-              >
-                下单印刷
-              </ElButton>
             </ElCard>
 
             <ElCard v-if="lastResult" class="result-card">
@@ -759,13 +782,6 @@ watch(isTypeset, (value) => {
         </ElTableColumn>
         <ElTableColumn label="定谱时间" prop="finalized_at" width="170" />
         <ElTableColumn label="说明" prop="description" show-overflow-tooltip />
-        <ElTableColumn label="操作" width="220" fixed="right">
-          <template #default="{ row }">
-            <ElButton size="small" link :icon="View" @click="handleViewPdf(row)">预览</ElButton>
-            <ElButton size="small" link type="primary" :icon="Download" @click="handleDownloadPdf(row)">下载</ElButton>
-            <ElButton size="small" link type="success" :icon="Share" @click="handleShare(row)">转发</ElButton>
-          </template>
-        </ElTableColumn>
       </ElTable>
     </ElCard>
   </div>
@@ -860,6 +876,16 @@ watch(isTypeset, (value) => {
   justify-content: center;
 }
 
+.print-job {
+  margin-top: 16px;
+}
+.print-job__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
 .preview-frame {
   margin-top: 16px;
 }

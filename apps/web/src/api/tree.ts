@@ -40,7 +40,7 @@ export const treeApi = {
    */
   getClanFullTree: (
     clanId: string,
-    params?: { userId?: string; depth?: number; limit?: number },
+    params?: { userId?: string; depth?: number; limit?: number; draft?: number },
   ) =>
     request.get(`/api/tree/clan/${clanId}/full`, {
       params,

@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
+import { AdminModule } from '../admin/admin.module';
 import { GenealogyDocumentController } from './genealogy-document.controller';
 import { GenealogyDocumentService } from './genealogy-document.service';
 import { PrintModule } from '../print/print.module';
 import { CosModule } from '../cos/cos.module';
 
 @Module({
-  imports: [PrintModule, CosModule],
+  imports: [PrintModule, CosModule, AdminModule],
   controllers: [GenealogyDocumentController],
   providers: [GenealogyDocumentService],
   exports: [GenealogyDocumentService],

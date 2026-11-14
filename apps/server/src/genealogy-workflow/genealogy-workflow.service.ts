@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { loadXiupu, saveXiupu, XIUPU_STAGE_KEYS, XiupuSettings } from './xiupu-settings';
+import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
 
 /**
  * 修谱工作流状态推导（只读，不落库）：
@@ -37,6 +38,8 @@ export interface WorkflowStage {
   status: WorkflowStageStatus;
   /** 统计数量，展示在节点旁的小标签，不放进序号圆点 */
   count: number;
+  /** 终审角标用锁谱文案，不用文档行数 */
+  count_label?: string;
   badge: number;
   /** 勘误被驳回，需要回到修订环节 */
   returned?: boolean;
@@ -75,7 +78,10 @@ export interface GenealogyWorkflowStatus {
 export class GenealogyWorkflowService {
   private readonly logger = new Logger(GenealogyWorkflowService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly edition: GenealogyEditionService,
+  ) {}
 
   async getStatus(clan: { id: bigint; slug: string; name: string }): Promise<GenealogyWorkflowStatus> {
     const clanId = clan.id;
@@ -98,7 +104,8 @@ export class GenealogyWorkflowService {
       bioPendingCount, // 待初审的生平
       genealogyDocCount, // 已定稿的族谱版本
       bookVolumeCount, // 已生成的册谱卷
-      printOrderCount, // 印刷订单
+      printOrderCount, // 家谱成书订单，只用于「预览、印刷出谱」的笔数展示
+      genealogyPrintJobCount, // 册谱印刷工作项，只用于 print 完成判定
       bioRejectedCount,
       bioRejectRow,
       modRejectRow,
@@ -133,6 +140,7 @@ export class GenealogyWorkflowService {
       this.prisma.genealogyDocument.count({ where: { clan_id: clanId } }),
       this.prisma.bookVolume.count({ where: { clan_id: clanId } }),
       this.prisma.printOrder.count({ where: { clan_id: clanId } }),
+      this.prisma.genealogyPrintJob.count({ where: { clan_id: clanId } }),
       this.prisma.bioReview.count({
         where: { person: { clan_id: clanId }, status: 'REJECTED' },
       }),
@@ -287,12 +295,9 @@ export class GenealogyWorkflowService {
         key: 'lock',
         label: '终审定稿',
         status: 'todo',
-        count: genealogyDocCount,
+        count: 0,
         badge: 0,
-        detail:
-          genealogyDocCount > 0
-            ? `已锁定 ${genealogyDocCount} 个谱稿版本`
-            : '终审通过后定谱锁稿',
+        detail: '未锁定',
         link: menu.lock,
         menu_path: menu.lock,
       },
@@ -350,21 +355,18 @@ export class GenealogyWorkflowService {
       stage.returned_from_label = null;
     });
 
-    const digitizeDone =
-      digitizeSubStages.every((s) => s.status === 'done') || personCount > 0 || saveLogCount > 0;
-    const lockDone = Boolean(xiupu.lock);
+    const round = await this.edition.roundForWorkflow(clanId);
+    const lockDone = round.betweenRounds;
+    const lockStage = stages.find((stage) => stage.key === 'lock');
+    if (lockStage) {
+      const lockLabel = lockDone ? '已锁定' : '未锁定';
+      lockStage.count = 0;
+      lockStage.count_label = lockLabel;
+      lockStage.detail = lockLabel;
+    }
 
     for (const stage of stages) {
-      stage.status = this.isStageDone(stage.key, {
-        digitizeDone,
-        bioReviewedCount,
-        crowdsourceNoticeCount,
-        smsCount,
-        modReqReviewedCount,
-        lockDone,
-        bookVolumeCount,
-        printOrderCount,
-      })
+      stage.status = this.isStageDone(stage.key, round)
         ? 'done'
         : 'todo';
     }
@@ -392,14 +394,7 @@ export class GenealogyWorkflowService {
         '谱稿初审',
       );
     } else if (resubmittedAt) {
-      const digitize = stages.find((stage) => stage.key === 'digitize');
       const review = stages.find((stage) => stage.key === 'internal_review');
-      if (digitize) {
-        digitize.status = 'done';
-        digitize.returned = false;
-        digitize.return_notice = null;
-        digitize.returned_from_label = null;
-      }
       const reReviewed = await this.hasBioApprovalAfter(clanId, resubmittedAt);
       if (review && !reReviewed) review.status = 'todo';
     }
@@ -558,34 +553,35 @@ export class GenealogyWorkflowService {
   /** 8 个主节点是否已经做完。回流和搁置由调用方改写 status，不在这里计完成。 */
   private isStageDone(
     key: string,
-    ctx: {
-      digitizeDone: boolean;
-      bioReviewedCount: number;
-      crowdsourceNoticeCount: number;
-      smsCount: number;
-      modReqReviewedCount: number;
-      lockDone: boolean;
-      bookVolumeCount: number;
-      printOrderCount: number;
+    round: {
+      hasRound: boolean;
+      betweenRounds: boolean;
+      projectSubmitted: boolean;
+      digitizeConfirmed: boolean;
+      reviewConfirmed: boolean;
+      reviseConfirmed: boolean;
+      noticeCount: number;
+      renderReady: boolean;
+      printReady: boolean;
     },
   ): boolean {
+    if (!round.hasRound && !round.betweenRounds) return false;
+    if (round.betweenRounds) {
+      if (key === 'render') return round.renderReady;
+      if (key === 'print') return round.printReady;
+      return true;
+    }
     switch (key) {
       case 'project':
-        return true;
+        return round.projectSubmitted;
       case 'digitize':
-        return ctx.digitizeDone;
+        return round.digitizeConfirmed;
       case 'internal_review':
-        return ctx.bioReviewedCount > 0;
+        return round.reviewConfirmed;
       case 'errata_notice':
-        return ctx.crowdsourceNoticeCount > 0 || ctx.smsCount > 0;
+        return round.noticeCount > 0;
       case 'errata_revise':
-        return ctx.modReqReviewedCount > 0;
-      case 'lock':
-        return ctx.lockDone;
-      case 'render':
-        return ctx.bookVolumeCount > 0;
-      case 'print':
-        return ctx.printOrderCount > 0;
+        return round.reviseConfirmed;
       default:
         return false;
     }

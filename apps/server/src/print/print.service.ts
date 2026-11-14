@@ -4,9 +4,22 @@ import * as puppeteer from 'puppeteer-core';
 import * as handlebars from 'handlebars';
 import * as fs from 'fs';
 import * as path from 'path';
+import { CepuService } from '../cepu/cepu.service';
 import { CosService } from '../cos/cos.service';
 import { ImageProcessorService } from '../cos/image-processor.service';
+import {
+  GenealogyPreviewParams,
+  preparePreviewEntries,
+  renderGenealogyPreviewDocument,
+} from './genealogy-preview';
 import { v4 as uuidv4 } from 'uuid';
+import type { Browser, Page, PDFOptions } from 'puppeteer-core';
+import {
+  PDF_RENDER_TIMEOUT_MESSAGE,
+  PDF_RENDER_TIMEOUT_MS,
+  renderWithinTimeout,
+  resolvePuppeteerExecutable,
+} from './print-browser';
 
 const prisma = new PrismaClient();
 
@@ -27,6 +40,7 @@ export class PrintService {
   constructor(
     private readonly cosService: CosService,
     private readonly imageProcessor: ImageProcessorService,
+    private readonly cepuService: CepuService,
   ) {}
 
   /**
@@ -46,7 +60,47 @@ export class PrintService {
     throw new Error(`族谱 PDF 模板不存在（尝试: ${candidates.join(' / ')}）`);
   }
 
-  async generateGenealogyPdf(clanId: bigint): Promise<Buffer> {
+  /**
+   * 无 preview 时仍走固定成员表模板（印刷下载 GET /print/genealogy）。
+   * 终审「生成预览」必须传入 preview，按 layout 分发到苏式 / 欧式 / 世系表。
+   */
+  async generateGenealogyPdf(clanId: bigint, preview?: GenealogyPreviewParams): Promise<Buffer> {
+    if (preview) return this.generateLayoutPreviewPdf(clanId, preview);
+    return this.generateFixedTemplatePdf(clanId);
+  }
+
+  private async generateLayoutPreviewPdf(clanId: bigint, preview: GenealogyPreviewParams): Promise<Buffer> {
+    const clan = await prisma.clan.findUnique({
+      where: { id: clanId },
+      select: { id: true, name: true },
+    });
+    if (!clan) throw new Error(`Clan with id ${clanId} not found`);
+
+    const entries = await this.cepuService.generateShilu(clanId, {});
+    let branchPersonIds: Set<string> | undefined;
+    const branch = preview.branch?.trim();
+    if (branch) {
+      const rows = await prisma.person.findMany({
+        where: { clan_id: clanId, deleted_at: null, migration_branch: branch },
+        select: { id: true },
+      });
+      branchPersonIds = new Set(rows.map((row) => row.id.toString()));
+    }
+    const prepared = preparePreviewEntries(entries, preview, branchPersonIds);
+    const shixi = preview.layout === 'shixi_table'
+      ? this.cepuService.renderShixiPreview(prepared, `${clan.name}世系表`)
+      : undefined;
+    const { html, pdf } = renderGenealogyPreviewDocument({
+      clanName: clan.name,
+      entries: prepared,
+      params: preview,
+      shixi,
+    });
+    this.logger.log(`册谱预览 layout=${preview.layout} entries=${prepared.length}`);
+    return this.printHtml(html, pdf);
+  }
+
+  private async generateFixedTemplatePdf(clanId: bigint): Promise<Buffer> {
     const [clan, persons] = await Promise.all([
       prisma.clan.findUnique({
         where: { id: clanId },
@@ -132,21 +186,7 @@ export class PrintService {
       pages,
     });
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    });
-
-    const page = await browser.newPage();
-
-    await page.setContent(html, {
-      waitUntil: 'load',
-    });
-
-    await page.emulateMediaType('print');
-
-    const pdfBuffer = await page.pdf({
+    return this.printHtml(html, {
       format: 'A4',
       printBackground: true,
       margin: {
@@ -156,10 +196,6 @@ export class PrintService {
         left: '20mm',
       },
     });
-
-    await browser.close();
-
-    return Buffer.from(pdfBuffer);
   }
 
   private toTreeNode(person: Person): TreeNode {
@@ -366,25 +402,75 @@ export class PrintService {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outW}" height="${outH}" viewBox="0 0 ${svgW} ${svgH}" style="background:#FBF7EF;">${svgBody}${scaleNote}</svg>`;
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>body{margin:0;}</style></head><body>${svg}</body></html>`;
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    });
-    try {
-      const page = await browser.newPage();
-      await page.setViewport({ width: Math.min(outW, 8000), height: Math.min(outH, 8000) });
-      await page.setContent(html, { waitUntil: 'load' });
-      const pdf = await page.pdf({
+    return this.printHtml(
+      html,
+      {
         width: `${outW}px`,
         height: `${outH}px`,
         printBackground: true,
         margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      },
+      async (page) => {
+        await page.setViewport({ width: Math.min(outW, 8000), height: Math.min(outH, 8000) });
+      },
+    );
+  }
+
+  /**
+   * 启动浏览器并在 60 秒内完成 PDF。pdf() 成功、失败或超时都会关闭 browser。
+   */
+  private async printHtml(
+    html: string,
+    pdfOptions: PDFOptions,
+    prepare?: (page: Page) => Promise<void>,
+  ): Promise<Buffer> {
+    const started = Date.now();
+    const browser = await this.launchBrowser();
+    const remaining = Math.max(1, PDF_RENDER_TIMEOUT_MS - (Date.now() - started));
+    return renderWithinTimeout(browser, () => this.renderPage(browser, html, pdfOptions, prepare), remaining);
+  }
+
+  private async launchBrowser(): Promise<Browser> {
+    const executablePath = await resolvePuppeteerExecutable(process.env, async () => {
+      try {
+        const resolveBundled = (puppeteer as { executablePath?: () => Promise<string> }).executablePath;
+        if (!resolveBundled) return undefined;
+        return (await resolveBundled.call(puppeteer)) || undefined;
+      } catch (error) {
+        this.logger.warn(`解析 puppeteer 自带 Chrome 失败: ${(error as Error)?.message}`);
+        return undefined;
+      }
+    });
+    try {
+      return await puppeteer.launch({
+        headless: true,
+        timeout: PDF_RENDER_TIMEOUT_MS,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        executablePath,
       });
-      return Buffer.from(pdf);
-    } finally {
-      await browser.close();
+    } catch (error) {
+      const named = error as { name?: string; message?: string };
+      if (named?.name === 'TimeoutError' || /timeout/i.test(named?.message ?? '')) {
+        throw new Error('浏览器启动超时（60 秒）');
+      }
+      throw error;
     }
+  }
+
+  private async renderPage(
+    browser: Browser,
+    html: string,
+    pdfOptions: PDFOptions,
+    prepare?: (page: Page) => Promise<void>,
+  ): Promise<Buffer> {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(PDF_RENDER_TIMEOUT_MS);
+    page.setDefaultNavigationTimeout(PDF_RENDER_TIMEOUT_MS);
+    if (prepare) await prepare(page);
+    await page.setContent(html, { waitUntil: 'load', timeout: PDF_RENDER_TIMEOUT_MS });
+    await page.emulateMediaType('print');
+    const pdf = await page.pdf({ ...pdfOptions, timeout: PDF_RENDER_TIMEOUT_MS });
+    return Buffer.from(pdf);
   }
 
   /**

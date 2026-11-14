@@ -24,6 +24,7 @@ interface WorkflowStage {
   label: string
   status: 'done' | 'current' | 'todo' | 'returned' | 'suspended'
   count: number
+  count_label?: string
   badge?: number
   returned?: boolean
   detail: string
@@ -253,7 +254,8 @@ watch(() => route.fullPath, () => load(), { immediate: true })
                 </svg>
                 <span v-else class="wf-num">{{ i + 1 }}</span>
                 <sup v-if="stage.badge" class="wf-dot">{{ stage.badge }}</sup>
-                <span v-if="stage.count > 0" class="wf-count-tag">{{ stage.count }}</span>
+                <span v-if="stage.count_label" class="wf-count-tag">{{ stage.count_label }}</span>
+                <span v-else-if="stage.count > 0" class="wf-count-tag">{{ stage.count }}</span>
               </div>
               <div v-if="i < workflow.stages.length - 1" class="wf-line" :class="{ active: stage.status === 'done' }" />
             </div>
@@ -589,6 +591,7 @@ watch(() => route.fullPath, () => load(), { immediate: true })
   padding: 0 4px;
   border-radius: 8px;
   font-weight: 500;
+  white-space: nowrap;
   box-shadow: 0 0 0 2px #fffdf8;
 }
 

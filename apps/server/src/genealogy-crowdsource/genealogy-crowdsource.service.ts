@@ -5,6 +5,7 @@ import { CreateCrowdsourceNoticeDto } from './dto/create-crowdsource-notice.dto'
 import { UpdateCrowdsourceNoticeDto } from './dto/update-crowdsource-notice.dto';
 import { CrowdsourceSubmissionDto } from './dto/crowdsource-submission.dto';
 import { randomBytes } from 'crypto';
+import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
 
 /**
  * 众包通知文案服务（修谱工作流 notify 阶段）
@@ -18,7 +19,10 @@ import { randomBytes } from 'crypto';
 export class GenealogyCrowdsourceService {
   private readonly logger = new Logger(GenealogyCrowdsourceService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly edition: GenealogyEditionService,
+  ) {}
 
   /**
    * 生成 32 位 url-safe token。
@@ -266,22 +270,25 @@ export class GenealogyCrowdsourceService {
       }
     }
 
-    // 5) 附加信息（xipai / contact_phone / bio）：统一写到 reason，管理员审核时可见
-    const extras: string[] = [];
-    if (dto.xipai?.trim()) extras.push(`字辈：${dto.xipai.trim()}`);
-    if (dto.contact_phone?.trim()) extras.push(`联系电话：${dto.contact_phone.trim()}`);
-    if (dto.bio?.trim()) extras.push(`生平简介：${dto.bio.trim()}`);
-    if (extras.length > 0) {
+    const published = await this.edition.published(clanId);
+    const filedId = published?.id;
+    const extraFields: { field: string; value: string }[] = [];
+    if (dto.xipai?.trim()) extraFields.push({ field: 'generation_char', value: dto.xipai.trim() });
+    if (dto.contact_phone?.trim()) extraFields.push({ field: 'contact_phone', value: dto.contact_phone.trim() });
+    if (dto.bio?.trim()) extraFields.push({ field: 'biography', value: dto.bio.trim() });
+    for (const extra of extraFields) {
       createdRequests.push(
         await this.prisma.personModificationRequest.create({
           data: {
             person_id: personId,
             clan_id: clanId,
             requester_user_id: user.id,
-            field_name: 'extra_info',
+            field_name: extra.field,
             old_value: null,
-            new_value: extras.join('；'),
-            reason: 'H5 众包修改（附加信息）',
+            new_value: extra.value,
+            reason: 'H5 众包修改',
+            target_kind: extra.field === 'biography' ? 'biography' : 'person',
+            filed_edition_id: filedId,
           },
         }),
       );
@@ -289,6 +296,14 @@ export class GenealogyCrowdsourceService {
 
     if (createdRequests.length === 0) {
       throw new BadRequestException('您提交的内容与现有信息一致，无需修改');
+    }
+
+    const draft = await this.edition.draft(clanId);
+    if (draft) {
+      await this.prisma.personModificationRequest.updateMany({
+        where: { id: { in: createdRequests.map((row) => row.id) } },
+        data: { revision_edition_id: draft.id, ...(filedId ? { filed_edition_id: filedId } : {}) },
+      });
     }
 
     // 6) 通知 sent_count +1（族员真实提交视为一次有效触达）

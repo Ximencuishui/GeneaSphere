@@ -157,11 +157,12 @@ export class TreeController {
     @Query('userId') userId?: string,
     @Query('depth') depth?: string,
     @Query('limit') limit?: string,
+    @Query('draft') draft?: string,
   ): Promise<ClanTreeResponse> {
     const clanId = await this.resolveClanId(clanSlug);
     const maxDepth = depth ? parseInt(depth, 10) : 0;
     const nodeLimit = limit ? parseInt(limit, 10) : 0;
-    return await this.treeService.getClanFullTree(clanId, userId, maxDepth, nodeLimit);
+    return await this.treeService.getClanFullTree(clanId, userId, maxDepth, nodeLimit, draft === '1');
   }
 
   /**

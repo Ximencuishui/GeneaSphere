@@ -146,8 +146,9 @@ const menuItems = computed<MenuEntry[]>(() => [
     title: '修谱',
     icon: 'EditPen',
     children: [
+      // 旧谱电子化、PDF 导入管理已作为「新建族谱项目」页内页签，不再单独占左栏
       { title: '新建族谱项目', path: `/zupu/${clanSlug.value}/genealogy/data?tab=new` },
-      { title: '旧谱电子化', path: `/zupu/${clanSlug.value}/genealogy/data?tab=digitize` },
+      { title: '谱稿正文', path: `/zupu/${clanSlug.value}/genealogy/manuscript` },
       { title: '谱稿初审', path: `/zupu/${clanSlug.value}/reviews/bio` },
       { title: '下发族人勘误', path: `/zupu/${clanSlug.value}/genealogy/errata?tab=dispatch` },
       { title: '汇总勘误、修订谱稿', path: `/zupu/${clanSlug.value}/genealogy/errata?tab=revise` },
@@ -238,10 +239,9 @@ const isLeaf = (item: MenuEntry): item is MenuLeaf =>
 const xiupuIndex = (path: string, query: Record<string, unknown>) => {
   const base = `/zupu/${clanSlug.value}`
   if (path === `${base}/genealogy/data`) {
-    return String(query.tab || 'new') === 'new'
-      ? `${base}/genealogy/data?tab=new`
-      : `${base}/genealogy/data?tab=digitize`
+    return `${base}/genealogy/data?tab=new`
   }
+  if (path === `${base}/genealogy/manuscript`) return `${base}/genealogy/manuscript`
   if (path === `${base}/reviews/bio`) return `${base}/reviews/bio`
   if (path === `${base}/genealogy/errata` || path === `${base}/genealogy/crowdsource` || path === `${base}/genealogy/h5-entry`) {
     const tab = String(query.tab || 'dispatch')
@@ -287,16 +287,20 @@ const breadcrumbs = computed(() => {
   const tab = String(route.query.tab || '')
   if (currentPath === `${base}/genealogy/data`) {
     crumbs.push({ title: '修谱' })
-    if (tab === 'new' || !tab) {
-      crumbs.push({ title: '新建族谱项目' })
-    } else if (tab === 'pdf-import') {
-      crumbs.push({ title: '旧谱电子化', path: `${base}/genealogy/data?tab=digitize` })
+    const projectPath = `${base}/genealogy/data?tab=new`
+    if (tab === 'pdf-import') {
+      crumbs.push({ title: '新建族谱项目', path: projectPath })
       crumbs.push({ title: 'PDF导入管理' })
-    } else if (route.query.import === '1') {
-      crumbs.push({ title: '旧谱电子化', path: `${base}/genealogy/data?tab=digitize` })
-      crumbs.push({ title: '上传旧谱' })
+    } else if (tab === 'digitize') {
+      crumbs.push({ title: '新建族谱项目', path: projectPath })
+      if (route.query.import === '1') {
+        crumbs.push({ title: '旧谱电子化', path: `${base}/genealogy/data?tab=digitize` })
+        crumbs.push({ title: '上传旧谱' })
+      } else {
+        crumbs.push({ title: '旧谱电子化' })
+      }
     } else {
-      crumbs.push({ title: '旧谱电子化' })
+      crumbs.push({ title: '新建族谱项目' })
     }
     return crumbs
   }

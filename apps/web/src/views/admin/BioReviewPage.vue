@@ -193,6 +193,16 @@ async function loadStageSuspend() {
   }
 }
 
+async function confirmReview() {
+  try {
+    await axios.post(`/api/genealogy/${clanSlug.value}/edition/confirm`, { stage: 'review' })
+    ElMessage.success('本轮谱稿初审已确认')
+    window.dispatchEvent(new Event('xiupu-workflow-refresh'))
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || '确认失败')
+  }
+}
+
 onMounted(() => {
   clanSlug.value = route.params.slug as string || '1'
   fetchReviews()
@@ -220,6 +230,7 @@ onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', loadS
             <p class="scope-hint">审核人物生平和世系关系。驳回后请回到旧谱电子化修订。</p>
           </div>
           <div class="header-actions">
+            <ElButton @click="confirmReview">确认本轮初审</ElButton>
             <ElButton
               type="success"
               :disabled="!hasSelection || batchOperating"

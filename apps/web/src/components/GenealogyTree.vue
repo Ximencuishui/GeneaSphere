@@ -484,10 +484,10 @@ const fetchTreeData = async (rootId: string = '1', opts?: { limit?: number }) =>
       // [渐进加载 2026-08-20] 首屏传 limit（按屏幕大小计算的卡片上限），
       // 后端只返回「主脉优先 + 层级 BFS」截取的核心子集，payload 与渲染量大幅下降；
       // 「加载完整族谱」时不传 limit → 全量。
-      const response: any = await treeApi.getClanFullTree(
-        props.clanId,
-        opts?.limit ? { limit: opts.limit } : undefined,
-      );
+      const response: any = await treeApi.getClanFullTree(props.clanId, {
+        ...(opts?.limit ? { limit: opts.limit } : {}),
+        ...(route.query.draft === '1' ? { draft: 1 } : {}),
+      });
       // API 完成：进入 parse 阶段，进度条会跳到 30 附近再平滑增长到 60%
       setLoadingStage('parse');
       if (response?.rootNode) {

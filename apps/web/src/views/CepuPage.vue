@@ -19,6 +19,7 @@ import {
   Loading,
 } from '@element-plus/icons-vue';
 import { cepuApi, type BookVolume, type ShiluEntry, type PersonBio } from '@/api/cepu';
+import request from '@/utils/request';
 import EuropeanChartView from '@/components/EuropeanChartView.vue';
 import SuChartView from '@/components/SuChartView.vue';
 import BiographyBook from '@/components/BiographyBook.vue';
@@ -57,6 +58,7 @@ const isAdmin = computed(() => {
 
 // ---------- 状态 ----------
 const volumes = ref<BookVolume[]>([]);
+const publishedReadonly = ref(false);
 const activeVolumeId = ref<string | null>(null);
 const volumeContent = ref<{
   id: string;
@@ -974,7 +976,40 @@ async function saveShiluConfig() {
 }
 
 // ---------- 初始化 ----------
+async function loadEditionState() {
+  try {
+    const body: any = await request.get(`/api/genealogy/${clanId.value}/edition`);
+    const state = body?.data ?? body;
+    publishedReadonly.value = Boolean(state?.published);
+  } catch {
+    publishedReadonly.value = false;
+  }
+}
+
+async function fileErrata() {
+  if (!volumeContent.value) return;
+  try {
+    const { value } = await ElMessageBox.prompt('写下要留到下一轮修谱的意见', '提勘误', {
+      inputType: 'textarea',
+      inputPlaceholder: '例如：谱序第三段的年代应改为嘉靖年间',
+    });
+    const slot = (volumeContent.value as any).catalog_slot;
+    await request.post(`/api/genealogy/${clanId.value}/errata`, {
+      target_kind: slot ? 'volume' : 'person',
+      field_name: slot ? 'content' : 'biography',
+      catalog_slot: slot,
+      new_value: value,
+      reason: value,
+    });
+    ElMessage.success('勘误已入队，下一轮修谱再采纳');
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return;
+    ElMessage.error(err?.response?.data?.message || err?.message || '提交失败');
+  }
+}
+
 onMounted(async () => {
+  await loadEditionState();
   await loadVolumes();
 });
 </script>
@@ -1053,8 +1088,9 @@ onMounted(async () => {
             </el-dropdown-menu>
           </template>
         </el-dropdown>
+        <el-button v-if="isAdmin && publishedReadonly" size="small" @click="fileErrata">提勘误</el-button>
         <el-button
-          v-if="isAdmin"
+          v-if="isAdmin && !publishedReadonly"
           :type="editMode ? 'primary' : 'default'"
           :icon="Edit"
           size="small"
@@ -1074,7 +1110,7 @@ onMounted(async () => {
         </div>
         <div class="book-profile-bar">
           <span class="book-profile-label">谱书复杂度</span>
-          <el-radio-group :model-value="bookProfile" size="small" :disabled="!isAdmin" @change="saveBookProfile">
+          <el-radio-group :model-value="bookProfile" size="small" :disabled="!isAdmin || publishedReadonly" @change="saveBookProfile">
             <el-radio-button value="compact">精简谱</el-radio-button>
             <el-radio-button value="standard">标准宗谱</el-radio-button>
           </el-radio-group>
@@ -1480,7 +1516,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <template v-if="isAdmin">
+          <template v-if="isAdmin && !publishedReadonly">
             <el-button v-if="!bioEditing" :icon="Edit" size="small" @click="bioEditing = true">编辑传记资料</el-button>
             <div v-else class="bio-form">
               <el-input v-model="bioForm.courtesy_name" placeholder="字号" size="small" />

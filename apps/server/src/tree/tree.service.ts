@@ -4,6 +4,7 @@ import { ChildRelationType } from '@prisma/client';
 import { serializeBigInt } from '../common/bigint-serializer';
 import { PedigreeService } from '../pedigree/pedigree.service';
 import { assertPedigreeUnlocked } from '../genealogy-workflow/xiupu-settings';
+import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
 
 export interface TreeNode {
   id: string;
@@ -200,6 +201,7 @@ export class TreeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pedigreeService: PedigreeService,
+    private readonly edition: GenealogyEditionService,
   ) {}
 
   /**
@@ -220,6 +222,7 @@ export class TreeService {
     },
     parent_id?: bigint
   ): Promise<Person> {
+    await this.edition.assertWritable(data.clan_id);
     await assertPedigreeUnlocked(this.prisma, data.clan_id);
     return await this.prisma.$transaction(async (tx) => {
       const person = await tx.person.create({
@@ -742,7 +745,11 @@ export class TreeService {
     userId?: string,
     maxDepth: number = 0,
     limit: number = 0,
+    draft = false,
   ): Promise<ClanTreeResponse> {
+    if (await this.edition.shouldReadSnapshot(clanId, draft)) {
+      return this.edition.buildTree(clanId);
+    }
     const startTime = Date.now();
     console.log(`[TreeService] getClanFullTree start: clanId=${clanId}, maxDepth=${maxDepth}, limit=${limit}`);
 
@@ -1931,6 +1938,7 @@ export class TreeService {
       select: { clan_id: true },
     });
     if (!existing) throw new NotFoundException('人物不存在');
+    await this.edition.assertWritable(existing.clan_id);
     await assertPedigreeUnlocked(this.prisma, existing.clan_id);
     return await this.prisma.$transaction(async (tx) => {
       const person = await tx.person.update({
@@ -2514,6 +2522,7 @@ export class TreeService {
       select: { clan_id: true },
     });
     if (!existing) throw new NotFoundException('人物不存在');
+    await this.edition.assertWritable(existing.clan_id);
     await assertPedigreeUnlocked(this.prisma, existing.clan_id);
     return await this.prisma.$transaction(async (tx) => {
       const subtreeDescendants = await tx.personAncestry.findMany({
