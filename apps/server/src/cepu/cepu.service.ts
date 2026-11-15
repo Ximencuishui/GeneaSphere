@@ -11,6 +11,7 @@ import { catalogCss, renderCatalogBook, renderGenerationIndex, renderPlaceholder
 import { buildBookCatalog, isBiographyVolume, isLadiesVolume, isLineageVolume, type BookProfile, type CatalogEntry } from './book-catalog';
 import { htmlToRules, isFamilyRulesTitle, rulesToHtml } from './clan-rules';
 import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
+import { injectPdfFonts, PUPPETEER_PDF_ARGS } from '../print/pdf-fonts';
 
 /**
  * 册谱服务（《册谱模块需求文档（PRD）》一期核心闭环）
@@ -1014,12 +1015,13 @@ export class CepuService {
 
     const browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: PUPPETEER_PDF_ARGS,
       executablePath: this.findBrowserPath(),
     });
     try {
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: 'load' });
+      await injectPdfFonts(page, html);
       await page.emulateMediaType('print');
       const ouEdition = opts.forceLayout === 'ou' || opts.forceLayout === 'ou_chart';
       const pdf = await page.pdf({

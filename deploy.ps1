@@ -53,27 +53,58 @@ function Upload-Files {
     $tempTar = "$env:TEMP\geneasphere-deploy.tar.gz"
 
     Write-Host "  Packaging project files..."
-    if (Test-Path "$ProjectDir\.git") {
-        git -C $ProjectDir archive --format=tar.gz -o $tempTar HEAD
-    } else {
-        & tar -czf $tempTar `
-            --exclude='node_modules' `
-            --exclude='.git' `
-            --exclude='temp' `
-            --exclude='storage' `
-            --exclude='uploads' `
-            --exclude='*.7z' `
-            --exclude='*.tgz' `
-            --exclude='*.tar.gz' `
-            --exclude='GraphicsMagick-*' `
-            --exclude='install_output.txt' `
-            --exclude='run_pnpm.bat' `
-            --exclude='create-schema.ps1' `
-            -C $ProjectDir .
+    # 始终用 tar 打包：git archive 只包含已提交文件，会漏掉未跟踪的新增文件（如新图片资源）
+    # 只传源码：本地构建产物 / 依赖缓存 / 大二进制一律排除，否则包体过大会被跨境链路掐断
+    & tar -czf $tempTar `
+        --exclude='node_modules' `
+        --exclude='.pnpm-store' `
+        --exclude='.git' `
+        --exclude='videos' `
+        --exclude='temp' `
+        --exclude='tmp' `
+        --exclude='storage' `
+        --exclude='uploads' `
+        --exclude='tests' `
+        --exclude='deploy_bundle' `
+        --exclude='deploy_light' `
+        --exclude='*.7z' `
+        --exclude='*.tgz' `
+        --exclude='*.tar.gz' `
+        --exclude='*.log' `
+        --exclude='*.traineddata' `
+        --exclude='GraphicsMagick-*' `
+        --exclude='install_output.txt' `
+        --exclude='run_pnpm.bat' `
+        --exclude='create-schema.ps1' `
+        --exclude='apps/web/dist' `
+        --exclude='apps/web/dist.new' `
+        --exclude='apps/web/node_modules' `
+        --exclude='apps/server/dist' `
+        -C $ProjectDir .
+
+    $tarMB = [math]::Round((Get-Item $tempTar).Length / 1MB)
+    Write-Host "  Package size: ${tarMB} MB"
+    if ($tarMB -gt 500) {
+        Write-Host "  Package too large (>500MB), aborting" -ForegroundColor Red
+        exit 1
     }
 
     Write-Host "  Uploading to server..."
-    scp -P $SSHPort $tempTar "root@${ServerIP}:${RemoteDir}/deploy.tar.gz"
+    $uploaded = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        scp -P $SSHPort $tempTar "root@${ServerIP}:${RemoteDir}/deploy.tar.gz"
+        if ($LASTEXITCODE -eq 0) {
+            # 校验远端压缩包完整性，避免半截传输被当完整包解压
+            ssh -p $SSHPort "root@$ServerIP" "gzip -t $RemoteDir/deploy.tar.gz"
+            if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
+            Write-Host "  Server archive corrupted, retrying..." -ForegroundColor Yellow
+        }
+        Write-Host "  Upload attempt $attempt failed, retrying..." -ForegroundColor Yellow
+    }
+    if (-not $uploaded) {
+        Write-Host "  Upload failed after 3 attempts, aborting" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "  Extracting..."
     # 解压逻辑放在独立 shell 脚本中（scripts/remote/extract-deploy.sh），
@@ -106,15 +137,27 @@ function Build-Local {
     }
 
     Write-Host "  Generating Prisma Client..."
-    npx prisma generate
+    npx prisma generate --schema=packages/db/prisma/schema.prisma
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Prisma generate failed, aborting" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "  Building server..."
     pnpm --filter server build
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Server build failed, aborting" -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host "  Building web..."
     Set-Location "$ProjectDir\apps\web"
-    $env:NODE_OPTIONS = '--max-old-space-size=1024'
+    $env:NODE_OPTIONS = '--max-old-space-size=3072'
     npx vite build --mode production
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Web build failed (heap OOM?), aborting" -ForegroundColor Red
+        exit 1
+    }
     Set-Location $ProjectDir
 
     Write-Host "  Build done" -ForegroundColor Green

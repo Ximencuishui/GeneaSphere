@@ -20,6 +20,7 @@ import {
   renderWithinTimeout,
   resolvePuppeteerExecutable,
 } from './print-browser';
+import { injectPdfFonts, PUPPETEER_PDF_ARGS } from './pdf-fonts';
 
 const prisma = new PrismaClient();
 
@@ -445,7 +446,7 @@ export class PrintService {
       return await puppeteer.launch({
         headless: true,
         timeout: PDF_RENDER_TIMEOUT_MS,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: PUPPETEER_PDF_ARGS,
         executablePath,
       });
     } catch (error) {
@@ -468,6 +469,7 @@ export class PrintService {
     page.setDefaultNavigationTimeout(PDF_RENDER_TIMEOUT_MS);
     if (prepare) await prepare(page);
     await page.setContent(html, { waitUntil: 'load', timeout: PDF_RENDER_TIMEOUT_MS });
+    await injectPdfFonts(page, html);
     await page.emulateMediaType('print');
     const pdf = await page.pdf({ ...pdfOptions, timeout: PDF_RENDER_TIMEOUT_MS });
     return Buffer.from(pdf);

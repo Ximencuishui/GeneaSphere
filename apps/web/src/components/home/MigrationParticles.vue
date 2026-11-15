@@ -28,7 +28,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import L from 'leaflet';
-import type { SurnameData, ParticleState } from '@/types/home';
+import type { ParticleState } from '@/types/home';
+import {
+  MIGRATION_MAP_VIEW,
+  OCEAN_EXITS,
+  migrationHubs,
+  oceanExitOf,
+  pathLength,
+  pathPointAt,
+  surnames,
+} from './surname-migrations';
 
 const props = defineProps<{
   highlightedSurname: string | null;
@@ -76,120 +85,6 @@ const tileErrored = ref(0);
 const tilesFailed = ref(false);
 let fallbackTimer: number | null = null;
 
-// ==================== 姓氏迁徙数据 ====================
-
-const surnames: SurnameData[] = [
-  {
-    name: '李', color: '#C9A96E',
-    origin: { lng: 104.5, lat: 34.5 },
-    paths: [
-      [{ lng: 104.5, lat: 34.5 }, { lng: 108, lat: 34 }, { lng: 113, lat: 34 }, { lng: 116, lat: 36 }],
-      [{ lng: 104.5, lat: 34.5 }, { lng: 106, lat: 30 }, { lng: 108, lat: 28 }, { lng: 112, lat: 27 }],
-      [{ lng: 104.5, lat: 34.5 }, { lng: 100, lat: 36 }, { lng: 96, lat: 38 }],
-    ],
-    description: '发源于陇西（今甘肃东南部）',
-  },
-  {
-    name: '王', color: '#E8A87C',
-    origin: { lng: 113.5, lat: 35.0 },
-    paths: [
-      [{ lng: 113.5, lat: 35.0 }, { lng: 116, lat: 35 }, { lng: 118, lat: 36 }, { lng: 120, lat: 37 }],
-      [{ lng: 113.5, lat: 35.0 }, { lng: 114, lat: 32 }, { lng: 116, lat: 30 }, { lng: 118, lat: 28 }],
-      [{ lng: 113.5, lat: 35.0 }, { lng: 110, lat: 36 }, { lng: 108, lat: 38 }],
-    ],
-    description: '发源于太原（今山西中部）',
-  },
-  {
-    name: '张', color: '#85C1A9',
-    origin: { lng: 115.5, lat: 36.0 },
-    paths: [
-      [{ lng: 115.5, lat: 36.0 }, { lng: 118, lat: 35 }, { lng: 120, lat: 34 }],
-      [{ lng: 115.5, lat: 36.0 }, { lng: 114, lat: 33 }, { lng: 113, lat: 31 }],
-      [{ lng: 115.5, lat: 36.0 }, { lng: 112, lat: 38 }, { lng: 110, lat: 40 }],
-    ],
-    description: '发源于清河（今河北南部）',
-  },
-  {
-    name: '刘', color: '#7FB3D8',
-    origin: { lng: 112.0, lat: 34.5 },
-    paths: [
-      [{ lng: 112.0, lat: 34.5 }, { lng: 114, lat: 34 }, { lng: 116, lat: 34 }],
-      [{ lng: 112.0, lat: 34.5 }, { lng: 110, lat: 32 }, { lng: 108, lat: 30 }],
-      [{ lng: 112.0, lat: 34.5 }, { lng: 113, lat: 36 }, { lng: 114, lat: 38 }],
-    ],
-    description: '发源于彭城（今江苏徐州）',
-  },
-  {
-    name: '陈', color: '#F0B27A',
-    origin: { lng: 114.7, lat: 33.9 },
-    paths: [
-      [{ lng: 114.7, lat: 33.9 }, { lng: 116, lat: 33 }, { lng: 118, lat: 32 }, { lng: 120, lat: 31 }],
-      [{ lng: 114.7, lat: 33.9 }, { lng: 115, lat: 30 }, { lng: 116, lat: 27 }],
-      [{ lng: 114.7, lat: 33.9 }, { lng: 112, lat: 34 }, { lng: 110, lat: 35 }],
-    ],
-    description: '发源于颍川（今河南许昌）',
-  },
-  {
-    name: '杨', color: '#A3D4C4',
-    origin: { lng: 110.5, lat: 35.5 },
-    paths: [
-      [{ lng: 110.5, lat: 35.5 }, { lng: 112, lat: 34 }, { lng: 114, lat: 33 }],
-      [{ lng: 110.5, lat: 35.5 }, { lng: 108, lat: 34 }, { lng: 106, lat: 33 }],
-      [{ lng: 110.5, lat: 35.5 }, { lng: 113, lat: 37 }, { lng: 115, lat: 38 }],
-    ],
-    description: '发源于弘农（今河南灵宝）',
-  },
-  {
-    name: '赵', color: '#D7A9E4',
-    origin: { lng: 111.5, lat: 36.5 },
-    paths: [
-      [{ lng: 111.5, lat: 36.5 }, { lng: 114, lat: 36 }, { lng: 116, lat: 37 }],
-      [{ lng: 111.5, lat: 36.5 }, { lng: 110, lat: 34 }, { lng: 108, lat: 33 }],
-      [{ lng: 111.5, lat: 36.5 }, { lng: 113, lat: 38 }, { lng: 115, lat: 39 }],
-    ],
-    description: '发源于天水（今甘肃天水）',
-  },
-  {
-    name: '黄', color: '#F5CBA7',
-    origin: { lng: 114.3, lat: 31.0 },
-    paths: [
-      [{ lng: 114.3, lat: 31.0 }, { lng: 116, lat: 30 }, { lng: 118, lat: 28 }],
-      [{ lng: 114.3, lat: 31.0 }, { lng: 112, lat: 30 }, { lng: 110, lat: 29 }],
-      [{ lng: 114.3, lat: 31.0 }, { lng: 115, lat: 33 }, { lng: 116, lat: 35 }],
-    ],
-    description: '发源于江夏（今湖北武汉）',
-  },
-  {
-    name: '周', color: '#A9CCE3',
-    origin: { lng: 108.5, lat: 34.0 },
-    paths: [
-      [{ lng: 108.5, lat: 34.0 }, { lng: 110, lat: 33 }, { lng: 112, lat: 32 }],
-      [{ lng: 108.5, lat: 34.0 }, { lng: 109, lat: 36 }, { lng: 111, lat: 37 }],
-      [{ lng: 108.5, lat: 34.0 }, { lng: 107, lat: 32 }, { lng: 106, lat: 30 }],
-    ],
-    description: '发源于汝南（今河南平舆）',
-  },
-  {
-    name: '吴', color: '#82E0AA',
-    origin: { lng: 119.5, lat: 31.0 },
-    paths: [
-      [{ lng: 119.5, lat: 31.0 }, { lng: 120, lat: 30 }, { lng: 121, lat: 29 }],
-      [{ lng: 119.5, lat: 31.0 }, { lng: 118, lat: 29 }, { lng: 116, lat: 28 }],
-      [{ lng: 119.5, lat: 31.0 }, { lng: 120, lat: 33 }, { lng: 121, lat: 34 }],
-    ],
-    description: '发源于吴郡（今江苏苏州）',
-  },
-];
-
-// 关键迁徙集散地
-const migrationHubs = [
-  { name: '山西洪洞', lng: 111.7, lat: 36.3, desc: '明代移民集散地' },
-  { name: '湖北麻城', lng: 115.0, lat: 31.2, desc: '湖广填四川起点' },
-  { name: '广东南雄', lng: 114.3, lat: 25.1, desc: '珠玑巷移民中转' },
-  { name: '福建宁化', lng: 116.7, lat: 26.3, desc: '客家人中转站' },
-  { name: '山东兖州', lng: 116.8, lat: 35.6, desc: '北方移民枢纽' },
-];
-
 // ==================== 地理投影 ====================
 // 使用 Leaflet 的真实地图投影将经纬度转换为 Canvas 像素坐标
 
@@ -201,68 +96,62 @@ function geoToCanvas(lng: number, lat: number): [number, number] {
 
 function initParticles() {
   particles = [];
-  const totalParticles = 300;
-  const perSurname = Math.floor(totalParticles / surnames.length);
+  const perSurname = 40;
 
   surnames.forEach((surname, si) => {
     for (let i = 0; i < perSurname; i++) {
-      const [ox, oy] = geoToCanvas(surname.origin.lng, surname.origin.lat);
-      const pathIdx = i % surname.paths.length;
-      const path = surname.paths[pathIdx];
-      const progress = Math.random();
-      const pathPos = getPathPosition(path, progress);
-      const [tx, ty] = geoToCanvas(pathPos[0], pathPos[1]);
-
+      const pathIndex = i % surname.paths.length;
+      const len = Math.max(pathLength(surname.paths[pathIndex]), 1);
       particles.push({
-        x: ox + (Math.random() - 0.5) * 20,
-        y: oy + (Math.random() - 0.5) * 20,
-        targetX: tx + (Math.random() - 0.5) * 15,
-        targetY: ty + (Math.random() - 0.5) * 15,
-        speed: 0.002 + Math.random() * 0.005,
-        size: 1.5 + Math.random() * 2.5,
-        alpha: 0.3 + Math.random() * 0.7,
+        x: 0,
+        y: 0,
+        offsetX: (Math.random() - 0.5) * 10,
+        offsetY: (Math.random() - 0.5) * 10,
+        // 按地理长度归一，长途（下南洋、西域）和短途用相近的像素速度
+        speed: (0.055 + Math.random() * 0.04) / len,
+        size: 1.4 + Math.random() * 1.6,
+        alpha: 0.45 + Math.random() * 0.55,
         surnameIndex: si,
-        pathIndex: pathIdx,
+        pathIndex,
         progress: Math.random(),
       });
     }
   });
 }
 
-function getPathPosition(path: { lng: number; lat: number }[], progress: number): [number, number] {
-  if (path.length < 2) return [path[0].lng, path[0].lat];
-  const totalSegments = path.length - 1;
-  const segLen = 1 / totalSegments;
-  const segIdx = Math.min(Math.floor(progress / segLen), totalSegments - 1);
-  const segProgress = (progress - segIdx * segLen) / segLen;
-  const from = path[segIdx];
-  const to = path[segIdx + 1];
-  return [
-    from.lng + (to.lng - from.lng) * segProgress,
-    from.lat + (to.lat - from.lat) * segProgress,
-  ];
+function placeParticle(p: ParticleState) {
+  const path = surnames[p.surnameIndex].paths[p.pathIndex];
+  const pos = pathPointAt(path, p.progress);
+  const [cx, cy] = geoToCanvas(pos.lng, pos.lat);
+  p.x = cx + p.offsetX;
+  p.y = cy + p.offsetY;
 }
 
 // ==================== 绘制函数 ====================
 
 function drawHubs() {
   const c = ctx;
-  if (!c) return;
+  if (!c || !canvasRef.value) return;
+  const w = canvasRef.value.clientWidth;
+  const h = canvasRef.value.clientHeight;
   migrationHubs.forEach((hub) => {
     const [x, y] = geoToCanvas(hub.lng, hub.lat);
+    if (x < -40 || y < -40 || x > w + 40 || y > h + 40) return;
     const pulse = Math.sin(Date.now() / 1500 + hub.lng) * 0.3 + 0.7;
     c.beginPath();
     c.arc(x, y, 4 + pulse * 3, 0, Math.PI * 2);
     c.fillStyle = `rgba(201, 169, 110, ${0.3 + pulse * 0.3})`;
     c.fill();
-    c.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    c.font = '11px "PingFang SC", sans-serif';
-    c.textAlign = 'center';
-    c.fillText(hub.name, x, y - 12);
     c.beginPath();
     c.arc(x, y, 2.5, 0, Math.PI * 2);
     c.fillStyle = 'rgba(201, 169, 110, 0.6)';
     c.fill();
+    // 贴边的地名只留圆点，避免「雅加达」这类标签被裁成半个字
+    if (x < 28 || x > w - 28 || y < 22 || y > h - 8) return;
+    c.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    c.font = '11px "PingFang SC", sans-serif';
+    c.textAlign = 'center';
+    c.fillText(hub.name, x, y - 12);
   });
 }
 
@@ -292,7 +181,7 @@ function drawSurnameOrigins() {
     c.fillStyle = `rgba(255, 255, 255, ${alpha})`;
     c.font = 'bold 13px "PingFang SC", sans-serif';
     c.textAlign = 'center';
-    c.fillText(s.name, x, y + 20);
+    c.fillText(s.name, x + (s.labelOffset?.x ?? 0), y + (s.labelOffset?.y ?? 20));
   });
 }
 
@@ -306,6 +195,26 @@ function drawParticles() {
       props.highlightedSurname === surname.name;
     if (!isHighlighted && props.highlightedSurname !== null) return;
 
+    const path = surname.paths[p.pathIndex];
+    const w = canvasRef.value?.clientWidth ?? 0;
+    const h = canvasRef.value?.clientHeight ?? 0;
+    const edgeDist = Math.min(p.x, p.y, w - p.x, h - p.y);
+    const fade = edgeDist < 56 ? Math.max(0, edgeDist / 56) : 1;
+    if (fade <= 0.02) return;
+
+    const tail = pathPointAt(path, Math.max(0, p.progress - 0.04));
+    const [tx, ty] = geoToCanvas(tail.lng, tail.lat);
+    const tailAlpha = Math.round(0xbb * fade)
+      .toString(16)
+      .padStart(2, '0');
+    c.beginPath();
+    c.moveTo(tx + p.offsetX, ty + p.offsetY);
+    c.lineTo(p.x, p.y);
+    c.strokeStyle = surname.color + tailAlpha;
+    c.lineWidth = 1.6;
+    c.lineCap = 'round';
+    c.stroke();
+
     const dx = mouseX - p.x;
     const dy = mouseY - p.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -315,7 +224,7 @@ function drawParticles() {
     c.arc(p.x, p.y, p.size + glow * 3, 0, Math.PI * 2);
     c.fillStyle =
       surname.color +
-      Math.round(Math.min(1, p.alpha + glow * 0.5) * 180)
+      Math.round(Math.min(1, p.alpha + glow * 0.5) * 220 * fade)
         .toString(16)
         .padStart(2, '0');
     c.fill();
@@ -336,48 +245,108 @@ function updateParticles() {
     if (p.progress > 1) {
       p.progress = 0;
       const surname = surnames[p.surnameIndex];
-      const [ox, oy] = geoToCanvas(surname.origin.lng, surname.origin.lat);
-      p.x = ox + (Math.random() - 0.5) * 20;
-      p.y = oy + (Math.random() - 0.5) * 20;
-      const pathIdx = Math.floor(Math.random() * surname.paths.length);
-      p.pathIndex = pathIdx;
-      const path = surname.paths[pathIdx];
-      const pathPos = getPathPosition(path, 0.3 + Math.random() * 0.6);
-      const [tx, ty] = geoToCanvas(pathPos[0], pathPos[1]);
-      p.targetX = tx + (Math.random() - 0.5) * 15;
-      p.targetY = ty + (Math.random() - 0.5) * 15;
-    } else {
-      const surname = surnames[p.surnameIndex];
-      const path = surname.paths[p.pathIndex];
-      const pos = getPathPosition(path, p.progress);
-      const [cx, cy] = geoToCanvas(pos[0], pos[1]);
-      p.x += (cx - p.x) * 0.02;
-      p.y += (cy - p.y) * 0.02;
+      p.pathIndex = Math.floor(Math.random() * surname.paths.length);
     }
+    placeParticle(p);
   });
+}
+
+function oceanLabelAnchor(path: { lng: number; lat: number }[]): { x: number; y: number } | null {
+  if (!canvasRef.value) return null;
+  const w = canvasRef.value.clientWidth;
+  const h = canvasRef.value.clientHeight;
+  const rect = { l: 56, t: 72, r: w - 56, b: h - 40 };
+  const inside = (p: { x: number; y: number }) =>
+    p.x >= rect.l && p.x <= rect.r && p.y >= rect.t && p.y <= rect.b;
+  const pts = path.map((p) => {
+    const [x, y] = geoToCanvas(p.lng, p.lat);
+    return { x, y };
+  });
+  const last = pts[pts.length - 1];
+  if (!last) return null;
+  if (inside(last)) return { x: last.x, y: last.y - 16 };
+  for (let i = pts.length - 1; i > 0; i--) {
+    if (!inside(pts[i - 1]) || inside(pts[i])) continue;
+    const a = pts[i - 1];
+    const b = pts[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    let u0 = 0;
+    let u1 = 1;
+    const checks: [number, number][] = [
+      [-dx, a.x - rect.l],
+      [dx, rect.r - a.x],
+      [-dy, a.y - rect.t],
+      [dy, rect.b - a.y],
+    ];
+    let clipped = true;
+    for (const [p, q] of checks) {
+      if (Math.abs(p) < 1e-6) {
+        if (q < 0) clipped = false;
+      } else {
+        const t = q / p;
+        if (p < 0) {
+          if (t > u1) clipped = false;
+          else if (t > u0) u0 = t;
+        } else if (t < u0) clipped = false;
+        else if (t < u1) u1 = t;
+      }
+    }
+    if (clipped) return { x: a.x + u1 * dx, y: a.y + u1 * dy };
+  }
+  return null;
+}
+
+function drawOceanExits() {
+  const c = ctx;
+  if (!c || !canvasRef.value) return;
+  const focused = props.highlightedSurname;
+  const w = canvasRef.value.clientWidth;
+  for (const exit of OCEAN_EXITS) {
+    const owners = surnames.filter((s) => s.paths.some((p) => oceanExitOf(p)?.id === exit.id));
+    if (focused && !owners.some((s) => s.name === focused)) continue;
+    const owner =
+      (focused && owners.find((s) => s.name === focused)) ||
+      owners.find((s) => s.name === exit.carrier) ||
+      owners[0];
+    const path = owner?.paths.find((p) => oceanExitOf(p)?.id === exit.id);
+    if (!path) continue;
+    const anchor = oceanLabelAnchor(path);
+    if (!anchor) continue;
+    c.font = '12px "PingFang SC", sans-serif';
+    c.textAlign = anchor.x > w * 0.72 ? 'right' : anchor.x < w * 0.28 ? 'left' : 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = 'rgba(232, 213, 163, 0.92)';
+    c.fillText(exit.label, anchor.x, anchor.y);
+    c.textAlign = 'left';
+    c.textBaseline = 'alphabetic';
+  }
 }
 
 function drawTrails() {
   const c = ctx;
   if (!c) return;
-  particles.forEach((p) => {
-    const surname = surnames[p.surnameIndex];
-    const isHighlighted =
-      props.highlightedSurname === null ||
-      props.highlightedSurname === surname.name;
-    if (!isHighlighted && props.highlightedSurname !== null) return;
-
-    const path = surname.paths[p.pathIndex];
-    c.beginPath();
-    const [sx, sy] = geoToCanvas(path[0].lng, path[0].lat);
-    c.moveTo(sx, sy);
-    for (let i = 1; i < path.length; i++) {
-      const [x, y] = geoToCanvas(path[i].lng, path[i].lat);
-      c.lineTo(x, y);
-    }
-    c.strokeStyle = surname.color + '15';
-    c.lineWidth = 0.5;
-    c.stroke();
+  const focused = props.highlightedSurname;
+  surnames.forEach((surname) => {
+    const isHighlighted = focused === null || focused === surname.name;
+    if (!isHighlighted) return;
+    const selected = focused === surname.name;
+    surname.paths.forEach((path) => {
+      const exit = oceanExitOf(path);
+      if (!focused && exit && exit.carrier !== surname.name) return;
+      c.beginPath();
+      const [sx, sy] = geoToCanvas(path[0].lng, path[0].lat);
+      c.moveTo(sx, sy);
+      for (let i = 1; i < path.length; i++) {
+        const [x, y] = geoToCanvas(path[i].lng, path[i].lat);
+        c.lineTo(x, y);
+      }
+      c.strokeStyle = surname.color + (selected ? 'cc' : '55');
+      c.lineWidth = selected ? 2.2 : 1.15;
+      c.lineJoin = 'round';
+      c.lineCap = 'round';
+      c.stroke();
+    });
   });
 }
 
@@ -389,6 +358,7 @@ function animate() {
 
   drawTrails();
   drawHubs();
+  drawOceanExits();
   drawSurnameOrigins();
   updateParticles();
   drawParticles();
@@ -474,10 +444,10 @@ onMounted(() => {
 
   // 初始化 Leaflet 地图（静态底图，不可交互）
   map = L.map(mapContainer.value, {
-    center: [35, 105],
-    zoom: 4,
-    minZoom: 4,
-    maxZoom: 4,
+    center: MIGRATION_MAP_VIEW.center,
+    zoom: MIGRATION_MAP_VIEW.zoom,
+    minZoom: MIGRATION_MAP_VIEW.zoom,
+    maxZoom: MIGRATION_MAP_VIEW.zoom,
     zoomControl: false,
     attributionControl: false,
     dragging: false,

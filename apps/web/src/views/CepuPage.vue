@@ -17,6 +17,7 @@ import {
   Share,
   Clock,
   Loading,
+  Management,
 } from '@element-plus/icons-vue';
 import { cepuApi, type BookVolume, type ShiluEntry, type PersonBio } from '@/api/cepu';
 import request from '@/utils/request';
@@ -1019,6 +1020,15 @@ onMounted(async () => {
     <!-- 顶部工具栏 -->
     <header class="cepu-header">
       <div class="header-left">
+        <el-tooltip v-if="isAdmin" content="返回管理后台" placement="bottom">
+          <el-button
+            :icon="Management"
+            circle
+            size="small"
+            aria-label="返回管理后台"
+            @click="router.push(`/zupu/${clanId}`)"
+          />
+        </el-tooltip>
         <el-button :icon="ArrowLeft" circle size="small" @click="router.push(`/tree/${clanId}`)" title="返回树谱" />
         <span class="page-title"><el-icon><Reading /></el-icon> 册谱</span>
         <el-tag v-if="isAdmin" size="small" type="warning">修谱管理员</el-tag>

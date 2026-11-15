@@ -6,6 +6,7 @@ import MigrationParticles from '@/components/home/MigrationParticles.vue'
 import SurnameLegend from '@/components/home/SurnameLegend.vue'
 import QuickSearchBar from '@/components/home/QuickSearchBar.vue'
 import DemoRoleModal from '@/components/landing/DemoRoleModal.vue'
+import { surnames as migrationSurnames } from '@/components/home/surname-migrations'
 
 const router = useRouter()
 const demoModalVisible = ref(false)
@@ -13,18 +14,11 @@ const scrollY = ref(0)
 const currentYear = new Date().getFullYear()
 const highlightedSurname = ref<string | null>(null)
 
-const surnames = [
-  { name: '李', color: '#C9A96E', description: '发源于陇西（今甘肃东南部）' },
-  { name: '王', color: '#E8A87C', description: '发源于太原（今山西中部）' },
-  { name: '张', color: '#85C1A9', description: '发源于清河（今河北南部）' },
-  { name: '刘', color: '#7FB3D8', description: '发源于彭城（今江苏徐州）' },
-  { name: '陈', color: '#F0B27A', description: '发源于颍川（今河南许昌）' },
-  { name: '杨', color: '#A3D4C4', description: '发源于弘农（今河南灵宝）' },
-  { name: '赵', color: '#D7A9E4', description: '发源于天水（今甘肃天水）' },
-  { name: '黄', color: '#F5CBA7', description: '发源于江夏（今湖北武汉）' },
-  { name: '周', color: '#A9CCE3', description: '发源于汝南（今河南平舆）' },
-  { name: '吴', color: '#82E0AA', description: '发源于吴郡（今江苏苏州）' },
-]
+const surnames = migrationSurnames.map(({ name, color, description }) => ({
+  name,
+  color,
+  description,
+}))
 
 const handleScroll = () => {
   scrollY.value = window.scrollY
@@ -155,7 +149,7 @@ onUnmounted(() => window.removeEventListener('scroll', handleScroll))
             <svg viewBox="0 0 48 48" width="48" height="48"><circle cx="24" cy="24" r="20" fill="none" stroke="#C9A96E" stroke-width="2"/><path d="M24 10v14l8 8" stroke="#C9A96E" stroke-width="2" fill="none"/></svg>
           </div>
           <h3>空间维度 · 迁徙之路</h3>
-          <p>以姓氏为线索，在中国地图上再现千年迁徙轨迹。从发源地到散居地，每一道光流都是一段家族史诗。</p>
+          <p>以姓氏为线索，再现千年迁徙轨迹。从郡望出发，经华南侨乡散到南洋，并通向北美、澳新与欧洲。</p>
         </div>
         <div class="about-card">
           <div class="about-icon">

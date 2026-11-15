@@ -3,6 +3,9 @@
     <!-- Top: Navigation Bar (fixed; always visible) -->
     <div class="tree-navbar">
       <div class="navbar-left">
+        <el-tooltip v-if="isAdmin" content="返回管理后台" placement="bottom">
+          <el-button :icon="Management" circle size="small" aria-label="返回管理后台" @click="goAdmin" />
+        </el-tooltip>
         <el-tooltip content="返回上一页" placement="bottom">
           <el-button :icon="ArrowLeft" circle size="small" @click="goBack" />
         </el-tooltip>
@@ -373,6 +376,7 @@ import {
   ArrowLeft,
   Tickets,
   HomeFilled,
+  Management,
 } from '@element-plus/icons-vue';
 // 异步加载 GenealogyTree 组件（含 @antv/g6 1MB+ 重库）：
 // 避免在 TreePage chunk 解析时阻塞整条静态依赖链。
@@ -429,6 +433,20 @@ const pageTitle = computed(() => {
   return cached ? `${cached} · 族谱树` : '族谱全景';
 });
 
+/** 家族管理员（OWNER / ADMIN）才显示「返回管理后台」，与 /zupu 路由守卫一致 */
+const isAdmin = computed(() => {
+  const token = localStorage.getItem('geneasphere_token');
+  if (!token) return false;
+  try {
+    const payload = JSON.parse(
+      atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')),
+    );
+    return payload.role === 'OWNER' || payload.role === 'ADMIN';
+  } catch {
+    return false;
+  }
+});
+
 /** 返回上一页：能退则退，不能退则回首页 */
 function goBack() {
   if (window.history.length > 1) {
@@ -441,6 +459,11 @@ function goBack() {
 /** 返回首页（营销首页 LandingPage） */
 function goHome() {
   router.push('/');
+}
+
+/** 返回当前家族的管理后台（家族概况） */
+function goAdmin() {
+  router.push(`/zupu/${clanId.value}`);
 }
 
 // =========== 人物编辑 / 添加亲属 / 删除 / 预览 / 高亮 状态 ===========
