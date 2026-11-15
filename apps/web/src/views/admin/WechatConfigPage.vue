@@ -1,27 +1,56 @@
 <script setup lang="ts">
 /**
- * 家族公众号 - 公众号配置
- * - 展示当前公众号接入状态（基于能力开关 wechat）
- * - 配置家族级别的公众号绑定信息（AppId、白名单、菜单等）
+ * 家族公众号
+ * - 配置页签：接入状态与家族级公众号绑定
+ * - 内容页签：嵌入 WechatContentPage
  * - 仅 Owner/Admin 可见
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useCapabilityStore } from '@/stores/capability'
+import WechatContentPage from './WechatContentPage.vue'
 
 const route = useRoute()
+const router = useRouter()
 const capabilityStore = useCapabilityStore()
+
+const pageTab = ref(route.query.tab === 'content' ? 'content' : 'config')
+const contentMounted = ref(pageTab.value === 'content')
+
+const onPageTabChange = (tab: string | number) => {
+  const next = String(tab)
+  router.replace({
+    path: route.path,
+    query: next === 'config' ? {} : { tab: next },
+  })
+}
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    const next = tab === 'content' ? 'content' : 'config'
+    if (next !== pageTab.value) pageTab.value = next
+    if (next === 'content') contentMounted.value = true
+  },
+)
+
+watch(pageTab, (tab) => {
+  if (tab === 'content') contentMounted.value = true
+})
 
 const clanSlug = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const statusLoading = ref(false)
 
+const secretDraft = ref('')
+
 const config = ref({
   app_id: '',
   app_secret_masked: '',
+  app_secret_set: false,
   token: '',
   encoding_aes_key: '',
   whitelisted_domains: '',
@@ -51,9 +80,8 @@ const fetchConfig = async () => {
     if (res.data?.config) config.value = { ...config.value, ...res.data.config }
     if (res.data?.status) status.value = { ...status.value, ...res.data.status }
   } catch (e: any) {
-    if (e?.response?.status !== 404) {
-      console.warn('加载公众号配置失败：', e?.response?.data?.message || e?.message)
-    }
+    const msg = e?.response?.data?.message
+    ElMessage.error(Array.isArray(msg) ? msg.join('；') : (msg || '加载公众号配置失败'))
   } finally {
     loading.value = false
   }
@@ -66,8 +94,9 @@ const fetchStatus = async () => {
       params: { clanSlug: clanSlug.value },
     })
     if (res.data) status.value = { ...status.value, ...res.data }
-  } catch {
-    // 忽略状态获取失败（能力未开启时属预期）
+  } catch (e: any) {
+    const msg = e?.response?.data?.message
+    ElMessage.error(Array.isArray(msg) ? msg.join('；') : (msg || '加载公众号状态失败'))
   } finally {
     statusLoading.value = false
   }
@@ -80,11 +109,12 @@ const handleSave = async () => {
       clanSlug: clanSlug.value,
       config: {
         ...config.value,
-        // 仅在用户显式输入新 secret 时覆盖后端掩码字段
-        app_secret: config.value.app_secret_masked ? config.value.app_secret_masked : undefined,
+        app_secret: secretDraft.value.trim() || undefined,
+        app_secret_masked: undefined,
       },
     })
-    ElMessage.success('公众号配置已保存')
+    secretDraft.value = ''
+    ElMessage.success('公众号配置已保存。微信未接入时只能保存草稿，启用、校验和推送不会下发。')
     await fetchConfig()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '保存失败')
@@ -156,13 +186,18 @@ watch(
 </script>
 
 <template>
-  <div class="wechat-config-page">
+  <div class="wechat-hub">
+    <div class="hub-header">
+      <h2>家族公众号</h2>
+    </div>
+    <ElTabs v-model="pageTab" @tab-change="onPageTabChange">
+      <ElTabPane label="配置" name="config">
+        <div class="wechat-config-page">
     <ElCard v-loading="loading">
       <template #header>
         <div class="page-header">
-          <h2>公众号配置</h2>
           <ElTag v-if="isMockMode" type="warning" effect="light">
-            当前为 Mock 模式
+            微信未配置，推送不可用
           </ElTag>
           <ElTag v-else type="success" effect="light">
             公众号能力已开通
@@ -177,9 +212,9 @@ watch(
         :closable="false"
         style="margin-bottom: 20px;"
       >
-        <template #title>公众号能力尚未接入真实 Provider</template>
-        配置项可保存，但消息推送、用户鉴权等动作会按 Mock 模式执行，不会真实下发到微信侧。
-        接入真实 Provider 后，本页所有配置将自动生效。
+        <template #title>微信能力尚未配置</template>
+        配置可以保存为草稿。启用、连通性校验和推送会失败，不会发给关注者。
+        接入真实微信凭证之前，不要把本页状态理解成已经推送成功。
       </ElAlert>
 
       <ElForm label-width="180px" class="config-form">
@@ -200,10 +235,10 @@ watch(
 
         <ElFormItem label="AppSecret">
           <ElInput
-            v-model="config.app_secret_masked"
+            v-model="secretDraft"
             type="password"
             show-password
-            placeholder="留空表示不修改，保存后将以掩码回显"
+            :placeholder="config.app_secret_set ? '已保存，留空表示不修改' : '填写后只保存，不会回显'"
             maxlength="64"
           />
         </ElFormItem>
@@ -317,10 +352,24 @@ watch(
         </ElDescriptionsItem>
       </ElDescriptions>
     </ElCard>
+        </div>
+      </ElTabPane>
+      <ElTabPane label="内容" name="content">
+        <WechatContentPage v-if="contentMounted" embedded />
+      </ElTabPane>
+    </ElTabs>
   </div>
 </template>
 
 <style scoped>
+.hub-header {
+  margin-bottom: 16px;
+}
+
+.hub-header h2 {
+  margin: 0;
+}
+
 .wechat-config-page {
   max-width: 960px;
   margin: 0 auto;

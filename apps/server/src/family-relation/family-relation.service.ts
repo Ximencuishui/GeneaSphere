@@ -155,6 +155,29 @@ export class FamilyRelationService {
 
       const now = new Date();
 
+      // 待审期间不改婚姻事实，通过后才落库。
+      if (needsManual) {
+        const change = await tx.familyRelationChange.create({
+          data: {
+            clan_id: person.clan_id,
+            person_id: personId,
+            operator_user_id: userId,
+            change_type: 'marriage',
+            previous_state: previousState,
+            current_state: {
+              marriage_status: dto.current_status,
+              previous_spouse_kept: dto.keep_previous_spouse !== false,
+              applied: false,
+            },
+            privacy_level: dto.keep_previous_spouse !== false ? 'admin' : 'clan',
+            change_reason: dto.change_reason,
+            status: RelationChangeStatus.pending,
+            needs_manual: true,
+          },
+        });
+        return { id: change.id.toString(), status: change.status, needs_manual: true };
+      }
+
       // 如果当前有婚姻记录，先结束它
       if (currentMarriage) {
         let endReason: MarriageEndReason;
@@ -184,6 +207,7 @@ export class FamilyRelationService {
       const currentState = {
         marriage_status: dto.current_status,
         previous_spouse_kept: dto.keep_previous_spouse !== false,
+        applied: true,
       };
 
       // 写入变更记录
@@ -339,6 +363,39 @@ export class FamilyRelationService {
     });
     if (!parent) throw new NotFoundException('父/母不存在');
 
+    const needsManual =
+      dto.child.father_info_missing && parent.gender === 'female';
+
+    if (needsManual) {
+      const change = await this.prisma.familyRelationChange.create({
+        data: {
+          clan_id: parent.clan_id,
+          person_id: parentPersonId,
+          operator_user_id: userId,
+          change_type: 'child',
+          previous_state: { existed: false },
+          current_state: {
+            applied: false,
+            child_name: dto.child.full_name,
+            child_gender: dto.child.gender,
+            birth_date: dto.child.birth_date ?? null,
+            custody: dto.custody,
+            father_info_missing: dto.child.father_info_missing,
+            mother_info_missing: dto.child.mother_info_missing,
+          },
+          privacy_level: 'admin',
+          change_reason: dto.change_reason,
+          status: RelationChangeStatus.pending,
+          needs_manual: true,
+        },
+      });
+      return {
+        child_id: null,
+        change_id: change.id.toString(),
+        needs_manual: true,
+      };
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // 创建子女 Person
       const child = await tx.person.create({
@@ -435,17 +492,15 @@ export class FamilyRelationService {
         }
       }
 
-      // 判断是否需要管理员审核
-      const needsManual =
-        dto.child.father_info_missing && parent.gender === 'female';
-
       const change = await tx.familyRelationChange.create({
         data: {
           clan_id: parent.clan_id,
           person_id: parentPersonId,
           operator_user_id: userId,
           change_type: 'child',
+          target_person_id: child.id,
           current_state: {
+            applied: true,
             child_name: dto.child.full_name,
             child_gender: dto.child.gender,
             custody: dto.custody,
@@ -486,6 +541,45 @@ export class FamilyRelationService {
     if (!child) throw new NotFoundException('子女不存在');
 
     return this.prisma.$transaction(async (tx) => {
+      const otherActive = await tx.childCustodyRecord.count({
+        where: {
+          child_id: childBigInt,
+          effective_to: null,
+          parent_id: { not: parentId },
+        },
+      });
+      const isDisputed = otherActive > 0;
+
+      if (isDisputed) {
+        const change = await tx.familyRelationChange.create({
+          data: {
+            clan_id: child.clan_id,
+            person_id: parentId,
+            operator_user_id: userId,
+            change_type: 'custody',
+            target_person_id: childBigInt,
+            previous_state: { applied: false },
+            current_state: {
+              applied: false,
+              child_name: child.full_name,
+              custody_status: dto.custody_status,
+              is_biological: dto.is_biological ?? true,
+              is_disputed: true,
+            },
+            privacy_level: 'admin',
+            change_reason: dto.change_reason,
+            status: RelationChangeStatus.pending,
+            is_disputed: true,
+            needs_manual: true,
+          },
+        });
+        return {
+          change_id: change.id.toString(),
+          is_disputed: true,
+          needs_manual: true,
+        };
+      }
+
       // 关闭旧抚养记录
       await tx.childCustodyRecord.updateMany({
         where: { child_id: childBigInt, parent_id: parentId, effective_to: null },
@@ -506,32 +600,24 @@ export class FamilyRelationService {
         },
       });
 
-      // 检测争议
-      const isDisputed = await this.validator.detectDispute(childBigInt);
-
-      if (isDisputed) {
-        await tx.childCustodyRecord.updateMany({
-          where: { child_id: childBigInt, effective_to: null },
-          data: { dispute_flag: true },
-        });
-      }
-
       const change = await tx.familyRelationChange.create({
         data: {
           clan_id: child.clan_id,
           person_id: parentId,
           operator_user_id: userId,
           change_type: 'custody',
+          target_person_id: childBigInt,
           current_state: {
+            applied: true,
             child_name: child.full_name,
             custody_status: dto.custody_status,
-            is_disputed: isDisputed,
+            is_disputed: false,
           },
           privacy_level: 'admin',
           change_reason: dto.change_reason,
-          status: isDisputed ? RelationChangeStatus.pending : RelationChangeStatus.auto_approved,
-          is_disputed: isDisputed,
-          needs_manual: isDisputed,
+          status: RelationChangeStatus.auto_approved,
+          is_disputed: false,
+          needs_manual: false,
         },
       });
 

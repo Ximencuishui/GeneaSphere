@@ -1,6 +1,6 @@
 <template>
   <div class="disputes-page">
-    <div class="page-header">
+    <div v-if="!embedded" class="page-header">
       <h2>子女归属争议</h2>
     </div>
 
@@ -39,6 +39,8 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { familyRelationApi } from '@/api/familyRelation'
 
+defineProps<{ embedded?: boolean }>()
+
 const route = useRoute()
 
 const disputes = ref<any[]>([])
@@ -56,8 +58,9 @@ async function fetchData() {
   try {
     const clanSlug = route.params.slug as string
     disputes.value = await familyRelationApi.admin.listDisputes(clanSlug) as any[]
-  } catch (err) {
-    console.error(err)
+  } catch (err: any) {
+    const msg = err?.response?.data?.message
+    ElMessage.error(Array.isArray(msg) ? msg.join('；') : (msg || '争议列表加载失败'))
   } finally {
     loading.value = false
   }
@@ -68,7 +71,10 @@ async function resolve(row: any, custodyStatus: string) {
     await familyRelationApi.admin.resolveDispute(row.id, custodyStatus)
     ElMessage.success('争议已解决')
     await fetchData()
-  } catch { ElMessage.error('操作失败') }
+  } catch (err: any) {
+    const msg = err?.response?.data?.message
+    ElMessage.error(typeof msg === 'string' && msg ? msg : '操作失败')
+  }
 }
 
 onMounted(fetchData)

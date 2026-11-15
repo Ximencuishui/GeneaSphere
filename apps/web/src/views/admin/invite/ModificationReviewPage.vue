@@ -1,7 +1,7 @@
 <template>
-  <div class="page">
+  <div class="page" :class="{ 'is-embedded': embedded }">
     <div class="page-header">
-      <h2>信息修改审核</h2>
+      <h2 v-if="!embedded">信息修改审核</h2>
       <div>
         <el-select v-model="status" placeholder="状态" clearable style="width: 160px;" @change="fetchList">
           <el-option label="PENDING" value="PENDING" />
@@ -53,8 +53,10 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+defineProps<{ embedded?: boolean }>()
+
 const route = useRoute()
-// 家族 slug 取自路由参数 /zupu/:slug/invite/reviews
+// 家族 slug 取自当前管理后台路由 /zupu/:slug/...（嵌入入族核验时同样可读到）
 const clanSlug = route.params.slug as string
 
 const list = ref<any[]>([])
@@ -123,5 +125,6 @@ onMounted(fetchList)
 
 <style scoped>
 .page { padding: 16px; }
+.page.is-embedded { padding: 0; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 </style>

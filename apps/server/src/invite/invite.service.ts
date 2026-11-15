@@ -66,6 +66,11 @@ export class InviteService {
   // ==================== 邀请二维码（管理端） ====================
 
   async createInviteQrcode(clanId: bigint, creatorId: string, expireDays = 7) {
+    const days = expireDays ?? 7;
+    if (!Number.isInteger(days) || days < 1 || days > 30) {
+      throw new BadRequestException('邀请二维码有效期须在 1 到 30 天之间');
+    }
+    expireDays = days;
     const code = this.generateUniqueCode(clanId);
     const expireAt = new Date(Date.now() + expireDays * 24 * 60 * 60 * 1000);
     const created = await this.prisma.inviteQrcode.create({

@@ -32,7 +32,7 @@ export class ReviewsController {
     @Query('status') status = 'PENDING',
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -286,7 +286,8 @@ export class ReviewsController {
 
     // 按 clan_id 分组进行权限校验
     const clanIds = [...new Set(reviews.map((r) => r.media.clan_id))];
-    for (const clanId of clanIds) {
+    for (const clanId of clanIds) {
+      await this.adminService.requireAdmin(clanId, userId);
     }
 
     // 批量更新
@@ -365,7 +366,8 @@ export class ReviewsController {
     }
 
     const clanIds = [...new Set(reviews.map((r) => r.media.clan_id))];
-    for (const clanId of clanIds) {
+    for (const clanId of clanIds) {
+      await this.adminService.requireAdmin(clanId, userId);
     }
 
     const now = new Date();
@@ -426,7 +428,7 @@ export class ReviewsController {
     @Query('status') status = 'PENDING',
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -497,15 +499,37 @@ export class ReviewsController {
     }
 
     await this.adminService.requireAdmin(review.person.clan_id, userId);
+    if (review.status !== ReviewStatus.PENDING) {
+      throw new BadRequestException('只能审核待审生平');
+    }
 
-    const updated = await this.prisma.bioReview.update({
-      where: { id: reviewId },
-      data: {
-        status: ReviewStatus.APPROVED,
-        reviewer_id: userId,
-        reviewed_at: new Date(),
-      },
+    const written = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.bioReview.updateMany({
+        where: { id: reviewId, status: ReviewStatus.PENDING },
+        data: {
+          status: ReviewStatus.APPROVED,
+          reviewer_id: userId,
+          reviewed_at: new Date(),
+        },
+      });
+      if (updated.count !== 1) {
+        throw new BadRequestException('只能审核待审生平');
+      }
+      await tx.personBio.upsert({
+        where: { person_id: review.person_id },
+        create: { person_id: review.person_id, biography: review.content },
+        update: { biography: review.content },
+      });
+      return updated;
     });
+
+    await this.notificationService.notifyBioReview({
+      authorId: review.author_id,
+      clanId: review.person.clan_id,
+      personId: review.person_id.toString(),
+      title: review.title,
+      approved: true,
+    }).catch((err) => console.error('Failed to send notification:', err));
 
     await this.adminService.logAction({
       clanId: review.person.clan_id,
@@ -515,7 +539,7 @@ export class ReviewsController {
       targetId: review.person_id.toString(),
     });
 
-    return { message: 'Biography approved successfully', status: updated.status };
+    return { message: 'Biography approved successfully', status: ReviewStatus.APPROVED, count: written.count };
   }
 
   /**
@@ -545,13 +569,16 @@ export class ReviewsController {
     }
 
     await this.adminService.requireAdmin(review.person.clan_id, userId);
+    if (review.status !== ReviewStatus.PENDING) {
+      throw new BadRequestException('只能审核待审生平');
+    }
 
     const rejectReason = body.custom_reason
       ? `${body.reason}: ${body.custom_reason}`
       : body.reason;
 
-    const updated = await this.prisma.bioReview.update({
-      where: { id: reviewId },
+    const updated = await this.prisma.bioReview.updateMany({
+      where: { id: reviewId, status: ReviewStatus.PENDING },
       data: {
         status: ReviewStatus.REJECTED,
         reject_reason: rejectReason,
@@ -559,6 +586,9 @@ export class ReviewsController {
         reviewed_at: new Date(),
       },
     });
+    if (updated.count !== 1) {
+      throw new BadRequestException('只能审核待审生平');
+    }
 
     // 发送通知给作者
     await this.notificationService.notifyBioReview({
@@ -579,7 +609,7 @@ export class ReviewsController {
       details: rejectReason,
     });
 
-    return { message: 'Biography rejected successfully', status: updated.status };
+    return { message: 'Biography rejected successfully', status: ReviewStatus.REJECTED };
   }
 
   /**
@@ -600,36 +630,48 @@ export class ReviewsController {
     const reviewIds = body.reviewIds.map((id) => BigInt(id));
 
     const reviews = await this.prisma.bioReview.findMany({
-      where: {
-        id: { in: reviewIds },
-        status: ReviewStatus.PENDING,
-      },
+      where: { id: { in: reviewIds } },
       include: { person: true },
     });
 
-    if (reviews.length === 0) {
-      throw new NotFoundException('No pending reviews found');
+    if (reviews.length !== reviewIds.length) {
+      throw new NotFoundException('部分生平不存在');
     }
 
-    const clanIds = [...new Set(reviews.map((r) => r.person.clan_id))];
-    for (const clanId of clanIds) {
+    for (const review of reviews) {
+      await this.adminService.requireAdmin(review.person.clan_id, userId);
+    }
+
+    const pending = reviews.filter((review) => review.status === ReviewStatus.PENDING);
+    if (pending.length === 0) {
+      throw new BadRequestException('没有仍处于待审的生平');
     }
 
     const now = new Date();
-    const result = await this.prisma.bioReview.updateMany({
-      where: {
-        id: { in: reviews.map((r) => r.id) },
-        status: ReviewStatus.PENDING,
-      },
-      data: {
-        status: ReviewStatus.APPROVED,
-        reviewer_id: userId,
-        reviewed_at: now,
-      },
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.bioReview.updateMany({
+        where: {
+          id: { in: pending.map((r) => r.id) },
+          status: ReviewStatus.PENDING,
+        },
+        data: {
+          status: ReviewStatus.APPROVED,
+          reviewer_id: userId,
+          reviewed_at: now,
+        },
+      });
+      for (const review of pending) {
+        await tx.personBio.upsert({
+          where: { person_id: review.person_id },
+          create: { person_id: review.person_id, biography: review.content },
+          update: { biography: review.content },
+        });
+      }
+      return updated;
     });
 
     await Promise.all(
-      reviews.map(async (review) => {
+      pending.map(async (review) => {
         await this.notificationService
           .notifyBioReview({
             authorId: review.author_id,
@@ -646,7 +688,7 @@ export class ReviewsController {
           action: 'BATCH_APPROVE_BIO',
           targetType: 'Person',
           targetId: review.person_id.toString(),
-          details: `Batch approved with ${reviews.length} items`,
+          details: `Batch approved with ${pending.length} items`,
         });
       }),
     );
@@ -678,25 +720,27 @@ export class ReviewsController {
     const reviewIds = body.reviewIds.map((id) => BigInt(id));
 
     const reviews = await this.prisma.bioReview.findMany({
-      where: {
-        id: { in: reviewIds },
-        status: ReviewStatus.PENDING,
-      },
+      where: { id: { in: reviewIds } },
       include: { person: true },
     });
 
-    if (reviews.length === 0) {
-      throw new NotFoundException('No pending reviews found');
+    if (reviews.length !== reviewIds.length) {
+      throw new NotFoundException('部分生平不存在');
     }
 
-    const clanIds = [...new Set(reviews.map((r) => r.person.clan_id))];
-    for (const clanId of clanIds) {
+    for (const review of reviews) {
+      await this.adminService.requireAdmin(review.person.clan_id, userId);
+    }
+
+    const pending = reviews.filter((review) => review.status === ReviewStatus.PENDING);
+    if (pending.length === 0) {
+      throw new BadRequestException('没有仍处于待审的生平');
     }
 
     const now = new Date();
     const result = await this.prisma.bioReview.updateMany({
       where: {
-        id: { in: reviews.map((r) => r.id) },
+        id: { in: pending.map((r) => r.id) },
         status: ReviewStatus.PENDING,
       },
       data: {
@@ -708,7 +752,7 @@ export class ReviewsController {
     });
 
     await Promise.all(
-      reviews.map(async (review) => {
+      pending.map(async (review) => {
         await this.notificationService
           .notifyBioReview({
             authorId: review.author_id,

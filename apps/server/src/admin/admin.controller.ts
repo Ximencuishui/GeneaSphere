@@ -63,9 +63,8 @@ export class AdminController {
           { title: '字辈管理', path: '/zupu/:slug/settings/xipai' },
           // 原【家族信息】已合并到【家族概况】（页面右上角设置图标打开弹窗）
           { title: '云存储', path: '/zupu/:slug/settings/storage' },
-          // 家族公众号（原顶级分组，已合并到【家族管理】下）
-          { title: '公众号配置', path: '/zupu/:slug/wechat/config' },
-          { title: '公众号内容', path: '/zupu/:slug/wechat/content' },
+          // 家族公众号：配置与内容已并为页签，主入口为配置页（?tab=content 为内容）
+          { title: '家族公众号', path: '/zupu/:slug/wechat/config' },
         ],
       },
       {

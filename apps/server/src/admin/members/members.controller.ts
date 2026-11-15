@@ -1,9 +1,11 @@
-import { Controller, Get, Patch, Delete, Body, Param, Query, UseGuards, Request, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Patch, Delete, Body, Param, Query, UseGuards, Request, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
 import { Role } from '@prisma/client';
+
+const MEMBER_ROLES: Role[] = [Role.OWNER, Role.ADMIN, Role.EDITOR, Role.VIEWER];
 
 @ApiTags('admin/members')
 @Controller('api/admin/members')
@@ -17,6 +19,7 @@ export class MembersController {
 
   /**
    * 获取成员列表（分页+筛选）
+   * ClanMember 没有世代字段，不接受 generation 过滤。
    */
   @Get()
   @ApiOperation({ summary: 'Get member list with pagination and filters' })
@@ -26,68 +29,70 @@ export class MembersController {
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('role') role?: string,
-    @Query('generation') generationStr?: string,
     @Query('keyword') keyword?: string,
   ) {
     const userId = req.user.userId;
     const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
     const skip = (page - 1) * pageSize;
 
-    // 构建查询条件
     const where: any = { clan_id: clanId };
-
-    if (role) {
-      const memberRoles = await this.prisma.clanMember.findMany({
-        where: { clan_id: clanId, role: role as Role },
-        select: { user_id: true },
-      });
-      // 还需要包含 Owner (clan.admin_user_id)
-      const clan = await this.prisma.clan.findUnique({
-        where: { id: clanId },
-        select: { admin_user_id: true },
-      });
+    if (role && MEMBER_ROLES.includes(role as Role)) {
+      where.role = role as Role;
+    }
+    const kw = keyword?.trim();
+    if (kw) {
+      where.OR = [
+        { user: { phone: { contains: kw } } },
+        { user: { nickname: { contains: kw } } },
+        {
+          user: {
+            person_links: {
+              some: {
+                person: { clan_id: clanId, full_name: { contains: kw } },
+              },
+            },
+          },
+        },
+      ];
     }
 
-    // 获取成员列表（通过 clanMember 表）
     const [members, total] = await Promise.all([
       this.prisma.clanMember.findMany({
-        where: { clan_id: clanId },
+        where,
         include: {
-          user: { select: { id: true, phone: true } },
+          user: {
+            select: {
+              id: true,
+              phone: true,
+              nickname: true,
+              person_links: {
+                where: { relation_role: 'self', person: { clan_id: clanId } },
+                select: { person: { select: { full_name: true } } },
+                take: 1,
+              },
+            },
+          },
         },
         orderBy: { joined_at: 'desc' },
         skip,
         take: pageSize,
       }),
-      this.prisma.clanMember.count({
-        where: { clan_id: clanId },
-      }),
+      this.prisma.clanMember.count({ where }),
     ]);
 
-    // 获取每个成员的人员信息
-    const memberDetails = await Promise.all(
-      members.map(async (m) => {
-        const person = await this.prisma.person.findFirst({
-          where: { clan_id: clanId },
-          // 假设可以通过 user_id 关联（需要扩展 schema）
-        });
-
-        return {
-          id: m.id.toString(),
-          user_id: m.user_id,
-          phone: m.user.phone,
-          role: m.role,
-          joined_at: m.joined_at,
-        };
-      })
-    );
-
     return {
-      data: memberDetails,
+      data: members.map((m) => ({
+        id: m.id.toString(),
+        user_id: m.user_id,
+        phone: m.user.phone,
+        nickname: m.user.nickname,
+        full_name: m.user.person_links[0]?.person.full_name ?? null,
+        role: m.role,
+        joined_at: m.joined_at,
+      })),
       pagination: {
         page,
         page_size: pageSize,
@@ -105,7 +110,7 @@ export class MembersController {
   async updateRole(
     @Request() req,
     @Param('id') memberIdStr: string,
-    @Body() body: { role: string; password?: string },
+    @Body() body: { role: string },
   ) {
     const userId = req.user.userId;
     const memberId = BigInt(memberIdStr);
@@ -120,7 +125,14 @@ export class MembersController {
 
     await this.adminService.requireOwner(member.clan_id, userId);
 
-    // 检查是否是最后一个 Admin
+    if (member.role === Role.OWNER) {
+      throw new BadRequestException('不能直接修改家族主人的角色，请先转让所有权');
+    }
+
+    if (!MEMBER_ROLES.includes(body.role as Role) || body.role === Role.OWNER) {
+      throw new BadRequestException('无效的角色');
+    }
+
     if (body.role !== 'ADMIN' && member.role === 'ADMIN') {
       const adminCount = await this.prisma.clanMember.count({
         where: { clan_id: member.clan_id, role: 'ADMIN' },
@@ -148,7 +160,7 @@ export class MembersController {
   }
 
   /**
-   * 转让 Owner 权限
+   * 转让 Owner 权限。仅当前家族主人可操作。
    */
   @Patch('transfer-ownership')
   @ApiOperation({ summary: 'Transfer clan ownership to another member' })
@@ -157,12 +169,12 @@ export class MembersController {
     @Body() body: { targetUserId: string; clanSlug: string },
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireOwnerBySlug(body.clanSlug, userId);
 
-    // 仅当前 Owner 可转让
+    if (!body.targetUserId || body.targetUserId === userId) {
+      throw new BadRequestException('请指定本家族的其他成员');
+    }
 
-
-    // 检查目标用户是否已是该家族的成员
     const targetMember = await this.prisma.clanMember.findUnique({
       where: {
         clan_id_user_id: {
@@ -176,9 +188,7 @@ export class MembersController {
       throw new NotFoundException('Target user is not a member of this clan');
     }
 
-    // 执行转让：新 Owner 设为 OWNER，原 Owner 降为 ADMIN
     await this.prisma.$transaction([
-      // 新 Owner
       this.prisma.clanMember.update({
         where: {
           clan_id_user_id: {
@@ -188,7 +198,6 @@ export class MembersController {
         },
         data: { role: Role.OWNER },
       }),
-      // 原 Owner 降为 ADMIN
       this.prisma.clanMember.update({
         where: {
           clan_id_user_id: {
@@ -197,6 +206,10 @@ export class MembersController {
           },
         },
         data: { role: Role.ADMIN },
+      }),
+      this.prisma.clan.update({
+        where: { id: clanId },
+        data: { admin_user_id: body.targetUserId },
       }),
     ]);
 
@@ -214,6 +227,8 @@ export class MembersController {
 
   /**
    * 移除成员（从家族中删除）
+   * 与族谱人物的关联只认 PersonUserLink，不根据手机号猜测姓名。
+   * 命中关联且该人物仍有子女时拒绝移除，不改动血缘数据。
    */
   @Delete(':id')
   @ApiOperation({ summary: 'Remove member from clan' })
@@ -237,17 +252,19 @@ export class MembersController {
 
     await this.adminService.requireAdmin(member.clan_id, userId);
 
-    // 防护 1: 禁止自我移除（防止管理员误操作把自己从家族中删除）
     if (member.user_id === userId) {
       throw new BadRequestException('不能移除自己，请联系其他管理员处理');
     }
 
-    // 防护 2: 防止移除最后一个管理员/所有者（家族无主化保护）
-    if (member.role === 'OWNER' || member.role === 'ADMIN') {
+    if (member.role === Role.OWNER) {
+      throw new BadRequestException('不能移除家族主人，请先转让所有权');
+    }
+
+    if (member.role === Role.ADMIN) {
       const adminCount = await this.prisma.clanMember.count({
         where: {
           clan_id: member.clan_id,
-          role: { in: ['OWNER', 'ADMIN'] },
+          role: { in: [Role.OWNER, Role.ADMIN] },
         },
       });
       if (adminCount <= 1) {
@@ -257,51 +274,28 @@ export class MembersController {
       }
     }
 
-    // 检查该成员是否关联到本家族中拥有子女的人员记录。
-    // 由于 schema 中 person 未直接关联 user_id，采用通过 phone 后缀匹配姓名等
-    // 作为辅助查找途径。如未来 schema 补充 user_id 字段，可直接使用精确查询。
-    const userPhone = member.user.phone;
-
-    // 在 FamilyUnit 中查找作为丈夫/妻子且有子女的人员名与该成员手机号后 4 位匹配的记录
-    const familiesWithChildren = await this.prisma.familyUnit.findMany({
+    const links = await this.prisma.personUserLink.findMany({
       where: {
-        clan_id: member.clan_id,
-        children: { some: {} },
+        user_id: member.user_id,
+        person: { clan_id: member.clan_id },
       },
-      include: {
-        husband: { select: { id: true, full_name: true } },
-        wife: { select: { id: true, full_name: true } },
-        children: { select: { child_id: true } },
-      },
+      select: { person_id: true },
     });
-
-    const blockingRelations: { personId: string; personName: string; childCount: number }[] = [];
-    for (const family of familiesWithChildren) {
-      const candidates = [family.husband, family.wife].filter(Boolean) as Array<{
-        id: bigint;
-        full_name: string;
-      }>;
-      for (const person of candidates) {
-        // 简化关联：会员手机号末 4 位出现于姓名中，或名称与账号匹配
-        if (
-          person.full_name.includes(userPhone.slice(-4)) ||
-          userPhone.includes(person.full_name)
-        ) {
-          blockingRelations.push({
-            personId: person.id.toString(),
-            personName: person.full_name,
-            childCount: family.children.length,
-          });
-        }
+    if (links.length > 0) {
+      const personIds = links.map((link) => link.person_id);
+      const families = await this.prisma.familyUnit.findMany({
+        where: {
+          clan_id: member.clan_id,
+          children: { some: {} },
+          OR: [{ husband_id: { in: personIds } }, { wife_id: { in: personIds } }],
+        },
+        select: { id: true },
+      });
+      if (families.length > 0) {
+        throw new BadRequestException(
+          '该成员已通过人物关联挂到仍有子女的族谱人物，请先调整家庭关系后再移除。本次不会改动族谱血缘。',
+        );
       }
-    }
-
-    if (blockingRelations.length > 0) {
-      throw new BadRequestException(
-        `该成员关联到本家族中拥有子女的人员记录，无法直接移除。请先转移子女关系。关联人员：${blockingRelations
-          .map((r) => `${r.personName}（${r.childCount} 名子女）`)
-          .join('、')}`,
-      );
     }
 
     await this.prisma.clanMember.delete({
@@ -314,7 +308,7 @@ export class MembersController {
       action: 'REMOVE_MEMBER',
       targetType: 'ClanMember',
       targetId: memberIdStr,
-      details: `Removed member phone=${userPhone}`,
+      details: `Removed member user=${member.user_id}`,
     });
 
     return { message: 'Member removed successfully' };

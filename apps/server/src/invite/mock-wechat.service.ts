@@ -33,19 +33,13 @@ export class MockWechatService extends WechatService {
     };
   }
 
-  async exchangeCode(
-    code: string,
-    hints?: { mock_phone?: string; mock_nickname?: string },
-  ): Promise<WxUserProfile> {
-    // 基于 code 哈希生成稳定 openid，便于回放
+  async exchangeCode(code: string): Promise<WxUserProfile> {
     const openid = this.hashCodeToOpenid(code);
-    const nickname = hints?.mock_nickname || `微信用户${openid.slice(-4)}`;
     return {
       openid,
       unionid: undefined,
-      nickname,
+      nickname: `微信用户${openid.slice(-4)}`,
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${openid}`,
-      phone: hints?.mock_phone,
     };
   }
 

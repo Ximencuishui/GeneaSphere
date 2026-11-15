@@ -33,14 +33,12 @@ const onSearchClear = () => {
 
 // 转让 Owner 对话框
 const transferDialogVisible = ref(false)
-const transferTargetPhone = ref('')
-const transferConfirmPassword = ref('')
+const transferTargetUserId = ref('')
 
 // 降级二次确认对话框
 const demoteDialogVisible = ref(false)
 const demoteMember = ref<any>(null)
 const demoteNewRole = ref('')
-const demotePassword = ref('')
 
 const fetchMembers = async () => {
   loading.value = true
@@ -56,24 +54,33 @@ const fetchMembers = async () => {
     })
     members.value = res.data.data
     total.value = res.data.pagination.total
-  } catch (error) {
-    console.error('Failed to fetch members:', error)
+  } catch (error: any) {
+    const msg = error?.response?.data?.message
+    ElMessage.error(Array.isArray(msg) ? msg.join('；') : (msg || '族员列表加载失败'))
   } finally {
     loading.value = false
   }
 }
 
-const currentUserRole = computed(() => {
-  // 从 localStorage 的 JWT token 中解析角色
+const currentUserId = computed(() => {
   try {
     const token = localStorage.getItem('geneasphere_token')
     if (!token) return ''
     const payload = JSON.parse(atob(token.split('.')[1]))
-    return payload.role || ''
+    return payload.sub || payload.userId || ''
   } catch {
     return ''
   }
 })
+
+const currentUserRole = computed(() => {
+  const me = members.value.find((member) => member.user_id === currentUserId.value)
+  return me?.role || ''
+})
+
+const transferCandidates = computed(() =>
+  members.value.filter((member) => member.user_id && member.user_id !== currentUserId.value && member.role !== 'OWNER'),
+)
 
 // 角色修改（含降级二次确认）
 const handleRoleChange = async (member: any, newRole: string) => {
@@ -81,7 +88,6 @@ const handleRoleChange = async (member: any, newRole: string) => {
   if ((member.role === 'ADMIN' || member.role === 'OWNER') && (newRole === 'EDITOR' || newRole === 'VIEWER')) {
     demoteMember.value = member
     demoteNewRole.value = newRole
-    demotePassword.value = ''
     demoteDialogVisible.value = true
     return
   }
@@ -103,14 +109,9 @@ const handleRoleChange = async (member: any, newRole: string) => {
 }
 
 const confirmDemote = async () => {
-  if (!demotePassword.value) {
-    ElMessage.warning('请输入密码确认')
-    return
-  }
   try {
     await axios.patch(`/api/admin/members/${demoteMember.value.id}/role`, {
       role: demoteNewRole.value,
-      password: demotePassword.value,
     })
     ElMessage.success('角色修改成功')
     demoteDialogVisible.value = false
@@ -122,20 +123,18 @@ const confirmDemote = async () => {
 
 // 转让 Owner
 const openTransferDialog = () => {
-  transferTargetPhone.value = ''
-  transferConfirmPassword.value = ''
+  transferTargetUserId.value = ''
   transferDialogVisible.value = true
 }
 
 const confirmTransferOwnership = async () => {
-  if (!transferTargetPhone.value || !transferConfirmPassword.value) {
-    ElMessage.warning('请填写所有必填项')
+  if (!transferTargetUserId.value) {
+    ElMessage.warning('请选择要转让给的族员')
     return
   }
   try {
     await axios.patch('/api/admin/members/transfer-ownership', {
-      targetUserId: transferTargetPhone.value,
-      password: transferConfirmPassword.value,
+      targetUserId: transferTargetUserId.value,
       clanSlug: clanSlug.value,
     })
     ElMessage.success('所有权已转让')
@@ -265,6 +264,9 @@ onMounted(() => {
           @selection-change="handleSelectionChange"
         >
           <ElTableColumn type="selection" width="50" :selectable="(row: any) => row.role !== 'OWNER'" />
+          <ElTableColumn prop="full_name" label="姓名" width="140">
+            <template #default="{ row }">{{ row.full_name || row.nickname || '—' }}</template>
+          </ElTableColumn>
           <ElTableColumn prop="phone" label="手机号" />
           <ElTableColumn prop="role" label="角色" width="150">
             <template #default="{ row }">
@@ -373,11 +375,15 @@ onMounted(() => {
     <!-- 转让所有权对话框 -->
     <ElDialog v-model="transferDialogVisible" title="转让家族所有权" width="450px" :close-on-click-modal="false">
       <ElForm label-width="100px">
-        <ElFormItem label="新 Owner ID">
-          <ElInput v-model="transferTargetPhone" placeholder="请输入目标用户的 ID" />
-        </ElFormItem>
-        <ElFormItem label="确认密码">
-          <ElInput v-model="transferConfirmPassword" type="password" placeholder="请输入您的密码以确认" />
+        <ElFormItem label="新主人">
+          <ElSelect v-model="transferTargetUserId" placeholder="选择本家族成员" filterable style="width: 100%;">
+            <ElOption
+              v-for="member in transferCandidates"
+              :key="member.user_id"
+              :label="`${member.full_name || member.nickname || member.phone}（${member.role}）`"
+              :value="member.user_id"
+            />
+          </ElSelect>
         </ElFormItem>
       </ElForm>
       <ElAlert type="error" show-icon style="margin-bottom: 12px;">
@@ -393,11 +399,6 @@ onMounted(() => {
     <!-- 降级二次确认对话框 -->
     <ElDialog v-model="demoteDialogVisible" title="敏感操作 - 需要二次确认" width="420px" :close-on-click-modal="false">
       <p>您正在将 <strong>{{ demoteMember?.phone }}</strong> 从 <ElTag type="warning">{{ demoteMember?.role }}</ElTag> 降级为 <ElTag type="info">{{ demoteNewRole }}</ElTag></p>
-      <ElForm label-width="100px" style="margin-top: 16px;">
-        <ElFormItem label="管理员密码">
-          <ElInput v-model="demotePassword" type="password" placeholder="请输入您的密码以确认" />
-        </ElFormItem>
-      </ElForm>
       <template #footer>
         <ElButton @click="demoteDialogVisible = false">取消</ElButton>
         <ElButton type="danger" @click="confirmDemote">确认降级</ElButton>

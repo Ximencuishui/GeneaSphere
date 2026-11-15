@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Request,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -29,6 +30,7 @@ import { WxCallbackDto } from './dto/wx-callback.dto';
 import { VerificationStatus } from '@prisma/client';
 import { ClanResolverService } from '../common/clan-resolver.service';
 import { serializeBigInt } from '../common/bigint-serializer';
+import { CapabilityService } from '../common/capability.service';
 
 @ApiTags('invite')
 @Controller('api/invite')
@@ -38,6 +40,7 @@ export class InviteController {
     private readonly wechat: WechatService,
     private readonly admin: AdminService,
     private readonly clanResolver: ClanResolverService,
+    private readonly capability: CapabilityService,
   ) {}
 
   // ==================== 管理端：邀请二维码 ====================
@@ -208,10 +211,12 @@ export class InviteController {
   @Post('h5/wx-callback')
   @ApiOperation({ summary: '微信授权回调（Mock）' })
   async wxCallback(@Body() dto: WxCallbackDto, @Query('session_id') sessionIdStr?: string) {
-    const profile = await this.wechat.exchangeCode(dto.code, {
-      mock_phone: dto.mock_phone,
-      mock_nickname: dto.mock_nickname,
-    });
+    const mockOn = process.env.WECHAT_MOCK_CALLBACK === 'true';
+    const wechat = this.capability.getStatus('wechat');
+    if (!wechat.available && !mockOn) {
+      throw new BadRequestException('微信未配置，无法完成授权回调');
+    }
+    const profile = await this.wechat.exchangeCode(dto.code);
     if (!sessionIdStr) {
       return { profile };
     }

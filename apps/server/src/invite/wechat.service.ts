@@ -32,8 +32,8 @@ export abstract class WechatService {
   /** 生成 H5 页面需要的 JSSDK 鉴权配置 */
   abstract getJsSdkConfig(url: string): Promise<WxJsSdkConfig>;
 
-  /** 用 code 换取用户基本信息（Mock 时可直接传 mock code） */
-  abstract exchangeCode(code: string, hints?: { mock_phone?: string; mock_nickname?: string }): Promise<WxUserProfile>;
+  /** 用 code 换取用户基本信息。不接受调用方传入的手机号。 */
+  abstract exchangeCode(code: string): Promise<WxUserProfile>;
 
   /** 发送微信模板消息（Mock 时仅打印日志） */
   abstract sendTemplateMessage(message: WxTemplateMessage): Promise<{ success: boolean; messageId?: string }>;

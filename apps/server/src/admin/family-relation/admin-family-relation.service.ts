@@ -3,6 +3,10 @@ import { PrismaService } from '@geneasphere/db';
 import { RelationChangeStatus } from '@prisma/client';
 import { AdminService } from '../admin.service';
 import { NotificationService } from '../../common/notification.service';
+import { PedigreeService } from '../../pedigree/pedigree.service';
+import { serializeBigInt } from '../../common/bigint-serializer';
+
+const REVIEWABLE = [RelationChangeStatus.pending, RelationChangeStatus.needs_manual];
 
 @Injectable()
 export class AdminFamilyRelationService {
@@ -10,6 +14,7 @@ export class AdminFamilyRelationService {
     private readonly prisma: PrismaService,
     private readonly adminService: AdminService,
     private readonly notificationService: NotificationService,
+    private readonly pedigreeService: PedigreeService,
   ) {}
 
   /**
@@ -124,13 +129,19 @@ export class AdminFamilyRelationService {
 
     await this.adminService.requireAdmin(change.person.clan_id, adminUserId);
 
-    const updated = await this.prisma.familyRelationChange.update({
-      where: { id },
-      data: {
-        status: RelationChangeStatus.approved,
-        approved_by: adminUserId,
-        reviewed_at: new Date(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await this.applyDeferred(tx, change);
+      const updated = await tx.familyRelationChange.updateMany({
+        where: { id, status: { in: REVIEWABLE } },
+        data: {
+          status: RelationChangeStatus.approved,
+          approved_by: adminUserId,
+          reviewed_at: new Date(),
+        },
+      });
+      if (updated.count !== 1) {
+        throw new BadRequestException('只能审核待审或需线下确认的变更');
+      }
     });
 
     // 审计日志
@@ -172,14 +183,30 @@ export class AdminFamilyRelationService {
 
     await this.adminService.requireAdmin(change.person.clan_id, adminUserId);
 
-    const updated = await this.prisma.familyRelationChange.update({
-      where: { id },
-      data: {
-        status: RelationChangeStatus.rejected,
-        approved_by: adminUserId,
-        reviewed_at: new Date(),
-        reject_reason: reason,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const state = (change.current_state || {}) as { applied?: boolean };
+      const previous = (change.previous_state || {}) as { current_spouse_id?: string | null };
+      if (change.change_type === 'marriage' && state.applied !== false && previous.current_spouse_id) {
+        await tx.marriageHistory.updateMany({
+          where: {
+            person_id: change.person_id,
+            spouse_id: BigInt(previous.current_spouse_id),
+          },
+          data: { is_current: true, end_date: null, end_reason: null },
+        });
+      }
+      const updated = await tx.familyRelationChange.updateMany({
+        where: { id, status: { in: REVIEWABLE } },
+        data: {
+          status: RelationChangeStatus.rejected,
+          approved_by: adminUserId,
+          reviewed_at: new Date(),
+          reject_reason: reason,
+        },
+      });
+      if (updated.count !== 1) {
+        throw new BadRequestException('只能审核待审或需线下确认的变更');
+      }
     });
 
     await this.adminService.logAction({
@@ -217,8 +244,8 @@ export class AdminFamilyRelationService {
 
     await this.adminService.requireAdmin(change.person.clan_id, adminUserId);
 
-    const updated = await this.prisma.familyRelationChange.update({
-      where: { id },
+    const updated = await this.prisma.familyRelationChange.updateMany({
+      where: { id, status: { in: REVIEWABLE } },
       data: {
         status: RelationChangeStatus.needs_manual,
         needs_manual: true,
@@ -226,6 +253,9 @@ export class AdminFamilyRelationService {
         reviewed_at: new Date(),
       },
     });
+    if (updated.count !== 1) {
+      throw new BadRequestException('只能把待审或需线下确认的变更标为线下确认');
+    }
 
     await this.adminService.logAction({
       clanId: change.person.clan_id,
@@ -254,13 +284,14 @@ export class AdminFamilyRelationService {
    */
   async listDisputes(callerUserId: string, clanSlug: string) {
     const clanIdBig = await this.adminService.requireAdminBySlug(clanSlug, callerUserId);
-    return this.prisma.familyRelationChange.findMany({
+    const rows = await this.prisma.familyRelationChange.findMany({
       where: { clan_id: clanIdBig, is_disputed: true },
       orderBy: { created_at: 'desc' },
       include: {
         person: { select: { full_name: true } },
       },
     });
+    return serializeBigInt(rows);
   }
 
   /**
@@ -275,27 +306,32 @@ export class AdminFamilyRelationService {
     if (!change) throw new NotFoundException('争议记录不存在');
 
     await this.adminService.requireAdmin(change.person.clan_id, adminUserId);
+    if (!change.target_person_id) {
+      throw new BadRequestException('争议缺少目标子女，无法落库');
+    }
+    if (!change.is_disputed) {
+      throw new BadRequestException('该记录不是待解决的子女争议');
+    }
 
-    // 更新冲突的抚养记录
-    await this.prisma.childCustodyRecord.updateMany({
-      where: {
-        child_id: change.target_person_id!,
-        dispute_flag: true,
-      },
-      data: {
-        dispute_flag: false,
-        custody_status: custodyStatus as any,
-      },
+    const clan = await this.prisma.clan.findUnique({
+      where: { id: change.clan_id },
+      select: { name: true },
     });
 
-    const updated = await this.prisma.familyRelationChange.update({
-      where: { id },
-      data: {
-        is_disputed: false,
-        status: RelationChangeStatus.approved,
-        approved_by: adminUserId,
-        reviewed_at: new Date(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await this.writeCustody(tx, change, custodyStatus);
+      const updated = await tx.familyRelationChange.updateMany({
+        where: { id, is_disputed: true, status: { in: REVIEWABLE } },
+        data: {
+          is_disputed: false,
+          status: RelationChangeStatus.approved,
+          approved_by: adminUserId,
+          reviewed_at: new Date(),
+        },
+      });
+      if (updated.count !== 1) {
+        throw new BadRequestException('只能解决仍待处理的争议');
+      }
     });
 
     await this.adminService.logAction({
@@ -304,7 +340,7 @@ export class AdminFamilyRelationService {
       action: 'RELATION_DISPUTE_RESOLVE',
       targetType: 'FamilyRelationChange',
       targetId: changeId,
-      details: JSON.stringify({ custody_status: custodyStatus }),
+      details: JSON.stringify({ custody_status: custodyStatus, child_id: change.target_person_id.toString() }),
     });
 
     await this.notificationService.notify({
@@ -312,11 +348,111 @@ export class AdminFamilyRelationService {
       clanId: change.person.clan_id,
       type: 'SYSTEM' as any,
       title: '子女归属争议已解决',
-      content: `您在 ${change.person.clan_id} 的子女归属争议已被管理员解决。`,
+      content: `您在「${clan?.name || '本家族'}」的子女归属争议已被管理员解决。`,
       targetType: 'FamilyRelationChange',
       targetId: changeId,
     });
 
     return { id: changeId, status: 'resolved', custody_status: custodyStatus };
+  }
+
+  private async applyDeferred(tx: any, change: any) {
+    const state = (change.current_state || {}) as any;
+    if (state.applied !== false) return;
+    if (change.change_type === 'marriage') {
+      const previous = (change.previous_state || {}) as { current_spouse_id?: string | null };
+      if (previous.current_spouse_id) {
+        const endReason = state.marriage_status === 'widowed' ? 'widowed' : 'divorce';
+        await tx.marriageHistory.updateMany({
+          where: {
+            person_id: change.person_id,
+            spouse_id: BigInt(previous.current_spouse_id),
+            is_current: true,
+          },
+          data: { is_current: false, end_date: new Date(), end_reason: endReason },
+        });
+      }
+      return;
+    }
+    if (change.change_type === 'child') {
+      await this.applyDeferredChild(tx, change, state);
+      return;
+    }
+    if (change.change_type === 'custody') {
+      await this.writeCustody(tx, change, state.custody_status);
+    }
+  }
+
+  private async applyDeferredChild(tx: any, change: any, state: any) {
+    const parent = await tx.person.findUnique({
+      where: { id: change.person_id },
+      select: { clan_id: true, gender: true },
+    });
+    if (!parent) throw new NotFoundException('父/母不存在');
+    const child = await tx.person.create({
+      data: {
+        clan_id: parent.clan_id,
+        full_name: state.child_name,
+        gender: state.child_gender,
+        birth_date: state.birth_date ? new Date(state.birth_date) : undefined,
+        is_living: true,
+      },
+    });
+    const husbandId = parent.gender === 'male' ? change.person_id : null;
+    const wifeId = parent.gender === 'female' ? change.person_id : null;
+    const familyUnit = await tx.familyUnit.create({
+      data: { clan_id: parent.clan_id, husband_id: husbandId, wife_id: wifeId },
+    });
+    await this.pedigreeService.attachChildToParents(tx, {
+      clan_id: parent.clan_id,
+      child_id: child.id,
+      parent_ids: [change.person_id],
+      family_id: familyUnit.id,
+    });
+    await tx.childCustodyRecord.create({
+      data: {
+        clan_id: parent.clan_id,
+        child_id: child.id,
+        parent_id: change.person_id,
+        custody_status: state.custody,
+        is_biological: true,
+        effective_from: new Date(),
+        effective_to: null,
+        created_by: change.operator_user_id,
+      },
+    });
+    await tx.familyRelationChange.update({
+      where: { id: change.id },
+      data: { target_person_id: child.id },
+    });
+  }
+
+  private async writeCustody(tx: any, change: any, custodyStatus: string) {
+    const childId = change.target_person_id as bigint | null;
+    if (!childId) throw new BadRequestException('争议缺少目标子女，无法落库');
+    const state = (change.current_state || {}) as { applied?: boolean; is_biological?: boolean };
+    if (state.applied === false) {
+      await tx.childCustodyRecord.updateMany({
+        where: { child_id: childId, parent_id: change.person_id, effective_to: null },
+        data: { effective_to: new Date() },
+      });
+      await tx.childCustodyRecord.create({
+        data: {
+          clan_id: change.clan_id,
+          child_id: childId,
+          parent_id: change.person_id,
+          custody_status: custodyStatus,
+          is_biological: state.is_biological ?? true,
+          effective_from: new Date(),
+          effective_to: null,
+          dispute_flag: false,
+          created_by: change.operator_user_id,
+        },
+      });
+    }
+    await tx.childCustodyRecord.updateMany({
+      where: { child_id: childId, effective_to: null },
+      data: { dispute_flag: false, custody_status: custodyStatus },
+    });
   }
 }

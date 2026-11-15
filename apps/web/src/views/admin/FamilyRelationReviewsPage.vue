@@ -1,9 +1,11 @@
 <template>
   <div class="reviews-page">
     <div class="page-header">
-      <h2>家庭关系变更审核</h2>
+      <h2>家庭关系审核</h2>
     </div>
 
+    <ElTabs v-model="activeTab" @tab-change="onTabChange">
+      <ElTabPane label="变更审核" name="changes">
     <ElCard>
       <ElForm :inline="true" class="filter-form">
         <ElFormItem label="状态">
@@ -60,6 +62,7 @@
           </template>
         </ElTableColumn>
       </ElTable>
+      <ElEmpty v-if="!loading && changes.length === 0" description="暂无家庭关系变更" />
 
       <div class="pagination-wrap" v-if="total > 0">
         <ElPagination
@@ -93,16 +96,47 @@
         <pre class="state-json">{{ formatState(detail.current_state) }}</pre>
       </template>
     </ElDrawer>
+      </ElTabPane>
+      <ElTabPane label="子女归属" name="disputes">
+        <FamilyRelationDisputesPage v-if="disputesMounted" embedded />
+      </ElTabPane>
+    </ElTabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { familyRelationApi } from '@/api/familyRelation'
+import FamilyRelationDisputesPage from './FamilyRelationDisputesPage.vue'
 
 const route = useRoute()
+const router = useRouter()
+
+const activeTab = ref(route.query.tab === 'disputes' ? 'disputes' : 'changes')
+const disputesMounted = ref(activeTab.value === 'disputes')
+
+function onTabChange(tab: string | number) {
+  const next = String(tab)
+  router.replace({
+    path: route.path,
+    query: next === 'changes' ? {} : { tab: next },
+  })
+}
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    const next = tab === 'disputes' ? 'disputes' : 'changes'
+    if (next !== activeTab.value) activeTab.value = next
+    if (next === 'disputes') disputesMounted.value = true
+  },
+)
+
+watch(activeTab, (tab) => {
+  if (tab === 'disputes') disputesMounted.value = true
+})
 
 const changes = ref<any[]>([])
 const loading = ref(false)
@@ -154,8 +188,9 @@ async function fetchData() {
     })
     changes.value = res.data
     total.value = res.pagination.total
-  } catch (err) {
-    console.error(err)
+  } catch (err: any) {
+    const msg = err?.response?.data?.message
+    ElMessage.error(Array.isArray(msg) ? msg.join('；') : (msg || '家庭关系列表加载失败'))
   } finally {
     loading.value = false
   }
@@ -167,7 +202,8 @@ async function viewDetail(row: any) {
     detail.value = res
     drawerVisible.value = true
   } catch (err) {
-    ElMessage.error('获取详情失败')
+    const msg = (err as any)?.response?.data?.message
+    ElMessage.error(typeof msg === 'string' && msg ? msg : '获取详情失败')
   }
 }
 

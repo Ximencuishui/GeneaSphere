@@ -290,8 +290,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'sms/balance', name: 'admin-sms-balance', component: () => import('@/views/admin/SmsBalancePage.vue'), meta: { title: '余额管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'logs', name: 'admin-logs', component: () => import('@/views/admin/LogsPage.vue'), meta: { title: '操作日志', requiresAuth: true, requiresAdmin: true } },
       { path: 'memory/quizzes', name: 'admin-memory-quizzes', component: () => import('@/views/admin/MemoryQuizManagement.vue'), meta: { title: '题库管理', requiresAuth: true, requiresAdmin: true } },
-      { path: 'family-relation/reviews', name: 'admin-family-relation-reviews', component: () => import('@/views/admin/FamilyRelationReviewsPage.vue'), meta: { title: '家庭关系变更审核', requiresAuth: true, requiresAdmin: true } },
-      { path: 'family-relation/disputes', name: 'admin-family-relation-disputes', component: () => import('@/views/admin/FamilyRelationDisputesPage.vue'), meta: { title: '子女归属争议', requiresAuth: true, requiresAdmin: true } },
+      { path: 'family-relation/reviews', name: 'admin-family-relation-reviews', component: () => import('@/views/admin/FamilyRelationReviewsPage.vue'), meta: { title: '家庭关系审核', requiresAuth: true, requiresAdmin: true } },
+      // 子女归属：已并入【家庭关系审核】的“子女归属”页签
+      { path: 'family-relation/disputes', name: 'admin-family-relation-disputes', redirect: (to) => `/zupu/${to.params.slug}/family-relation/reviews?tab=disputes` },
       { path: 'announcements', name: 'admin-announcements', component: () => import('@/views/admin/AnnouncementsPage.vue'), meta: { title: '公告管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'reports', name: 'admin-reports', component: () => import('@/views/admin/ReportsPage.vue'), meta: { title: '举报管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'statistics', name: 'admin-statistics', component: () => import('@/views/admin/StatisticsPage.vue'), meta: { title: '数据统计', requiresAuth: true, requiresAdmin: true } },
@@ -302,14 +303,15 @@ const routes: RouteRecordRaw[] = [
       { path: 'family-albums', name: 'admin-family-albums', component: () => import('@/views/admin/FamilyAlbumsPage.vue'), meta: { title: '家庭图册', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/clan-info', name: 'admin-clan-info', component: () => import('@/views/admin/ClanInfoPage.vue'), meta: { title: '家族信息', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/export', name: 'admin-export', component: () => import('@/views/admin/DataExportPage.vue'), meta: { title: '数据导出', requiresAuth: true, requiresAdmin: true } },
-      { path: 'invite/qrcodes', name: 'admin-invite-qrcodes', component: () => import('@/views/admin/invite/QrcodeListPage.vue'), meta: { title: '邀请二维码', requiresAuth: true, requiresAdmin: true } },
-      // 验证记录：菜单调整后已合并到【邀请二维码】的“验证记录” tab；保留旧路径直连以防外链失效
+      { path: 'invite/qrcodes', name: 'admin-invite-qrcodes', component: () => import('@/views/admin/invite/QrcodeListPage.vue'), meta: { title: '入族核验', requiresAuth: true, requiresAdmin: true } },
+      // 验证记录：已并入【入族核验】的“验证记录”页签；保留旧路径直连以防外链失效
       { path: 'invite/records', redirect: (to) => `/zupu/${to.params.slug}/invite/qrcodes?tab=verification` },
       { path: 'invite/records/:id', name: 'admin-invite-record-detail', component: () => import('@/views/admin/invite/VerificationRecordDetailPage.vue'), meta: { title: '验证详情', requiresAuth: true, requiresAdmin: true } },
-      { path: 'invite/reviews', name: 'admin-invite-reviews', component: () => import('@/views/admin/invite/ModificationReviewPage.vue'), meta: { title: '族员信息审核', requiresAuth: true, requiresAdmin: true } },
-      // 家族公众号（2026-08-18 菜单调整后新增）
-      { path: 'wechat/config', name: 'admin-wechat-config', component: () => import('@/views/admin/WechatConfigPage.vue'), meta: { title: '公众号配置', requiresAuth: true, requiresAdmin: true } },
-      { path: 'wechat/content', name: 'admin-wechat-content', component: () => import('@/views/admin/WechatContentPage.vue'), meta: { title: '内容管理', requiresAuth: true, requiresAdmin: true } },
+      // 族员信息审核：已并入【入族核验】的“信息审核”页签
+      { path: 'invite/reviews', name: 'admin-invite-reviews', redirect: (to) => `/zupu/${to.params.slug}/invite/qrcodes?tab=reviews` },
+      // 家族公众号：配置与内容合并为页签，主入口为配置
+      { path: 'wechat/config', name: 'admin-wechat-config', component: () => import('@/views/admin/WechatConfigPage.vue'), meta: { title: '家族公众号', requiresAuth: true, requiresAdmin: true } },
+      { path: 'wechat/content', name: 'admin-wechat-content', redirect: (to) => `/zupu/${to.params.slug}/wechat/config?tab=content` },
       // 兼容旧路径：/zupu/:slug/dashboard 与 /zupu/:slug/dashboard/* 全部归并到 /zupu/:slug
       { path: 'dashboard/:rest(.*)*', redirect: (to) => `/zupu/${to.params.slug}` },
       // 旧路径重定向（菜单重构后旧链接仍可用，避免失效）

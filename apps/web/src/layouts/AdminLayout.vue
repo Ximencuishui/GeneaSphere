@@ -113,7 +113,7 @@ const clanSlug = computed(() => (route.params.slug as string) || '')
 //   - 族谱：只读/查看类（树谱、册谱、旧谱）+ 数据统计
 //   - 修谱：编辑/创作/分发全流程（族谱数据、众包修改、定谱、生成族谱、印刷）
 //   - 家族大事：事件/迁移相关的内容与视频
-//   - 家族管理：成员/公告/邀请/审核/字辈 等管理员职责 + 家族公众号
+//   - 家族管理：族员、入族核验、家庭关系审核、公告、举报、字辈、家族公众号
 //   - 历史影像：影像库与历史影像的审核（原【内容与影像】+ 影像审核）
 //   - 设置：系统配置类（原【系统设置】 + 题库管理）
 //
@@ -173,19 +173,16 @@ const menuItems = computed<MenuEntry[]>(() => [
     children: [
       // 族员管理：直接指向原【族员列表】页面（该页面内置【族员列表/权限分配】两个 tab）
       { title: '族员管理', path: `/zupu/${clanSlug.value}/members` },
+      // 入族核验：二维码列表 / 验证记录 / 信息审核，默认二维码列表
+      { title: '入族核验', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
+      // 家庭关系审核：变更审核 / 子女归属，默认变更审核
+      { title: '家庭关系审核', path: `/zupu/${clanSlug.value}/family-relation/reviews` },
       { title: '公告管理', path: `/zupu/${clanSlug.value}/announcements` },
-      // 邀请二维码：内集成【验证记录】 tab，默认进入二维码列表
-      { title: '邀请二维码', path: `/zupu/${clanSlug.value}/invite/qrcodes` },
-      { title: '族员信息审核', path: `/zupu/${clanSlug.value}/invite/reviews` },
-      { title: '内部初审', path: `/zupu/${clanSlug.value}/reviews/bio` },
-      { title: '家庭关系变更审核', path: `/zupu/${clanSlug.value}/family-relation/reviews` },
-      { title: '子女归属争议', path: `/zupu/${clanSlug.value}/family-relation/disputes` },
       { title: '举报管理', path: `/zupu/${clanSlug.value}/reports` },
       { title: '字辈管理', path: `/zupu/${clanSlug.value}/settings/xipai` },
       // 原【家族信息】已合并到【家族概况】（页面右上角设置图标打开弹窗）
-      // 公众号配置与内容管理（原【家族公众号】顶级分组，已合并到【家族管理】下）
-      { title: '公众号配置', path: `/zupu/${clanSlug.value}/wechat/config` },
-      { title: '公众号内容', path: `/zupu/${clanSlug.value}/wechat/content` },
+      // 家族公众号：配置 / 内容，默认配置（原顶级分组已并入本组）
+      { title: '家族公众号', path: `/zupu/${clanSlug.value}/wechat/config` },
     ],
   },
   {

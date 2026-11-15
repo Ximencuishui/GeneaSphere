@@ -100,6 +100,7 @@ model User {
   genealogy_print_jobs  GenealogyPrintJob[]
   clan_migration_videos ClanMigrationVideo[]
   clan_event_videos     ClanEventVideo[]
+  wechat_articles       ClanWechatArticle[]
 
   @@index([ban_status])
   @@index([wx_openid])
@@ -186,6 +187,8 @@ model Clan {
   // ==================== 家族概况：理事会 / 修谱小组（2026-08-20 菜单重构）====================
   council_members        ClanCouncilMember[]
   revision_team_members  ClanRevisionTeamMember[]
+  wechat_config          ClanWechatConfig?
+  wechat_articles        ClanWechatArticle[]
 
   @@index([status])
   @@index([register_ip])
@@ -2704,4 +2707,48 @@ model ClanRevisionTeamMember {
 
   @@index([clan_id, sort_order])
   @@map("clan_revision_team_members")
+}
+
+// 家族公众号配置。AppSecret 与 EncodingAESKey 只落库，接口不回显。
+model ClanWechatConfig {
+  id                   BigInt    @id @default(autoincrement()) @map("id")
+  clan_id              BigInt    @unique @map("clan_id")
+  app_id               String?   @map("app_id") @db.VarChar(64)
+  app_secret           String?   @map("app_secret") @db.VarChar(128)
+  token                String?   @map("token") @db.VarChar(64)
+  encoding_aes_key     String?   @map("encoding_aes_key") @db.VarChar(64)
+  whitelisted_domains  String?   @map("whitelisted_domains") @db.Text
+  follow_reply_type    String    @default("TEXT") @map("follow_reply_type") @db.VarChar(20)
+  follow_reply_content String?   @map("follow_reply_content") @db.Text
+  default_menu_json    String?   @map("default_menu_json") @db.Text
+  enabled              Boolean   @default(false) @map("enabled")
+  verified_at          DateTime? @map("verified_at")
+  created_at           DateTime  @default(now()) @map("created_at")
+  updated_at           DateTime  @updatedAt @map("updated_at")
+  clan                 Clan      @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+
+  @@map("clan_wechat_configs")
+}
+
+model ClanWechatArticle {
+  id           BigInt    @id @default(autoincrement()) @map("id")
+  clan_id      BigInt    @map("clan_id")
+  title        String    @map("title") @db.VarChar(200)
+  digest       String?   @map("digest") @db.VarChar(500)
+  content      String    @default("") @map("content") @db.Text
+  cover_url    String?   @map("cover_url")
+  article_type String    @default("NEWS") @map("article_type") @db.VarChar(20)
+  source_url   String?   @map("source_url")
+  scheduled_at DateTime? @map("scheduled_at")
+  target_tags  String[]  @default([]) @map("target_tags")
+  status       String    @default("drafts") @map("status") @db.VarChar(20)
+  published_at DateTime? @map("published_at")
+  created_by   String    @map("created_by")
+  created_at   DateTime  @default(now()) @map("created_at")
+  updated_at   DateTime  @updatedAt @map("updated_at")
+  clan         Clan      @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  creator      User      @relation(fields: [created_by], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, status, created_at])
+  @@map("clan_wechat_articles")
 }

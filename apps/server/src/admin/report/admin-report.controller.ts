@@ -7,6 +7,8 @@ import {
   Body,
   UseGuards,
   Request,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
@@ -23,9 +25,20 @@ export class AdminReportController {
     private readonly prisma: PrismaService,
   ) {}
 
-  /**
-   * 获取举报列表
-   */
+  private async loadInClan(id: bigint, clanId: bigint) {
+    const report = await this.prisma.contentReport.findFirst({
+      where: { id, clan_id: clanId },
+      include: {
+        reporter: { select: { id: true, phone: true, nickname: true } },
+        handler: { select: { id: true, phone: true, nickname: true } },
+      },
+    });
+    if (!report) {
+      throw new NotFoundException('举报不存在');
+    }
+    return report;
+  }
+
   @Get()
   @ApiOperation({ summary: '获取举报列表' })
   async getReports(
@@ -37,7 +50,7 @@ export class AdminReportController {
     @Query('targetType') targetType?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -55,12 +68,8 @@ export class AdminReportController {
       this.prisma.contentReport.findMany({
         where,
         include: {
-          reporter: {
-            select: { id: true, phone: true, nickname: true },
-          },
-          handler: {
-            select: { id: true, phone: true, nickname: true },
-          },
+          reporter: { select: { id: true, phone: true, nickname: true } },
+          handler: { select: { id: true, phone: true, nickname: true } },
         },
         orderBy: { created_at: 'desc' },
         skip,
@@ -69,46 +78,46 @@ export class AdminReportController {
       this.prisma.contentReport.count({ where }),
     ]);
 
-    // 获取举报目标的详细信息
     const enrichedReports = await Promise.all(
       reports.map(async (report) => {
         let targetInfo: any = null;
-
         try {
           switch (report.target_type) {
-            case 'MEDIA':
+            case 'MEDIA': {
               const media = await this.prisma.mediaArchive.findUnique({
                 where: { id: report.target_id },
                 select: { id: true, file_url: true, thumb_url: true, description: true },
               });
               targetInfo = media ? { type: 'media', data: media } : null;
               break;
-            case 'BIO':
+            }
+            case 'BIO': {
               const bio = await this.prisma.bioReview.findUnique({
                 where: { id: report.target_id },
-                include: {
-                  person: { select: { id: true, full_name: true } },
-                },
+                include: { person: { select: { id: true, full_name: true } } },
               });
               targetInfo = bio ? { type: 'bio', data: bio } : null;
               break;
-            case 'POST':
+            }
+            case 'POST': {
               const post = await this.prisma.searchPost.findUnique({
                 where: { id: report.target_id },
                 select: { id: true, origin_place: true, contact_info: true },
               });
               targetInfo = post ? { type: 'post', data: post } : null;
               break;
-            case 'MEMBER':
+            }
+            case 'MEMBER': {
               const person = await this.prisma.person.findUnique({
                 where: { id: report.target_id },
                 select: { id: true, full_name: true },
               });
               targetInfo = person ? { type: 'member', data: person } : null;
               break;
+            }
           }
         } catch {
-          // 目标可能已被删除
+          targetInfo = null;
         }
 
         return {
@@ -137,9 +146,6 @@ export class AdminReportController {
     };
   }
 
-  /**
-   * 获取举报详情
-   */
   @Get(':id')
   @ApiOperation({ summary: '获取举报详情' })
   async getReport(
@@ -148,23 +154,8 @@ export class AdminReportController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
-
-    const report = await this.prisma.contentReport.findUnique({
-      where: { id: BigInt(id) },
-      include: {
-        reporter: {
-          select: { id: true, phone: true, nickname: true },
-        },
-        handler: {
-          select: { id: true, phone: true, nickname: true },
-        },
-      },
-    });
-
-    if (!report) {
-      throw new Error('Report not found');
-    }
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const report = await this.loadInClan(BigInt(id), clanId);
 
     return {
       id: report.id.toString(),
@@ -181,9 +172,6 @@ export class AdminReportController {
     };
   }
 
-  /**
-   * 确认举报（确认违规）
-   */
   @Post(':id/confirm')
   @ApiOperation({ summary: '确认举报，处理违规内容' })
   async confirmReport(
@@ -192,46 +180,59 @@ export class AdminReportController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const reportId = BigInt(id);
 
-    const report = await this.prisma.contentReport.findUnique({
-      where: { id: BigInt(id) },
-    });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const report = await tx.contentReport.findFirst({
+        where: { id: reportId, clan_id: clanId },
+      });
+      if (!report) {
+        throw new NotFoundException('举报不存在');
+      }
+      if (report.status !== 'PENDING') {
+        throw new BadRequestException('只能处理待处理的举报');
+      }
+      if (report.target_type === 'MEMBER') {
+        throw new BadRequestException('成员类举报不能自动处置。请线下核实后驳回，或等待后续处置能力。');
+      }
 
-    if (!report) {
-      throw new Error('Report not found');
-    }
+      switch (report.target_type) {
+        case 'MEDIA':
+          await tx.mediaArchive.update({
+            where: { id: report.target_id },
+            data: { deleted_at: new Date(), deleted_by: userId },
+          });
+          break;
+        case 'BIO':
+          await tx.bioReview.update({
+            where: { id: report.target_id },
+            data: { status: 'REJECTED' },
+          });
+          break;
+        case 'POST':
+          await tx.searchPost.update({
+            where: { id: report.target_id },
+            data: { status: 'REMOVED' },
+          });
+          break;
+        default:
+          throw new BadRequestException(`暂不支持自动处置 ${report.target_type} 类举报`);
+      }
 
-    // 根据目标类型处理违规内容
-    switch (report.target_type) {
-      case 'MEDIA':
-        await this.prisma.mediaArchive.update({
-          where: { id: report.target_id },
-          data: { deleted_at: new Date(), deleted_by: userId },
-        }).catch(() => {});
-        break;
-      case 'BIO':
-        await this.prisma.bioReview.update({
-          where: { id: report.target_id },
-          data: { status: 'REJECTED' },
-        }).catch(() => {});
-        break;
-      case 'POST':
-        await this.prisma.searchPost.update({
-          where: { id: report.target_id },
-          data: { status: 'REMOVED' },
-        }).catch(() => {});
-        break;
-    }
-
-    const updated = await this.prisma.contentReport.update({
-      where: { id: BigInt(id) },
-      data: {
-        status: 'CONFIRMED',
-        handled_by: userId,
-        handled_at: new Date(),
-        result: body.result || '已确认违规并处理',
-      },
+      const result = await tx.contentReport.updateMany({
+        where: { id: reportId, clan_id: clanId, status: 'PENDING' },
+        data: {
+          status: 'CONFIRMED',
+          handled_by: userId,
+          handled_at: new Date(),
+          result: body.result || '已确认违规并处理',
+        },
+      });
+      if (result.count !== 1) {
+        throw new BadRequestException('只能处理待处理的举报');
+      }
+      return tx.contentReport.findFirst({ where: { id: reportId, clan_id: clanId } });
     });
 
     await this.adminService.logAction({
@@ -240,19 +241,16 @@ export class AdminReportController {
       action: 'CONFIRM_REPORT',
       targetType: 'ContentReport',
       targetId: id,
-      details: `确认举报: ${report.reason}`,
+      details: `确认举报`,
     });
 
     return {
-      id: updated.id.toString(),
-      status: updated.status,
-      handled_at: updated.handled_at,
+      id: updated!.id.toString(),
+      status: updated!.status,
+      handled_at: updated!.handled_at,
     };
   }
 
-  /**
-   * 驳回举报
-   */
   @Post(':id/reject')
   @ApiOperation({ summary: '驳回举报' })
   async rejectReport(
@@ -261,18 +259,12 @@ export class AdminReportController {
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const reportId = BigInt(id);
 
-    const report = await this.prisma.contentReport.findUnique({
-      where: { id: BigInt(id) },
-    });
-
-    if (!report) {
-      throw new Error('Report not found');
-    }
-
-    const updated = await this.prisma.contentReport.update({
-      where: { id: BigInt(id) },
+    const existing = await this.loadInClan(reportId, clanId);
+    const result = await this.prisma.contentReport.updateMany({
+      where: { id: reportId, clan_id: clanId, status: 'PENDING' },
       data: {
         status: 'REJECTED',
         handled_by: userId,
@@ -280,6 +272,9 @@ export class AdminReportController {
         result: body.result || '举报已驳回',
       },
     });
+    if (result.count !== 1) {
+      throw new BadRequestException('只能处理待处理的举报');
+    }
 
     await this.adminService.logAction({
       clanId,
@@ -287,13 +282,13 @@ export class AdminReportController {
       action: 'REJECT_REPORT',
       targetType: 'ContentReport',
       targetId: id,
-      details: `驳回举报: ${report.reason}`,
+      details: `驳回举报: ${existing.reason}`,
     });
 
     return {
-      id: updated.id.toString(),
-      status: updated.status,
-      handled_at: updated.handled_at,
+      id,
+      status: 'REJECTED',
+      handled_at: new Date(),
     };
   }
 }

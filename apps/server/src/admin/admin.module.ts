@@ -34,9 +34,13 @@ import { ClanOverviewController } from './overview/clan-overview.controller';
 import { AlertService } from '../common/alert.service';
 import { CosModule } from '../cos/cos.module';
 import { PlatformAuthModule } from '../platform/auth/platform-auth.module';
+import { PedigreeModule } from '../pedigree/pedigree.module';
+import { AdminWechatController } from './wechat/admin-wechat.controller';
+import { AdminWechatService } from './wechat/admin-wechat.service';
+import { RejectingWechatOfficialProvider, WechatOfficialProvider } from './wechat/wechat-official.provider';
 
 @Module({
-  imports: [CosModule, PlatformAuthModule],
+  imports: [CosModule, PlatformAuthModule, PedigreeModule],
   controllers: [
     AdminController,
     DashboardController,
@@ -63,8 +67,20 @@ import { PlatformAuthModule } from '../platform/auth/platform-auth.module';
     AdminBackupController,
     StorageUpgradeController,
     ClanOverviewController,
+    AdminWechatController,
   ],
-  providers: [AdminService, MergeService, SmsService, AdminFamilyRelationService, NotificationService, ClanResolverService, AlertService],
+  providers: [
+    AdminService,
+    MergeService,
+    SmsService,
+    AdminFamilyRelationService,
+    NotificationService,
+    ClanResolverService,
+    AlertService,
+    AdminWechatService,
+    RejectingWechatOfficialProvider,
+    { provide: WechatOfficialProvider, useExisting: RejectingWechatOfficialProvider },
+  ],
   exports: [AdminService, MergeService, NotificationService, ClanResolverService, AlertService],
 })
 export class AdminModule {}

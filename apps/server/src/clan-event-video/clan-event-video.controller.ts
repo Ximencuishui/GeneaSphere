@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ClanEventVideoService } from './clan-event-video.service';
 import { CreateClanEventVideoDto } from './dto/create-clan-event-video.dto';
 import { VideoProjectStatus, FamilyEventType } from '@prisma/client';
+import { AdminService } from '../admin/admin.service';
 import { ClanResolverService } from '../common/clan-resolver.service';
 
 @ApiTags('clan-event-video')
@@ -25,6 +26,7 @@ export class ClanEventVideoController {
   constructor(
     private readonly service: ClanEventVideoService,
     private readonly clanResolver: ClanResolverService,
+    private readonly admin: AdminService,
   ) {}
 
   @Get(':clanSlug/preview')
@@ -82,14 +84,14 @@ export class ClanEventVideoController {
     @Param('clanSlug') clanSlug: string,
     @Body() dto: CreateClanEventVideoDto,
   ) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.create(clanId, req.user.userId, dto);
   }
 
   @Delete(':clanSlug/:id')
   @ApiOperation({ summary: '删除大事件视频项目' })
-  async delete(@Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+  async delete(@Request() req, @Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.delete(clanId, this.toBigInt(idStr));
   }
 

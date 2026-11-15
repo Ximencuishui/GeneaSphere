@@ -11,6 +11,8 @@ import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useCapabilityStore } from '@/stores/capability'
 
+defineProps<{ embedded?: boolean }>()
+
 const route = useRoute()
 const capabilityStore = useCapabilityStore()
 
@@ -124,14 +126,14 @@ const handleSubmit = async () => {
 const handlePublish = async (row: any) => {
   try {
     await ElMessageBox.confirm(
-      `确认立即推送「${row.title}」给所有关注者？此操作将真实下发到公众号（Mock 模式下仅打印日志）。`,
+      `确认推送「${row.title}」？微信能力未配置时会失败，不会发给关注者。`,
       '立即推送',
       { type: 'warning', confirmButtonText: '确认推送', cancelButtonText: '取消' },
     )
     await axios.post(`/api/admin/wechat/articles/${row.id}/publish`, {
       clanSlug: clanSlug.value,
     })
-    ElMessage.success('已推送')
+    ElMessage.success('推送请求已提交')
     fetchList()
   } catch (e: any) {
     if (e !== 'cancel') {
@@ -220,7 +222,7 @@ watch(
   <div class="wechat-content-page">
     <div class="page-header">
       <div>
-        <h2>内容管理</h2>
+        <h2 v-if="!embedded">内容管理</h2>
         <p class="subtitle">编辑、计划、推送家族公众号图文 / 文本内容</p>
       </div>
       <ElButton type="primary" @click="handleCreate">

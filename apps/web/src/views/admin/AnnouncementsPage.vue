@@ -4,6 +4,13 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+function serverMessage(e: any, fallback: string) {
+  const msg = e?.response?.data?.message
+  if (Array.isArray(msg)) return msg.join('；')
+  if (typeof msg === 'string' && msg.trim()) return msg
+  return fallback
+}
+
 const route = useRoute()
 const clanSlug = computed(() => route.params.slug || '1')
 
@@ -41,7 +48,7 @@ const fetchData = async () => {
     announcements.value = res.data.data
     pagination.value.total = res.data.total
   } catch (e: any) {
-    ElMessage.error(e.message || '加载失败')
+    ElMessage.error(serverMessage(e, '加载失败'))
   } finally {
     loading.value = false
   }
@@ -90,7 +97,7 @@ const handleSubmit = async () => {
     dialogVisible.value = false
     fetchData()
   } catch (e: any) {
-    ElMessage.error(e.message || '操作失败')
+    ElMessage.error(serverMessage(e, '操作失败'))
   }
 }
 
@@ -107,7 +114,7 @@ const handleDelete = async (id: string) => {
     fetchData()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '删除失败')
+      ElMessage.error(serverMessage(e, '删除失败'))
     }
   }
 }
@@ -123,7 +130,7 @@ const handleTogglePin = async (row: any) => {
     ElMessage.success(row.is_pinned ? '已取消置顶' : '已置顶')
     fetchData()
   } catch (e: any) {
-    ElMessage.error(e.message || '操作失败')
+    ElMessage.error(serverMessage(e, '操作失败'))
   }
 }
 
@@ -138,7 +145,7 @@ const handleToggleStatus = async (row: any) => {
     ElMessage.success(row.is_active ? '已下架' : '已发布')
     fetchData()
   } catch (e: any) {
-    ElMessage.error(e.message || '操作失败')
+    ElMessage.error(serverMessage(e, '操作失败'))
   }
 }
 
@@ -192,6 +199,7 @@ onMounted(() => {
         </template>
       </el-table-column>
     </el-table>
+    <el-empty v-if="!loading && announcements.length === 0" description="暂无公告" />
 
     <el-pagination
       v-model:current-page="pagination.page"

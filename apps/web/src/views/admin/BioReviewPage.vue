@@ -40,8 +40,9 @@ const fetchReviews = async () => {
     reviews.value = res.data.data
     total.value = res.data.pagination.total
     selectedReviews.value = []
-  } catch (error) {
-    console.error('Failed to fetch bio reviews:', error)
+  } catch (error: any) {
+    const msg = error?.response?.data?.message
+    ElMessage.error(Array.isArray(msg) ? msg.join('；') : (msg || '生平列表加载失败'))
   } finally {
     loading.value = false
   }
@@ -179,6 +180,12 @@ const handleBatchRejectWithPreset = async (preset: string) => {
 }
 
 const hasSelection = computed(() => selectedReviews.value.length > 0)
+const detailVisible = ref(false)
+const detailReview = ref<any>(null)
+const openDetail = (row: any) => {
+  detailReview.value = row
+  detailVisible.value = true
+}
 
 const stageSuspended = ref(false)
 
@@ -323,7 +330,7 @@ onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', loadS
             <ElButton
               type="primary"
               size="small"
-              @click="$router.push(`/zupu/${clanSlug}//admin/reviews/bio/` + row.id)"
+              @click="openDetail(row)"
             >
               查看详情
             </ElButton>
@@ -344,6 +351,15 @@ onBeforeUnmount(() => window.removeEventListener('xiupu-workflow-refresh', loadS
         @current-change="fetchReviews"
       />
     </ElCard>
+
+    <ElDialog v-model="detailVisible" title="生平详情" width="640px">
+      <template v-if="detailReview">
+        <p><strong>{{ detailReview.title }}</strong></p>
+        <p>关联人物：{{ detailReview.person_name }}</p>
+        <p>作者：{{ detailReview.author_phone }}</p>
+        <p style="white-space: pre-wrap;">{{ detailReview.content }}</p>
+      </template>
+    </ElDialog>
   </div>
 </template>
 

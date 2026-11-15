@@ -1,8 +1,8 @@
 <template>
   <div class="page">
     <div class="page-header">
-      <h2>邀请二维码</h2>
-      <div class="actions">
+      <h2>入族核验</h2>
+      <div v-if="activeTab !== 'reviews'" class="actions">
         <el-button v-if="activeTab === 'qrcodes'" type="primary" @click="dialogVisible = true">
           生成新二维码
         </el-button>
@@ -47,6 +47,7 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-empty v-if="!loading && list.length === 0" description="暂无邀请二维码" />
 
         <GenerateQrcodeDialog
           v-model:visible="dialogVisible"
@@ -123,6 +124,11 @@
           style="margin-top: 12px; text-align: right;"
         />
       </el-tab-pane>
+
+      <!-- 信息审核（原 ModificationReviewPage，嵌入后不再单独占菜单） -->
+      <el-tab-pane label="信息审核" name="reviews">
+        <ModificationReviewPage v-if="reviewsMounted" embedded />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -134,15 +140,18 @@ import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import QRCode from 'qrcode'
 import GenerateQrcodeDialog from './GenerateQrcodeDialog.vue'
+import ModificationReviewPage from './ModificationReviewPage.vue'
 
 const route = useRoute()
 const router = useRouter()
 // P1-5 修复：使用路由上的 clanSlug 而非 URL 拼出的 clan_id，与后端 /api/invite/qrcodes?clan_slug 对齐
 const clanSlug = ref(String(route.params.slug || ''))
 
-// Tab 状态：qrcodes = 二维码列表（默认），verification = 验证记录
-// 通过 ?tab=verification 可深链直入验证记录 tab
-const activeTab = ref<string>((route.query.tab as string) === 'verification' ? 'verification' : 'qrcodes')
+// Tab：qrcodes = 二维码列表（默认），verification = 验证记录，reviews = 信息审核
+const normalizeInviteTab = (tab: unknown) =>
+  tab === 'verification' || tab === 'reviews' ? tab : 'qrcodes'
+const activeTab = ref<string>(normalizeInviteTab(route.query.tab))
+const reviewsMounted = ref(activeTab.value === 'reviews')
 
 // =================== 二维码列表 ===================
 const list = ref<any[]>([])
@@ -269,25 +278,30 @@ const onTabChange = (tab: string | number) => {
 watch(
   () => route.query.tab,
   (tab) => {
-    const next = (tab as string) === 'verification' ? 'verification' : 'qrcodes'
+    const next = normalizeInviteTab(tab)
     if (next !== activeTab.value) {
       activeTab.value = next
     }
+    if (next === 'reviews') reviewsMounted.value = true
   },
 )
 
-// 切换 tab 时请求对应数据（仅首次切换时请求）
+// 切换 tab 时请求对应数据（仅首次切换时请求；信息审核由子页面自己拉）
 const ensureLoaded = (() => {
   const loaded = { qrcodes: false, verification: false }
   return (tab: string) => {
-    if (loaded[tab as keyof typeof loaded]) return
-    loaded[tab as keyof typeof loaded] = true
+    if (tab !== 'qrcodes' && tab !== 'verification') return
+    if (loaded[tab]) return
+    loaded[tab] = true
     if (tab === 'qrcodes') fetchList()
     else fetchRecords()
   }
 })()
 
-watch(activeTab, (tab) => ensureLoaded(tab))
+watch(activeTab, (tab) => {
+  if (tab === 'reviews') reviewsMounted.value = true
+  ensureLoaded(tab)
+})
 
 onMounted(() => {
   ensureLoaded(activeTab.value)

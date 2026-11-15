@@ -92,6 +92,10 @@ export class GenealogyEditionService {
             ? { review_confirmed_at: now }
             : { revise_confirmed_at: now };
     if (stage === 'review') {
+      const pendingBios = await this.prisma.bioReview.count({
+        where: { status: 'PENDING', person: { clan_id: clanId } },
+      });
+      if (pendingBios > 0) throw new BadRequestException('还有待审生平，处理完再确认初审');
       const open = await this.openReviewRejections(clanId);
       if (open > 0) throw new BadRequestException('还有未处理的驳回，修订后再确认初审');
     }

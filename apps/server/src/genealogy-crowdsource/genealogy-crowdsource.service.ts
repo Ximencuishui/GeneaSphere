@@ -276,6 +276,17 @@ export class GenealogyCrowdsourceService {
     if (dto.xipai?.trim()) extraFields.push({ field: 'generation_char', value: dto.xipai.trim() });
     if (dto.contact_phone?.trim()) extraFields.push({ field: 'contact_phone', value: dto.contact_phone.trim() });
     if (dto.bio?.trim()) extraFields.push({ field: 'biography', value: dto.bio.trim() });
+    if (dto.bio?.trim()) {
+      await this.prisma.bioReview.create({
+        data: {
+          person_id: personId,
+          author_id: user.id,
+          title: `${person.full_name}的生平`,
+          content: dto.bio.trim(),
+          status: 'PENDING',
+        },
+      });
+    }
     for (const extra of extraFields) {
       createdRequests.push(
         await this.prisma.personModificationRequest.create({

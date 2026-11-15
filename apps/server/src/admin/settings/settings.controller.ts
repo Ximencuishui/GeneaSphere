@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, Request, NotFoundException, Header, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, Request, NotFoundException, BadRequestException, Header, StreamableFile } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
@@ -232,6 +232,16 @@ export class SettingsController {
 
     await this.adminService.requireAdmin(xipai.clan_id, userId);
     await this.edition.assertWritable(xipai.clan_id);
+
+    const used = await this.prisma.personBio.count({
+      where: {
+        generation_char: xipai.character,
+        person: { clan_id: xipai.clan_id },
+      },
+    });
+    if (used > 0) {
+      throw new BadRequestException('该字辈仍被人物使用，无法删除');
+    }
 
     await this.prisma.xipai.delete({
       where: { id: xipaiId },

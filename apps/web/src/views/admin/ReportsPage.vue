@@ -4,6 +4,13 @@ import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+function serverMessage(e: any, fallback: string) {
+  const msg = e?.response?.data?.message
+  if (Array.isArray(msg)) return msg.join('；')
+  if (typeof msg === 'string' && msg.trim()) return msg
+  return fallback
+}
+
 const route = useRoute()
 const clanSlug = computed(() => route.params.slug || '1')
 
@@ -30,7 +37,7 @@ const fetchData = async () => {
     reports.value = res.data.data
     pagination.value.total = res.data.total
   } catch (e: any) {
-    ElMessage.error(e.message || '加载失败')
+    ElMessage.error(serverMessage(e, '加载失败'))
   } finally {
     loading.value = false
   }
@@ -47,7 +54,7 @@ const handleConfirm = async (id: string) => {
     fetchData()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '操作失败')
+      ElMessage.error(serverMessage(e, '操作失败'))
     }
   }
 }
@@ -63,7 +70,7 @@ const handleReject = async (id: string) => {
     fetchData()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '操作失败')
+      ElMessage.error(serverMessage(e, '操作失败'))
     }
   }
 }
@@ -164,6 +171,7 @@ onMounted(() => {
         </template>
       </el-table-column>
     </el-table>
+    <el-empty v-if="!loading && reports.length === 0" description="暂无举报" />
 
     <el-pagination
       v-model:current-page="pagination.page"

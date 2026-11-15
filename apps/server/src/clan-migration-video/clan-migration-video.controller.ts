@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ClanMigrationVideoService } from './clan-migration-video.service';
 import { CreateClanMigrationVideoDto } from './dto/create-clan-migration-video.dto';
 import { VideoProjectStatus } from '@prisma/client';
+import { AdminService } from '../admin/admin.service';
 import { ClanResolverService } from '../common/clan-resolver.service';
 
 @ApiTags('clan-migration-video')
@@ -25,6 +26,7 @@ export class ClanMigrationVideoController {
   constructor(
     private readonly service: ClanMigrationVideoService,
     private readonly clanResolver: ClanResolverService,
+    private readonly admin: AdminService,
   ) {}
 
   @Get(':clanSlug/preview')
@@ -77,14 +79,14 @@ export class ClanMigrationVideoController {
     @Param('clanSlug') clanSlug: string,
     @Body() dto: CreateClanMigrationVideoDto,
   ) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.create(clanId, req.user.userId, dto);
   }
 
   @Delete(':clanSlug/:id')
   @ApiOperation({ summary: '删除迁徙视频项目' })
-  async delete(@Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
-    const { id: clanId } = await this.clanResolver.resolveOrThrow(clanSlug);
+  async delete(@Request() req, @Param('clanSlug') clanSlug: string, @Param('id') idStr: string) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
     return this.service.delete(clanId, this.toBigInt(idStr));
   }
 
