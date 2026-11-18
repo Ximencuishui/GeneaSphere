@@ -55,7 +55,23 @@ export class PrivacyService {
     const [persons, generations] = await Promise.all([
       this.prisma.person.findMany({
         where: { clan_id: clanId, deleted_at: null },
-        select: { id: true, full_name: true, is_living: true },
+        select: {
+          id: true,
+          full_name: true,
+          is_living: true,
+          bio: {
+            select: {
+              courtesy_name: true,
+              art_name: true,
+              alias_name: true,
+              former_name: true,
+              taboo_name: true,
+              posthumous_name: true,
+              infant_name: true,
+              nickname: true,
+            },
+          },
+        },
       }),
       this.generationMap(clanId),
     ]);
@@ -63,6 +79,14 @@ export class PrivacyService {
       full_name: person.full_name,
       is_living: person.is_living,
       generation: generations.get(person.id.toString()) ?? 1,
+      courtesy_name: person.bio?.courtesy_name,
+      art_name: person.bio?.art_name,
+      alias_name: person.bio?.alias_name,
+      former_name: person.bio?.former_name,
+      taboo_name: person.bio?.taboo_name,
+      posthumous_name: person.bio?.posthumous_name,
+      infant_name: person.bio?.infant_name,
+      nickname: person.bio?.nickname,
     }));
   }
 

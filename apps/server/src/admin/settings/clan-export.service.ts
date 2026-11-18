@@ -10,6 +10,7 @@ import {
   EXPORT_RETENTION_MS,
   ExportFormat,
   ExportType,
+  missingOriginalExportError,
   readExportObject,
   singleExportBody,
   zipTextEntries,
@@ -93,6 +94,28 @@ export class ClanExportService {
     try {
       const bundle = await this.collect(task.clan_id);
       const written = await this.write(task.clan_id, task.id, task.export_type as ExportType, task.format as ExportFormat, bundle);
+      if (written.errorMessage) {
+        await this.prisma.clanExportTask.update({
+          where: { id: taskId },
+          data: {
+            status: 'failed',
+            file_path: written.filePath,
+            file_name: written.fileName,
+            error_message: written.errorMessage,
+            completed_at: new Date(),
+          },
+        });
+        await this.notify.notify({
+          userId: task.requested_by,
+          clanId: task.clan_id,
+          type: 'SYSTEM',
+          title: '家族数据导出失败',
+          content: written.errorMessage,
+          targetType: 'ClanExportTask',
+          targetId: task.id.toString(),
+        });
+        return;
+      }
       await this.prisma.clanExportTask.update({
         where: { id: taskId },
         data: {
@@ -238,10 +261,15 @@ export class ClanExportService {
         : undefined;
       const packed = await entriesForMedia(collected.mediaRows, readObject);
       const packedIds = new Set(packed.entries.map((entry) => entry.name.split('-')[0]));
-      bundle.media = bundle.media.map((item) => ({
-        ...item,
-        packed: packedIds.has(item.id) || packed.entries.some((entry) => entry.name.startsWith(`${item.id}-`)),
-      }));
+      const reasonById = new Map(packed.skipped.map((item) => [item.id, item.reason]));
+      bundle.media = bundle.media.map((item) => {
+        const included = packedIds.has(item.id) || packed.entries.some((entry) => entry.name.startsWith(`${item.id}-`));
+        return {
+          ...item,
+          packed: included,
+          pack_reason: included ? '' : (reasonById.get(item.id) || '没有可用的文件地址'),
+        };
+      });
       const fileName = `export-${clanId.toString()}-${taskId.toString()}.zip`;
       const filePath = path.join(dir, fileName);
       const entries: ZipEntry[] = zipTextEntries(format, bundle).map((entry) => ({
@@ -258,12 +286,16 @@ export class ClanExportService {
       if (!fs.existsSync(filePath)) {
         throw new Error('导出压缩包没有写入');
       }
-      return { filePath, fileName };
+      return {
+        filePath,
+        fileName,
+        errorMessage: missingOriginalExportError(collected.mediaRows.length, packed.entries.length, packed.skipped),
+      };
     }
     const file = singleExportBody(type, format, bundle);
     const fileName = `export-${clanId.toString()}-${taskId.toString()}-${file.filename}`;
     const filePath = path.join(dir, fileName);
     await fs.promises.writeFile(filePath, file.body);
-    return { filePath, fileName };
+    return { filePath, fileName, errorMessage: null as string | null };
   }
 }

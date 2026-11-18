@@ -160,8 +160,8 @@ export class CepuService {
 
   /** 批注 meta（权限校验用）：返回所属卷宗 clan_id */
   async getAnnotationMeta(annotationId: bigint) {
-    return this.prisma.bookAnnotation.findUnique({
-      where: { id: annotationId },
+    return this.prisma.bookAnnotation.findFirst({
+      where: { id: annotationId, deleted_at: null },
       select: { id: true, volume: { select: { clan_id: true } } },
     });
   }
@@ -814,7 +814,7 @@ export class CepuService {
 
   async getAnnotations(volumeId: bigint) {
     return this.prisma.bookAnnotation.findMany({
-      where: { volume_id: volumeId },
+      where: { volume_id: volumeId, deleted_at: null },
       orderBy: { created_at: 'asc' },
     });
   }
@@ -829,10 +829,12 @@ export class CepuService {
     });
   }
 
-  async deleteAnnotation(annotationId: bigint) {
-    const ann = await this.prisma.bookAnnotation.findUnique({ where: { id: annotationId } });
-    if (!ann) throw new NotFoundException('批注不存在');
-    await this.prisma.bookAnnotation.delete({ where: { id: annotationId } });
+  async deleteAnnotation(annotationId: bigint, userId: string) {
+    const updated = await this.prisma.bookAnnotation.updateMany({
+      where: { id: annotationId, deleted_at: null },
+      data: { deleted_at: new Date(), deleted_by: userId },
+    });
+    if (updated.count === 0) throw new NotFoundException('批注不存在');
   }
 
   // ==================== 分享只读链接（二期） ====================
@@ -924,7 +926,7 @@ export class CepuService {
   /** 批注按 anchor 聚合，供导出选择输出（PR#1:统一只用 anchor 作为 key，buildBookSections 与 buildBookSections(section) 口径一致） */
   private async loadAnnotationMap(volumeIds: bigint[]): Promise<Map<string, string[]>> {
     const anns = await this.prisma.bookAnnotation.findMany({
-      where: { volume_id: { in: volumeIds } },
+      where: { volume_id: { in: volumeIds }, deleted_at: null },
       orderBy: { created_at: 'asc' },
     });
     const map = new Map<string, string[]>();

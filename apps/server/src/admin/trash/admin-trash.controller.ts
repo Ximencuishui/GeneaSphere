@@ -444,4 +444,95 @@ export class AdminTrashController {
     });
     return { success: true };
   }
+
+  @Get('annotations')
+  @ApiOperation({ summary: '获取已删除册谱批注' })
+  async getDeletedAnnotations(
+    @Request() req,
+    @Query('clanSlug') clanSlug: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const pageNum = parseInt(page || '1', 10);
+    const pageSizeNum = parseInt(pageSize || '20', 10);
+    const skip = (pageNum - 1) * pageSizeNum;
+    const where = { deleted_at: { not: null }, volume: { clan_id: clanId } };
+    const [rows, total] = await Promise.all([
+      this.prisma.bookAnnotation.findMany({
+        where,
+        include: { volume: { select: { title: true } } },
+        orderBy: { deleted_at: 'desc' },
+        skip,
+        take: pageSizeNum,
+      }),
+      this.prisma.bookAnnotation.count({ where }),
+    ]);
+    return {
+      data: rows.map((row) => ({
+        id: row.id.toString(),
+        note: row.note,
+        anchor: row.anchor,
+        volume_title: row.volume?.title || '',
+        deleted_at: row.deleted_at,
+        deleted_by: row.deleted_by,
+      })),
+      total,
+      page: pageNum,
+      pageSize: pageSizeNum,
+      totalPages: Math.ceil(total / pageSizeNum),
+    };
+  }
+
+  @Post('annotations/:id/restore')
+  @ApiOperation({ summary: '恢复已删除册谱批注' })
+  async restoreAnnotation(
+    @Request() req,
+    @Param('id') id: string,
+    @Query('clanSlug') clanSlug: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const restored = await this.prisma.bookAnnotation.updateMany({
+      where: { id: BigInt(id), deleted_at: { not: null }, volume: { clan_id: clanId } },
+      data: { deleted_at: null, deleted_by: null },
+    });
+    if (restored.count === 0) throw new NotFoundException('批注不存在或不属于当前家族回收站');
+    await this.adminService.logAction({
+      clanId,
+      userId,
+      action: 'RESTORE_ANNOTATION',
+      targetType: 'BookAnnotation',
+      targetId: id,
+      details: '恢复册谱批注',
+      ipAddress: clientIp(req),
+    });
+    return { id, restored_at: new Date() };
+  }
+
+  @Delete('annotations/:id')
+  @ApiOperation({ summary: '永久删除册谱批注' })
+  async permanentDeleteAnnotation(
+    @Request() req,
+    @Param('id') id: string,
+    @Query('clanSlug') clanSlug: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const removed = await this.prisma.bookAnnotation.deleteMany({
+      where: { id: BigInt(id), deleted_at: { not: null }, volume: { clan_id: clanId } },
+    });
+    if (removed.count === 0) throw new NotFoundException('批注不存在或不属于当前家族回收站');
+    await this.adminService.logAction({
+      clanId,
+      userId,
+      action: 'PERMANENT_DELETE_ANNOTATION',
+      targetType: 'BookAnnotation',
+      targetId: id,
+      details: '永久删除册谱批注',
+      ipAddress: clientIp(req),
+    });
+    return { success: true };
+  }
 }

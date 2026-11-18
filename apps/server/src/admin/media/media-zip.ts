@@ -30,15 +30,41 @@ export function zipDirectory(): string {
   return path.resolve(os.tmpdir(), 'geneasphere-media-zips');
 }
 
+function pathInsideRoot(abs: string, root: string): boolean {
+  const relative = path.relative(root, abs);
+  return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 /** 与回收站清理相同：只接受 /media/ 下、不越出 STORAGE_PATH 的路径。 */
 export function resolveLocalMediaPath(fileUrl?: string | null, root = storageRoot()): string | null {
   if (!fileUrl || !fileUrl.startsWith('/media/')) return null;
-  const rel = fileUrl.slice('/media/'.length);
-  if (!rel || rel.includes('..') || rel.includes('\\') || path.isAbsolute(rel)) return null;
+  let rel = fileUrl.slice('/media/'.length);
+  try {
+    rel = decodeURIComponent(rel);
+  } catch {
+    return null;
+  }
+  if (!rel || rel.includes('..') || rel.includes('\\') || rel.includes('\0') || path.isAbsolute(rel)) return null;
   const abs = path.resolve(root, ...rel.split('/').filter(Boolean));
-  const relative = path.relative(root, abs);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  if (!pathInsideRoot(abs, root)) return null;
   return abs;
+}
+
+/**
+ * 本地驱动把对象 key 的斜杠收成下划线文件名；也兼容按 key 分层存放的文件。
+ * 只返回确实存在的文件。
+ */
+export function resolveStoredObjectPath(key?: string | null, root = storageRoot()): string | null {
+  if (!isSafeObjectKey(key)) return null;
+  const candidates = [
+    path.resolve(root, key.replace(/\//g, '_')),
+    path.resolve(root, ...key.split('/').filter(Boolean)),
+  ];
+  for (const abs of candidates) {
+    if (!pathInsideRoot(abs, root)) continue;
+    if (fs.existsSync(abs) && fs.statSync(abs).isFile()) return abs;
+  }
+  return null;
 }
 
 export function isSafeObjectKey(key?: string | null): key is string {
@@ -76,9 +102,30 @@ export async function entriesForMedia(
   for (const row of rows) {
     const id = String(row.id);
     let packed = false;
+
+    // 原图 key 优先于展示图。本地文件按驱动的两种落盘方式找，找不到再向对象存储要字节。
+    if (isSafeObjectKey(row.original_key)) {
+      const localOriginal = resolveStoredObjectPath(row.original_key);
+      if (localOriginal) {
+        entries.push({ kind: 'file', abs: localOriginal, name: entryName(id, path.basename(localOriginal)) });
+        packed = true;
+      } else if (readObject) {
+        try {
+          const body = await readObject(row.original_key);
+          if (body?.length) {
+            entries.push({ kind: 'buffer', body, name: entryName(id, path.basename(row.original_key)) });
+            packed = true;
+          }
+        } catch {
+          // 冷热存储都没有这份原图，继续看已保存的地址。
+        }
+      }
+    }
+    if (packed) continue;
+
     for (const url of [row.file_url, row.display_url]) {
       const abs = resolveLocalMediaPath(url);
-      if (!abs || !fs.existsSync(abs)) continue;
+      if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
       entries.push({ kind: 'file', abs, name: entryName(id, path.basename(abs)) });
       packed = true;
       break;
@@ -86,10 +133,9 @@ export async function entriesForMedia(
     if (packed) continue;
 
     const keys: string[] = [];
-    if (isSafeObjectKey(row.original_key)) keys.push(row.original_key);
     for (const url of [row.file_url, row.display_url]) {
       const key = objectKeyFromStoredUrl(url);
-      if (key && !keys.includes(key)) keys.push(key);
+      if (key && key !== row.original_key && !keys.includes(key)) keys.push(key);
     }
 
     if (readObject && keys.length > 0) {
@@ -107,10 +153,12 @@ export async function entriesForMedia(
     }
     if (packed) continue;
 
-    const hadLocal = [row.file_url, row.display_url].some((url) => typeof url === 'string' && url.startsWith('/media/'));
+    const hadLocal = [row.file_url, row.display_url].some((url) => typeof url === 'string' && url.startsWith('/media/'))
+      || isSafeObjectKey(row.original_key);
+    const hadRemote = isSafeObjectKey(row.original_key) || keys.length > 0;
     skipped.push({
       id,
-      reason: keys.length > 0 ? '远程文件无法读取' : hadLocal ? '本地文件不存在' : '没有可用的文件地址',
+      reason: hadRemote && readObject ? '远程文件无法读取' : hadLocal ? '本地文件不存在' : '没有可用的文件地址',
     });
   }
 

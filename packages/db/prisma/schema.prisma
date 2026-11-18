@@ -364,9 +364,12 @@ model BookAnnotation {
   note       String     @map("note") @db.Text
   created_by String     @map("created_by")
   created_at DateTime   @default(now()) @map("created_at")
+  deleted_at DateTime?  @map("deleted_at")
+  deleted_by String?    @map("deleted_by")
   volume     BookVolume @relation(fields: [volume_id], references: [id], onDelete: Cascade)
 
   @@index([volume_id, anchor])
+  @@index([volume_id, deleted_at])
   @@map("book_annotations")
 }
 

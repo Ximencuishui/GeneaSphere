@@ -118,7 +118,7 @@ export function auditLogsCsv(logs: any[]): string {
 
 export function mediaManifestCsv(media: any[]): string {
   return toCsv(
-    ['id', 'media_type', 'file_size', 'file_url', 'download_url', 'packed'],
+    ['id', 'media_type', 'file_size', 'file_url', 'download_url', 'packed', 'pack_reason'],
     media.map((item) => [
       item.id,
       item.media_type || '',
@@ -126,8 +126,20 @@ export function mediaManifestCsv(media: any[]): string {
       item.file_url || '',
       item.download_url || item.file_url || '',
       item.packed ? 'yes' : 'no',
+      item.packed ? '' : (item.pack_reason || ''),
     ]),
   );
+}
+
+/** 有影像行但一个原文件都没读到时，全量导出不能算完成。没有影像行则可以完成。 */
+export function missingOriginalExportError(
+  mediaCount: number,
+  packedCount: number,
+  skipped: Array<{ id: string; reason: string }>,
+): string | null {
+  if (mediaCount === 0 || packedCount > 0) return null;
+  const detail = skipped.map((item) => `${item.id}（${item.reason}）`).join('、');
+  return `影像原文件都读不到：${detail || '没有可读取的文件'}`;
 }
 
 export function genealogyJson(bundle: ExportBundle) {

@@ -24,6 +24,10 @@ const announcements = ref<any[]>([])
 const announcementsLoading = ref(false)
 const announcementsPagination = ref({ page: 1, pageSize: 20, total: 0 })
 
+const annotations = ref<any[]>([])
+const annotationsLoading = ref(false)
+const annotationsPagination = ref({ page: 1, pageSize: 20, total: 0 })
+
 // 加载成员
 const fetchMembers = async () => {
   membersLoading.value = true
@@ -190,6 +194,55 @@ const handlePermanentDeleteAnnouncement = async (id: string) => {
   }
 }
 
+const fetchAnnotations = async () => {
+  annotationsLoading.value = true
+  try {
+    const res = await axios.get('/api/admin/trash/annotations', {
+      params: {
+        clanSlug: clanSlug.value,
+        page: annotationsPagination.value.page,
+        pageSize: annotationsPagination.value.pageSize,
+      },
+    })
+    annotations.value = res.data.data
+    annotationsPagination.value.total = res.data.total
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message || '加载失败')
+  } finally {
+    annotationsLoading.value = false
+  }
+}
+
+const handleRestoreAnnotation = async (id: string) => {
+  try {
+    await axios.post(`/api/admin/trash/annotations/${id}/restore`, {}, {
+      params: { clanSlug: clanSlug.value },
+    })
+    ElMessage.success('恢复成功')
+    fetchAnnotations()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message || '恢复失败')
+  }
+}
+
+const handlePermanentDeleteAnnotation = async (id: string) => {
+  try {
+    await ElMessageBox.confirm('此操作不可逆，确定要永久删除吗？', '危险操作', {
+      type: 'error',
+      confirmButtonText: '永久删除',
+    })
+    await axios.delete(`/api/admin/trash/annotations/${id}`, {
+      params: { clanSlug: clanSlug.value },
+    })
+    ElMessage.success('已永久删除')
+    fetchAnnotations()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.response?.data?.message || e.message || '删除失败')
+    }
+  }
+}
+
 const handleTabChange = (tab: string) => {
   if (tab === 'members' && members.value.length === 0) {
     fetchMembers()
@@ -197,6 +250,8 @@ const handleTabChange = (tab: string) => {
     fetchMedia()
   } else if (tab === 'announcements' && announcements.value.length === 0) {
     fetchAnnouncements()
+  } else if (tab === 'annotations' && annotations.value.length === 0) {
+    fetchAnnotations()
   }
 }
 
@@ -210,6 +265,15 @@ onMounted(() => {
     <div class="page-header">
       <h2>回收站</h2>
     </div>
+
+    <el-alert
+      class="trash-note"
+      type="info"
+      :closable="false"
+      show-icon
+      title="个人留言不属于家族，不在此回收"
+      description="个人空间留言和讨论组回复没有家族归属。册谱书面批注属于家族卷宗，删除后在「已删除批注」里恢复或永久删除。"
+    />
 
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
       <el-tab-pane label="已删除成员" name="members">
@@ -282,6 +346,37 @@ onMounted(() => {
         />
       </el-tab-pane>
 
+      <el-tab-pane label="留言" name="messages">
+        <el-empty description="个人留言不属于家族，不在此回收" />
+      </el-tab-pane>
+
+      <el-tab-pane label="已删除批注" name="annotations">
+        <el-table :data="annotations" v-loading="annotationsLoading" stripe>
+          <el-table-column prop="note" label="批注" min-width="240" show-overflow-tooltip />
+          <el-table-column prop="volume_title" label="卷宗" width="180" />
+          <el-table-column prop="anchor" label="位置" width="160" />
+          <el-table-column prop="deleted_at" label="删除时间" width="180">
+            <template #default="{ row }">
+              {{ row.deleted_at ? new Date(row.deleted_at).toLocaleString() : '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="handleRestoreAnnotation(row.id)">恢复</el-button>
+              <el-button link type="danger" @click="handlePermanentDeleteAnnotation(row.id)">永久删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination
+          v-model:current-page="annotationsPagination.page"
+          :total="annotationsPagination.total"
+          :page-size="annotationsPagination.pageSize"
+          @current-change="(page: number) => { annotationsPagination.page = page; fetchAnnotations() }"
+          layout="total, prev, pager, next"
+          class="pagination"
+        />
+      </el-tab-pane>
+
       <el-tab-pane label="已删除公告" name="announcements">
         <el-table :data="announcements" v-loading="announcementsLoading" stripe>
           <el-table-column prop="title" label="标题" min-width="200" />
@@ -322,6 +417,10 @@ onMounted(() => {
 .page-header h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.trash-note {
+  margin-bottom: 16px;
 }
 
 .pagination {

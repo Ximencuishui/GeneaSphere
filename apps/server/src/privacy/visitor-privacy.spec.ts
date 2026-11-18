@@ -130,6 +130,69 @@ describe('visitor privacy', () => {
     expect(html).not.toContain('<img');
   });
 
+  it('removes courtesy names, aliases and former names, and skips one-character names', () => {
+    const html = redactDocumentHtml(
+      '<p>朱熹字元晦，号晦庵，曾用名沈郎，别名紫阳。在世李四。字朱。</p><img src="/a.jpg">',
+      rules,
+      [
+        {
+          full_name: '朱熹',
+          courtesy_name: '元晦、仲晦',
+          art_name: '晦庵',
+          former_name: '沈郎',
+          alias_name: '紫阳',
+          nickname: '朱',
+          is_living: false,
+          generation: 1,
+        },
+        { full_name: '李四', is_living: true, generation: 2 },
+      ],
+    );
+    expect(html).not.toContain('朱熹');
+    expect(html).not.toContain('元晦');
+    expect(html).not.toContain('仲晦');
+    expect(html).not.toContain('晦庵');
+    expect(html).not.toContain('沈郎');
+    expect(html).not.toContain('紫阳');
+    expect(html).toContain('李四');
+    expect(html).toContain('字朱');
+    expect(html).not.toContain('<img');
+  });
+
+  it('replaces a longer hidden name before a shorter one and keeps images when photos stay visible', () => {
+    const replaced = redactDocumentHtml(
+      '<p>张三丰</p>',
+      rules,
+      [
+        { full_name: '张三丰', is_living: false, generation: 1 },
+        { full_name: '张三', is_living: false, generation: 1 },
+      ],
+    );
+    expect(replaced).not.toContain('张三');
+    expect(replaced).not.toContain('丰');
+
+    const withPhoto = redactDocumentHtml(
+      '<p>张三</p><img src="/a.jpg">',
+      { ...rules, hide_living_photos: false },
+      [{ full_name: '张三', is_living: false, generation: 1 }],
+    );
+    expect(withPhoto).not.toContain('张三');
+    expect(withPhoto).toContain('<img');
+  });
+
+  it('does not strip a name that a visible person still uses', () => {
+    const html = redactDocumentHtml(
+      '<p>在世李四</p>',
+      rules,
+      [
+        { full_name: '李四', is_living: true, generation: 2 },
+        { full_name: '旧名', alias_name: '李四', is_living: false, generation: 1 },
+      ],
+    );
+    expect(html).toContain('李四');
+    expect(html).not.toContain('旧名');
+  });
+
   it('hides ancestor ids from visitors on kinship checks', () => {
     const full = { isConsanguineous: true, commonAncestors: [{ ancestor_id: '1' }], relationship: 'sibling' as const };
     expect(visitorKinshipResult(full, false)).toEqual({ isConsanguineous: true });

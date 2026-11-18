@@ -25,7 +25,8 @@ import { AdminService } from '../admin/admin.service';
 import { Public } from '../auth/public.decorator';
 import { serializeBigInt } from '../common/bigint-serializer';
 import { PrivacyService } from '../privacy/privacy.service';
-import { redactCepuEntries, redactDocumentHtml, redactPersonBio, visitorMaySeePerson } from '../privacy/visitor-privacy';
+import { clientIp } from '../common/client-ip';
+import { personCallNames, redactCepuEntries, redactDocumentHtml, redactPersonBio, visitorMaySeePerson } from '../privacy/visitor-privacy';
 import { Response } from 'express';
 
 /**
@@ -194,7 +195,7 @@ export class CepuController {
     const decision = await this.privacy.forViewer(BigInt(bio.clan_id), req?.user?.userId);
     if (!decision.restricted) return serializeBigInt(bio);
     const generations = await this.privacy.generationMap(BigInt(bio.clan_id));
-    const redacted = redactPersonBio(bio, decision.rules, generations.get(bio.person_id) ?? 1);
+    const redacted = redactPersonBio(bio, decision.rules, generations.get(String(bio.person_id)) ?? 1);
     if (!redacted) throw new NotFoundException('人物不存在');
     return serializeBigInt(redacted);
   }
@@ -227,7 +228,7 @@ export class CepuController {
     const keyword = (q ?? '').trim();
     const people = keyword.length >= 2 ? await this.privacy.namedPeople(clanId) : [];
     const keywordHitsHiddenName = people.some((person) => (
-      person.full_name.includes(keyword)
+      personCallNames(person).some((name) => name.includes(keyword))
       && !visitorMaySeePerson(person.is_living, person.generation, decision.rules)
     ));
     return serializeBigInt({
@@ -473,8 +474,18 @@ export class CepuController {
     const userId = req?.user?.userId as string | undefined;
     const ann = await this.cepuService.getAnnotationMeta(BigInt(annotationId));
     if (!ann) throw new NotFoundException('批注不存在');
-    await this.requireAdmin(ann.volume.clan_id.toString(), userId);
-    await this.cepuService.deleteAnnotation(BigInt(annotationId));
+    const clanId = ann.volume.clan_id;
+    await this.requireAdmin(clanId.toString(), userId);
+    await this.cepuService.deleteAnnotation(BigInt(annotationId), userId!);
+    await this.adminService.logAction({
+      clanId,
+      userId: userId!,
+      action: 'DELETE_ANNOTATION',
+      targetType: 'BookAnnotation',
+      targetId: annotationId,
+      details: '删除册谱批注',
+      ipAddress: clientIp(req),
+    });
     return { success: true };
   }
 }

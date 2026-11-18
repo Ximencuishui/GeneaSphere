@@ -161,7 +161,7 @@ onMounted(loadTasks)
       <ul class="tips-list">
         <li>任务在后台生成，完成后通过站内信通知，文件保留 7 天</li>
         <li>全部数据打成 ZIP：族谱 JSON 或 CSV、迁徙 CSV、操作日志 CSV、影像清单 CSV</li>
-        <li>本地或对象存储能读到的影像原文件会放进 ZIP；读不到的只在清单里保留下载地址</li>
+        <li>本地或对象存储能读到的影像原文件会放进 ZIP。清单写出是否打进包和原因。有影像但一个原文件都读不到时，任务标为失败，不记成完成。没有影像的家族仍可完成。</li>
         <li>当前没有 Excel 导出，请使用 CSV 或 JSON</li>
       </ul>
     </el-card>

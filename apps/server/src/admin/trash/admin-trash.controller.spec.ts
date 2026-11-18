@@ -29,6 +29,12 @@ describe('AdminTrashController restore media', () => {
     personAncestry: { deleteMany: jest.fn() },
     familyChild: { deleteMany: jest.fn() },
     familyUnit: { updateMany: jest.fn() },
+    bookAnnotation: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+      updateMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation(async (fn: (tx: typeof prisma) => Promise<unknown>) => fn(prisma));
@@ -179,5 +185,52 @@ describe('AdminTrashController restore media', () => {
       action: 'PERMANENT_DELETE_MEMBER',
       clanId: 1n,
     }));
+  });
+
+  it('restores a deleted book annotation in this clan and records the client ip', async () => {
+    prisma.bookAnnotation.updateMany.mockResolvedValue({ count: 1 });
+    const withIp = { user: { userId: 'admin-a' }, headers: { 'x-forwarded-for': '203.0.113.8' } };
+
+    await controller.restoreAnnotation(withIp, '7', 'clan-a');
+
+    expect(prisma.bookAnnotation.updateMany).toHaveBeenCalledWith({
+      where: { id: 7n, deleted_at: { not: null }, volume: { clan_id: 1n } },
+      data: { deleted_at: null, deleted_by: null },
+    });
+    expect(admin.logAction).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'RESTORE_ANNOTATION',
+      ipAddress: '203.0.113.8',
+    }));
+  });
+
+  it('returns 404 when the annotation is not in this clan trash', async () => {
+    prisma.bookAnnotation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(controller.restoreAnnotation(req, '7', 'clan-a')).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(admin.logAction).not.toHaveBeenCalled();
+  });
+
+  it('permanently deletes only an annotation that is already in the trash', async () => {
+    prisma.bookAnnotation.deleteMany.mockResolvedValue({ count: 1 });
+    const withIp = { user: { userId: 'admin-a' }, headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' } };
+
+    await controller.permanentDeleteAnnotation(withIp, '7', 'clan-a');
+
+    expect(prisma.bookAnnotation.deleteMany).toHaveBeenCalledWith({
+      where: { id: 7n, deleted_at: { not: null }, volume: { clan_id: 1n } },
+    });
+    expect(admin.logAction).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'PERMANENT_DELETE_ANNOTATION',
+      ipAddress: '203.0.113.9',
+    }));
+  });
+
+  it('returns 404 and does not log when the annotation is not already deleted', async () => {
+    prisma.bookAnnotation.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(controller.permanentDeleteAnnotation(req, '7', 'clan-a')).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(admin.logAction).not.toHaveBeenCalled();
   });
 });

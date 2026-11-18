@@ -182,24 +182,68 @@ export function redactPersonBio(bio: any, rules: VisitorPrivacyRules, generation
   return next;
 }
 
+export const PERSON_CALL_NAME_FIELDS = [
+  'full_name',
+  'courtesy_name',
+  'art_name',
+  'alias_name',
+  'former_name',
+  'taboo_name',
+  'posthumous_name',
+  'infant_name',
+  'nickname',
+] as const;
+
 export interface NamedPerson {
   full_name: string;
   is_living: boolean;
   generation: number;
+  courtesy_name?: string | null;
+  art_name?: string | null;
+  alias_name?: string | null;
+  former_name?: string | null;
+  taboo_name?: string | null;
+  posthumous_name?: string | null;
+  infant_name?: string | null;
+  nickname?: string | null;
 }
 
-/** 文档卷 HTML 没有结构化人物字段。隐藏人物的姓名从正文里去掉，在世照片开关打开时去掉图片。 */
+const CALL_NAME_SPLIT = /[、，,;；/|·・]+/;
+
+/** 姓名、字、号、别名、曾用名等可用来称呼的写法。组合字段按顿号等拆开。 */
+export function personCallNames(person: NamedPerson): string[] {
+  const found: string[] = [];
+  for (const field of PERSON_CALL_NAME_FIELDS) {
+    const raw = person[field];
+    if (typeof raw !== 'string') continue;
+    const value = raw.trim();
+    if (!value) continue;
+    found.push(value);
+    for (const part of value.split(CALL_NAME_SPLIT)) {
+      const name = part.trim();
+      if (name && name !== value) found.push(name);
+    }
+  }
+  return found;
+}
+
+/** 文档卷 HTML 没有结构化人物字段。隐藏人物的姓名、字、号、别名、曾用名从正文里去掉。单字跳过。在世照片开关打开时去掉图片。 */
 export function redactDocumentHtml(html: string, rules: VisitorPrivacyRules, people: NamedPerson[]): string {
   let text = html || '';
-  const hidden = people
-    .map((person) => person.full_name?.trim() || '')
-    .filter((name, index, names) => {
-      if (name.length < 2 || names.indexOf(name) !== index) return false;
-      const person = people.find((item) => item.full_name?.trim() === name);
-      return !!person && !visitorMaySeePerson(person.is_living, person.generation, rules);
-    })
-    .sort((a, b) => b.length - a.length);
-  for (const name of hidden) text = text.split(name).join('');
+  const visible = new Set<string>();
+  const hidden: string[] = [];
+  for (const person of people) {
+    const names = personCallNames(person).filter((name) => name.length >= 2);
+    if (visitorMaySeePerson(person.is_living, person.generation, rules)) {
+      for (const name of names) visible.add(name);
+    } else {
+      hidden.push(...names);
+    }
+  }
+  const removable = [...new Set(hidden)]
+    .filter((name) => !visible.has(name))
+    .sort((a, b) => b.length - a.length || a.localeCompare(b, 'zh'));
+  for (const name of removable) text = text.split(name).join('');
   if (rules.hide_living_photos) text = text.replace(/<img\b[^>]*>/gi, '');
   return text;
 }
