@@ -63,18 +63,23 @@ emit_common() {
 EOF
 }
 
-cat << EOF
+if [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
+    # 域名访问 80 → 301 跳转 HTTPS
+    cat << EOF
 server {
     listen ${WEB_PORT};
-    server_name ${SERVER_NAME};
-EOF
-emit_common
-cat << EOF
+    server_name ${SERVER_NAME% _};
+    return 301 https://\$host\$request_uri;
 }
-EOF
 
-if [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
+# IP / 内部访问（deploy.sh 健康检查、curl localhost）仍走 80 明文
+server {
+    listen ${WEB_PORT};
+    server_name _;
+EOF
+    emit_common
     cat << EOF
+}
 
 server {
     listen 443 ssl http2;
@@ -86,6 +91,16 @@ server {
     ssl_ciphers         HIGH:!aNULL:!MD5;
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 10m;
+EOF
+    emit_common
+    cat << EOF
+}
+EOF
+else
+    cat << EOF
+server {
+    listen ${WEB_PORT};
+    server_name ${SERVER_NAME};
 EOF
     emit_common
     cat << EOF
