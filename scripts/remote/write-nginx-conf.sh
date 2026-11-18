@@ -73,8 +73,9 @@ server {
 }
 
 # IP / 内部访问（deploy.sh 健康检查、curl localhost）仍走 80 明文
+# default_server 确保未匹配域名的请求（如 Host: localhost）落到本块而非跳转块
 server {
-    listen ${WEB_PORT};
+    listen ${WEB_PORT} default_server;
     server_name _;
 EOF
     emit_common
