@@ -24,6 +24,8 @@ import { ClanResolverService } from '../common/clan-resolver.service';
 import { AdminService } from '../admin/admin.service';
 import { Public } from '../auth/public.decorator';
 import { serializeBigInt } from '../common/bigint-serializer';
+import { PrivacyService } from '../privacy/privacy.service';
+import { redactCepuEntries, redactDocumentHtml, redactPersonBio, visitorMaySeePerson } from '../privacy/visitor-privacy';
 import { Response } from 'express';
 
 /**
@@ -38,6 +40,7 @@ export class CepuController {
     private readonly cepuService: CepuService,
     private readonly clanResolver: ClanResolverService,
     private readonly adminService: AdminService,
+    private readonly privacy: PrivacyService,
   ) {}
 
   /** 数字 id 或 slug 解析（与 tree.controller 同口径） */
@@ -124,7 +127,8 @@ export class CepuController {
   async getVolume(@Param('clanSlug') clanSlug: string, @Param('id') id: string, @Req() req: any) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
-    return serializeBigInt(await this.cepuService.getVolume(clanId, BigInt(id), String(req.query?.source || '')));
+    const volume = await this.cepuService.getVolume(clanId, BigInt(id), String(req.query?.source || ''));
+    return serializeBigInt(await this.presentVolume(clanId, req?.user?.userId, volume));
   }
 
   /** 新增卷宗（admin） */
@@ -186,7 +190,13 @@ export class CepuController {
     const person = await this.cepuService.getPersonMeta(BigInt(personId));
     if (!person) throw new NotFoundException('人物不存在');
     this.assertShareAllowed(req, person.clan_id);
-    return serializeBigInt(await this.cepuService.getPersonBio(BigInt(personId)));
+    const bio = await this.cepuService.getPersonBio(BigInt(personId));
+    const decision = await this.privacy.forViewer(BigInt(bio.clan_id), req?.user?.userId);
+    if (!decision.restricted) return serializeBigInt(bio);
+    const generations = await this.privacy.generationMap(BigInt(bio.clan_id));
+    const redacted = redactPersonBio(bio, decision.rules, generations.get(bio.person_id) ?? 1);
+    if (!redacted) throw new NotFoundException('人物不存在');
+    return serializeBigInt(redacted);
   }
 
   /** 人物传记附表写入（admin） */
@@ -210,7 +220,45 @@ export class CepuController {
   async search(@Param('clanSlug') clanSlug: string, @Query('q') q: string, @Req() req: any) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
-    return serializeBigInt(await this.cepuService.search(clanId, q ?? ''));
+    const result = await this.cepuService.search(clanId, q ?? '');
+    const decision = await this.privacy.forViewer(clanId, req?.user?.userId);
+    if (!decision.restricted) return serializeBigInt(result);
+    const generations = await this.privacy.generationMap(clanId);
+    const keyword = (q ?? '').trim();
+    const people = keyword.length >= 2 ? await this.privacy.namedPeople(clanId) : [];
+    const keywordHitsHiddenName = people.some((person) => (
+      person.full_name.includes(keyword)
+      && !visitorMaySeePerson(person.is_living, person.generation, decision.rules)
+    ));
+    return serializeBigInt({
+      ...result,
+      persons: result.persons.filter((person) => visitorMaySeePerson(
+        person.is_living !== false,
+        generations.get(String(person.person_id)) ?? 1,
+        decision.rules,
+      )),
+      volumes: keywordHitsHiddenName ? [] : result.volumes,
+    });
+  }
+
+  private async visitorExportOptions(clanId: bigint, userId?: string) {
+    const decision = await this.privacy.forViewer(clanId, userId);
+    if (!decision.restricted) return undefined;
+    return { rules: decision.rules, people: await this.privacy.namedPeople(clanId) };
+  }
+
+  private async presentVolume(clanId: bigint, userId: string | undefined, volume: any) {
+    const decision = await this.privacy.forViewer(clanId, userId);
+    if (!decision.restricted) return volume;
+    if (Array.isArray(volume?.entries)) {
+      return { ...volume, entries: redactCepuEntries(volume.entries, decision.rules) };
+    }
+    if (typeof volume?.content !== 'string' && typeof volume?.rulesText !== 'string') return volume;
+    const people = await this.privacy.namedPeople(clanId);
+    const next = { ...volume };
+    if (typeof next.content === 'string') next.content = redactDocumentHtml(next.content, decision.rules, people);
+    if (typeof next.rulesText === 'string') next.rulesText = redactDocumentHtml(next.rulesText, decision.rules, people);
+    return next;
   }
 
   // ==================== 分享只读链接（二期） ====================
@@ -285,6 +333,7 @@ export class CepuController {
   ) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
+    const visitor = await this.visitorExportOptions(clanId, req?.user?.userId);
     // 校验强制版式参数,只接受白名单值;非法或空 = 按卷配置
     const forceLayout =
       layout === 'su' || layout === 'ou' || layout === 'ou_chart' || layout === 'shixi_table' ? layout : undefined;
@@ -304,6 +353,7 @@ export class CepuController {
         framePt: suFrameWeightPt(framePt),
         continueNote: continueNote === 'brief' || continueNote === 'full' ? continueNote : undefined,
         showAvatars: showAvatars === '0' || showAvatars === 'false' ? false : showAvatars === '1' || showAvatars === 'true' ? true : undefined,
+        visitor,
       });
       res.set({
         'Content-Type': 'application/pdf',
@@ -341,6 +391,7 @@ export class CepuController {
   ) {
     const clanId = await this.resolveClanId(clanSlug);
     this.assertShareAllowed(req, clanId);
+    const visitor = await this.visitorExportOptions(clanId, req?.user?.userId);
     const forceLayout =
       layout === 'su' || layout === 'ou' || layout === 'ou_chart' || layout === 'shixi_table' ? layout : undefined;
     try {
@@ -356,6 +407,7 @@ export class CepuController {
         framePt: suFrameWeightPt(framePt),
         continueNote: continueNote === 'brief' || continueNote === 'full' ? continueNote : undefined,
         showAvatars: showAvatars === '0' || showAvatars === 'false' ? false : showAvatars === '1' || showAvatars === 'true' ? true : undefined,
+        visitor,
       });
       res.set({
         'Content-Type': 'application/msword',

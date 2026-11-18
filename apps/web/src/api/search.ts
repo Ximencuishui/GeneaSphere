@@ -8,7 +8,6 @@ export function createSearchPost(data: {
   origin_place: string;
   xipai_keywords: string[];
   contact_info: string;
-  created_by?: string;
 }) {
   return request.post('/api/search/post', data);
 }

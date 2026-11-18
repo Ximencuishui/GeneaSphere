@@ -113,6 +113,7 @@ declare module 'vue' {
     LegalPageLayout: typeof import('./components/LegalPageLayout.vue')['default']
     Lightning: typeof import('@element-plus/icons-vue')['Lightning']
     Loading: typeof import('@element-plus/icons-vue')['Loading']
+    LocationPicker: typeof import('./components/media/LocationPicker.vue')['default']
     Lock: typeof import('@element-plus/icons-vue')['Lock']
     Management: typeof import('@element-plus/icons-vue')['Management']
     MigrationMap: typeof import('./components/migration/MigrationMap.vue')['default']

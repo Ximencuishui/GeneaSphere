@@ -8,6 +8,7 @@ import { OrdersController } from './orders/orders.controller';
 import { SettingsController } from './settings/settings.controller';
 import { StatisticsController } from './statistics/statistics.controller';
 import { PlatformLogsController } from './logs/logs.controller';
+import { PlatformStorageUpgradeController } from './storage/storage-upgrade-review.controller';
 import { SettingsService } from './settings/settings.service';
 import { PdfReportService } from './statistics/pdf-report.service';
 import { ClanResolverService } from '../common/clan-resolver.service';
@@ -23,6 +24,7 @@ import { ClanResolverService } from '../common/clan-resolver.service';
     SettingsController,
     StatisticsController,
     PlatformLogsController,
+    PlatformStorageUpgradeController,
   ],
   providers: [SettingsService, PdfReportService, ClanResolverService],
   exports: [SettingsService, PdfReportService, ClanResolverService],

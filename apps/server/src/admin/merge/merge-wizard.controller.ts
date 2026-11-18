@@ -4,8 +4,38 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { MergeService } from './merge.service';
 import { PrismaService } from '@geneasphere/db';
-import { ApplicationStatus } from '@prisma/client';
 import { NotificationService } from '../../common/notification.service';
+import { serializeBigInt } from '../../common/bigint-serializer';
+
+const SENSITIVE_FIELD_KEYS = new Set([
+  'phone',
+  'phone_bound',
+  'contact_phone',
+  'contact_info',
+  'scanner_phone',
+  'id_card',
+  'id_card_url',
+  'id_card_uploaded_at',
+  'id_card_number',
+  'id_number',
+]);
+
+function stripSensitiveFields<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'bigint' || value instanceof Date) return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => stripSensitiveFields(item)) as unknown as T;
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (SENSITIVE_FIELD_KEYS.has(key)) continue;
+      out[key] = stripSensitiveFields(nested);
+    }
+    return out as T;
+  }
+  return value;
+}
 
 @ApiTags('admin/merge/wizard')
 @Controller('api/admin/merge')
@@ -18,6 +48,10 @@ export class MergeWizardController {
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
   ) {}
+
+  private present<T>(value: T): T {
+    return serializeBigInt(stripSensitiveFields(value));
+  }
 
   /**
    * 获取合并向导初始化数据
@@ -51,10 +85,10 @@ export class MergeWizardController {
 
     const wizardData = await this.mergeService.getWizardData(appId, mainClanId);
 
-    return {
+    return this.present({
       success: true,
       data: wizardData,
-    };
+    });
   }
 
   /**
@@ -72,10 +106,10 @@ export class MergeWizardController {
 
     const tree = await this.mergeService.getClanTree(clanId);
 
-    return {
+    return this.present({
       success: true,
       data: tree,
-    };
+    });
   }
 
   /**
@@ -95,10 +129,10 @@ export class MergeWizardController {
 
     const ancestors = await this.mergeService.getAncestors(personId, clanId);
 
-    return {
+    return this.present({
       success: true,
       data: ancestors,
-    };
+    });
   }
 
   /**
@@ -125,10 +159,10 @@ export class MergeWizardController {
       BigInt(applicantClanId),
     );
 
-    return {
+    return this.present({
       success: result.isValid,
       data: result,
-    };
+    });
   }
 
   /**
@@ -155,10 +189,10 @@ export class MergeWizardController {
       BigInt(mainClanId),
     );
 
-    return {
+    return this.present({
       success: true,
       data: alignments,
-    };
+    });
   }
 
   /**
@@ -171,11 +205,12 @@ export class MergeWizardController {
     @Body() body: {
       applicationId: string;
       anchorPersonId: string;
+      branchRootPersonId?: string;
       generationOffset?: number;
     },
   ) {
     const userId = req.user.userId;
-    const { applicationId, anchorPersonId, generationOffset = 0 } = body;
+    const { applicationId, anchorPersonId, branchRootPersonId, generationOffset = 0 } = body;
 
     // 获取申请信息以验证权限
     const app = await this.prisma.mergeApplication.findUnique({
@@ -191,6 +226,7 @@ export class MergeWizardController {
     const result = await this.mergeService.executeMerge(
       BigInt(applicationId),
       BigInt(anchorPersonId),
+      branchRootPersonId ? BigInt(branchRootPersonId) : null,
       generationOffset,
       userId,
     );
@@ -217,10 +253,10 @@ export class MergeWizardController {
       details: `Merged into anchor ${anchorPersonId}, generation offset: ${generationOffset}`,
     });
 
-    return {
+    return this.present({
       success: true,
       data: result,
-    };
+    });
   }
 
   /**
@@ -238,10 +274,10 @@ export class MergeWizardController {
 
     const snapshots = await this.mergeService.getMergeSnapshots(clanId);
 
-    return {
+    return this.present({
       success: true,
       data: snapshots,
-    };
+    });
   }
 
   /**
@@ -297,10 +333,10 @@ export class MergeWizardController {
       details: `Rolled back merge snapshot ${snapshotIdStr}`,
     });
 
-    return {
+    return this.present({
       success: true,
       message: 'Rollback completed successfully',
-    };
+    });
   }
 
   /**
@@ -332,14 +368,15 @@ export class MergeWizardController {
 
     const wizardData = await this.mergeService.getWizardData(appId, app.clan_id);
 
-    return {
+    return this.present({
       success: true,
       data: wizardData,
-    };
+    });
   }
 
   /**
    * 初审通过（进入待合并状态）
+   * 页面只对 PENDING 展示该操作，条件更新限定来源状态为 PENDING。
    */
   @Post('applications/:id/approve')
   @ApiOperation({ summary: 'Approve application for merge' })
@@ -360,14 +397,7 @@ export class MergeWizardController {
 
     await this.adminService.requireAdmin(app.clan_id, userId);
 
-    const updated = await this.prisma.mergeApplication.update({
-      where: { id: appId },
-      data: {
-        status: ApplicationStatus.APPROVED,
-        reviewed_by: userId,
-        reviewed_at: new Date(),
-      },
-    });
+    const updated = await this.mergeService.approveApplication(appId, userId);
 
     // 通知申请人
     await this.notificationService.notifyMergeApproved({
@@ -386,9 +416,87 @@ export class MergeWizardController {
       details: 'Application approved for merge',
     });
 
-    return {
+    return this.present({
       success: true,
       data: { status: updated.status },
-    };
+    });
+  }
+
+  /**
+   * 拒绝申请。只从 PENDING 条件更新。
+   */
+  @Post('applications/:id/reject')
+  @ApiOperation({ summary: 'Reject merge application' })
+  async rejectMerge(
+    @Request() req,
+    @Param('id') appIdStr: string,
+    @Body() body: { reason: string },
+  ) {
+    const userId = req.user.userId;
+    const appId = BigInt(appIdStr);
+
+    const app = await this.prisma.mergeApplication.findUnique({
+      where: { id: appId },
+    });
+
+    if (!app) {
+      throw new Error('Application not found');
+    }
+
+    await this.adminService.requireAdmin(app.clan_id, userId);
+
+    const updated = await this.mergeService.rejectApplication(appId, userId, body.reason);
+
+    await this.notificationService.notifyMergeResult({
+      applicantId: app.applicant_id,
+      clanId: app.clan_id,
+      applicationId: appIdStr,
+      approved: false,
+      reason: body.reason,
+    }).catch((err) => console.error('Notification failed:', err));
+
+    await this.adminService.logAction({
+      clanId: app.clan_id,
+      userId,
+      action: 'REJECT_MERGE',
+      targetType: 'MergeApplication',
+      targetId: appIdStr,
+      details: body.reason,
+    });
+
+    return this.present({
+      success: true,
+      data: { status: updated.status },
+    });
+  }
+
+  /**
+   * 标记为需人工核查。只从 PENDING 条件更新。
+   */
+  @Post('applications/:id/mark-manual')
+  @ApiOperation({ summary: 'Mark application as needs manual review' })
+  async markManualReview(
+    @Request() req,
+    @Param('id') appIdStr: string,
+  ) {
+    const userId = req.user.userId;
+    const appId = BigInt(appIdStr);
+
+    const app = await this.prisma.mergeApplication.findUnique({
+      where: { id: appId },
+    });
+
+    if (!app) {
+      throw new Error('Application not found');
+    }
+
+    await this.adminService.requireAdmin(app.clan_id, userId);
+
+    const updated = await this.mergeService.markNeedsManualReview(appId);
+
+    return this.present({
+      success: true,
+      data: { status: updated.status },
+    });
   }
 }

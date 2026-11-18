@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
+const router = useRouter()
 const clanSlug = computed(() => route.params.slug || '1')
+
+const PRIVACY_LABEL: Record<string, string> = {
+  self: '仅自己',
+  clan: '全族',
+  lineage: '上下几代',
+  public: '平台公开',
+  same_location: '同地点',
+}
+const privacyLabel = (value?: string) => (value && PRIVACY_LABEL[value]) || value || '-'
 
 // 数据列表
 const albums = ref<any[]>([])
@@ -18,7 +28,7 @@ const formData = ref({
   name: '',
   description: '',
   cover_url: '',
-  is_public: true,
+  default_privacy: 'clan',
 })
 
 // 加载数据
@@ -43,7 +53,7 @@ const handleAdd = () => {
     name: '',
     description: '',
     cover_url: '',
-    is_public: true,
+    default_privacy: 'clan',
   }
   dialogVisible.value = true
 }
@@ -55,7 +65,7 @@ const handleEdit = (row: any) => {
     name: row.name || '',
     description: row.description || '',
     cover_url: row.cover_url || '',
-    is_public: row.is_public !== false,
+    default_privacy: row.default_privacy || 'clan',
   }
   dialogVisible.value = true
 }
@@ -68,14 +78,10 @@ const handleSave = async () => {
   }
   try {
     if (editingId.value) {
-      await axios.put(`/api/admin/albums/${editingId.value}`, formData.value, {
-        params: { clanSlug: clanSlug.value },
-      })
+      await axios.put(`/api/admin/albums/${clanSlug.value}/${editingId.value}`, formData.value)
       ElMessage.success('更新成功')
     } else {
-      await axios.post('/api/admin/albums', formData.value, {
-        params: { clanSlug: clanSlug.value },
-      })
+      await axios.post(`/api/admin/albums/${clanSlug.value}`, formData.value)
       ElMessage.success('创建成功')
     }
     dialogVisible.value = false
@@ -103,7 +109,7 @@ const handleDelete = async (id: string) => {
 
 // 查看相册详情
 const handleViewDetail = (row: any) => {
-  window.open(`/admin/media/albums/${row.id}`, '_blank')
+  router.push({ name: 'admin-media-library', query: { albumId: row.id } })
 }
 
 onMounted(() => {
@@ -133,12 +139,15 @@ onMounted(() => {
       </el-table-column>
       <el-table-column prop="name" label="相册名称" min-width="150" />
       <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="media_count" label="照片数" width="100" />
-      <el-table-column label="公开状态" width="100">
+      <el-table-column prop="photo_count" label="照片数" width="100" />
+      <el-table-column label="默认隐私" width="120">
         <template #default="{ row }">
-          <el-tag :type="row.is_public ? 'success' : 'info'" size="small">
-            {{ row.is_public ? '公开' : '私有' }}
-          </el-tag>
+          {{ privacyLabel(row.default_privacy) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="创建者" width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.creator_name || '-' }}
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="160">
@@ -172,8 +181,10 @@ onMounted(() => {
         <el-form-item label="封面URL">
           <el-input v-model="formData.cover_url" placeholder="请输入封面图片URL" />
         </el-form-item>
-        <el-form-item label="公开状态">
-          <el-switch v-model="formData.is_public" />
+        <el-form-item label="默认隐私">
+          <el-select v-model="formData.default_privacy" style="width: 100%;">
+            <el-option v-for="(label, value) in PRIVACY_LABEL" :key="value" :label="label" :value="value" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>

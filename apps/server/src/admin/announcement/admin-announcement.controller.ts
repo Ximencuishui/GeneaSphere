@@ -34,7 +34,7 @@ export class AdminAnnouncementController {
 
   private async loadInClan(id: bigint, clanId: bigint) {
     const announcement = await this.prisma.clanAnnouncement.findFirst({
-      where: { id, clan_id: clanId },
+      where: { id, clan_id: clanId, deleted_at: null },
       include: {
         creator: {
           select: { id: true, phone: true, nickname: true },
@@ -63,7 +63,7 @@ export class AdminAnnouncementController {
     const pageSizeNum = parseInt(pageSize || '20', 10);
     const skip = (pageNum - 1) * pageSizeNum;
 
-    const where: any = { clan_id: clanId };
+    const where: any = { clan_id: clanId, deleted_at: null };
     if (status === 'active') {
       where.is_active = true;
     } else if (status === 'inactive') {
@@ -206,14 +206,14 @@ export class AdminAnnouncementController {
     const announcement = await this.prisma.$transaction(async (tx) => {
       if (body.is_pinned === true && !current.is_pinned) {
         const pinnedCount = await tx.clanAnnouncement.count({
-          where: { clan_id: clanId, is_pinned: true, id: { not: current.id } },
+          where: { clan_id: clanId, is_pinned: true, deleted_at: null, id: { not: current.id } },
         });
         if (pinnedCount >= PIN_LIMIT) {
           throw new BadRequestException('最多只能置顶3条公告');
         }
       }
       const updated = await tx.clanAnnouncement.updateMany({
-        where: { id: current.id, clan_id: clanId },
+        where: { id: current.id, clan_id: clanId, deleted_at: null },
         data: {
           title: safeTitle,
           content: safeContent,
@@ -258,8 +258,14 @@ export class AdminAnnouncementController {
     const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
     const announcement = await this.loadInClan(BigInt(id), clanId);
 
-    const removed = await this.prisma.clanAnnouncement.deleteMany({
-      where: { id: announcement.id, clan_id: clanId },
+    const removed = await this.prisma.clanAnnouncement.updateMany({
+      where: { id: announcement.id, clan_id: clanId, deleted_at: null },
+      data: {
+        deleted_at: new Date(),
+        deleted_by: userId,
+        is_active: false,
+        is_pinned: false,
+      },
     });
     if (removed.count !== 1) {
       throw new NotFoundException('公告不存在');
@@ -290,21 +296,21 @@ export class AdminAnnouncementController {
 
     const announcement = await this.prisma.$transaction(async (tx) => {
       const current = await tx.clanAnnouncement.findFirst({
-        where: { id: BigInt(id), clan_id: clanId },
+        where: { id: BigInt(id), clan_id: clanId, deleted_at: null },
       });
       if (!current) {
         throw new NotFoundException('公告不存在');
       }
       if (body.isPinned) {
         const pinnedCount = await tx.clanAnnouncement.count({
-          where: { clan_id: clanId, is_pinned: true, id: { not: current.id } },
+          where: { clan_id: clanId, is_pinned: true, deleted_at: null, id: { not: current.id } },
         });
         if (pinnedCount >= PIN_LIMIT) {
           throw new BadRequestException('最多只能置顶3条公告');
         }
       }
       const updated = await tx.clanAnnouncement.updateMany({
-        where: { id: current.id, clan_id: clanId },
+        where: { id: current.id, clan_id: clanId, deleted_at: null },
         data: { is_pinned: body.isPinned },
       });
       if (updated.count !== 1) {
@@ -346,7 +352,7 @@ export class AdminAnnouncementController {
     }
 
     const updated = await this.prisma.clanAnnouncement.updateMany({
-      where: { id: current.id, clan_id: clanId },
+      where: { id: current.id, clan_id: clanId, deleted_at: null },
       data: updateData,
     });
     if (updated.count !== 1) {

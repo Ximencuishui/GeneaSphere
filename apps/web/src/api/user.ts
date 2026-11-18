@@ -147,6 +147,23 @@ export const userApi = {
     counts: () =>
       request.get<UserBadgeCounts, UserBadgeCounts>('/api/user/badge-counts'),
   },
+  mergeApplications: {
+    list: () =>
+      request.get<{ data: Array<Record<string, unknown>> }, { data: Array<Record<string, unknown>> }>(
+        '/api/merge-applications',
+      ),
+    create: (data: {
+      clan_id: string;
+      origin_place: string;
+      xipai_info?: string[];
+      ancestor_name?: string;
+      migration_history?: string;
+      applicant_clan_id?: string;
+      branch_root_person_id?: string;
+    }) => request.post('/api/merge-applications', data),
+    withdraw: (id: string | number) =>
+      request.post(`/api/merge-applications/${trimId(id)}/withdraw`),
+  },
   applications: {
     list: (params?: {
       category?: UserApplicationCategory;

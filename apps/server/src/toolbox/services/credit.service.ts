@@ -216,6 +216,7 @@ export class CreditService {
     status: string,
     inputUrl?: string,
     mediaId?: bigint,
+    clanId?: bigint | null,
   ) {
     const prisma = this.prisma as any;
     return prisma.toolUsageLog.create({
@@ -227,6 +228,7 @@ export class CreditService {
         status,
         input_url: inputUrl,
         media_id: mediaId,
+        clan_id: clanId ?? null,
       },
     });
   }

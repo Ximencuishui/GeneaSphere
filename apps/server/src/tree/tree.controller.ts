@@ -26,6 +26,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { serializeBigInt } from '../common/bigint-serializer';
+import { PrivacyService } from '../privacy/privacy.service';
+import { redactClanTree, redactPersonDetail, redactTreeNode, visitorKinshipResult, visitorMaySeePerson } from '../privacy/visitor-privacy';
 
 /**
  * 族谱树 API
@@ -46,6 +48,7 @@ export class TreeController {
     private readonly treeService: TreeService,
     private readonly clanResolver: ClanResolverService,
     private readonly adminService: AdminService,
+    private readonly privacy: PrivacyService,
   ) {}
 
   /** 公开详情接口：有合法 token 就认出本人，没有或过期也不拦截。 */
@@ -133,11 +136,13 @@ export class TreeController {
 
   @Public()
   @Get('subtree/:rootPersonId')
-  async getSubTree(@Param('rootPersonId') rootPersonId: string): Promise<TreeNode> {
+  async getSubTree(@Param('rootPersonId') rootPersonId: string, @Req() req: any): Promise<TreeNode> {
     if (!/^\d+$/.test(rootPersonId)) {
       throw new BadRequestException('rootPersonId must be a positive integer');
     }
-    return await this.treeService.getSubTree(BigInt(rootPersonId));
+    const personId = BigInt(rootPersonId);
+    const tree = await this.treeService.getSubTree(personId);
+    return this.presentNode(personId, this.optionalUserId(req), tree);
   }
 
   /**
@@ -158,11 +163,17 @@ export class TreeController {
     @Query('depth') depth?: string,
     @Query('limit') limit?: string,
     @Query('draft') draft?: string,
+    @Req() req?: any,
   ): Promise<ClanTreeResponse> {
     const clanId = await this.resolveClanId(clanSlug);
-    const maxDepth = depth ? parseInt(depth, 10) : 0;
-    const nodeLimit = limit ? parseInt(limit, 10) : 0;
-    return await this.treeService.getClanFullTree(clanId, userId, maxDepth, nodeLimit, draft === '1');
+    const viewerId = this.optionalUserId(req);
+    const decision = await this.privacy.forViewer(clanId, viewerId);
+    const maxDepth = !decision.restricted && depth ? parseInt(depth, 10) : 0;
+    const nodeLimit = !decision.restricted && limit ? parseInt(limit, 10) : 0;
+    const tree = await this.treeService.getClanFullTree(clanId, userId, maxDepth, nodeLimit, draft === '1');
+    if (!decision.restricted) return tree;
+    const generations = await this.privacy.generationMap(clanId);
+    return redactClanTree(tree, decision.rules, generations);
   }
 
   /**
@@ -178,8 +189,13 @@ export class TreeController {
     @Query('offset') offset?: string,
     @Query('limit') limit?: string,
     @Query('userId') userId?: string,
+    @Req() req?: any,
   ): Promise<ClanNextBatchResponse> {
     const clanId = await this.resolveClanId(clanSlug);
+    const decision = await this.privacy.forViewer(clanId, this.optionalUserId(req));
+    if (decision.restricted) {
+      return { items: [], totalPersons: 0, shownPersons: 0, isPartial: false };
+    }
     const offsetNum = offset ? parseInt(offset, 10) : 0;
     const batchSize = limit ? parseInt(limit, 10) : 100;
     if (offsetNum < 0 || batchSize < 1) {
@@ -339,15 +355,16 @@ export class TreeController {
     @Param('personId') personId: string,
     @Query('up') up?: string,
     @Query('down') down?: string,
+    @Req() req?: any,
   ): Promise<FocusTreeResponse> {
     if (!/^\d+$/.test(personId)) {
       throw new BadRequestException('personId must be a positive integer');
     }
     const upN = this.parseFocusDepth(up, 'up');
     const downN = this.parseFocusDepth(down, 'down');
-    return serializeBigInt(
-      await this.treeService.getFocusTree(BigInt(personId), upN, downN),
-    );
+    const focus = await this.treeService.getFocusTree(BigInt(personId), upN, downN);
+    const root = await this.presentNode(BigInt(personId), this.optionalUserId(req), focus.root);
+    return serializeBigInt({ ...focus, root });
   }
 
   private parseFocusDepth(raw: string | undefined, name: string): number {
@@ -368,9 +385,23 @@ export class TreeController {
   @Public()
   @Get('person/:personId/detail')
   async getPersonDetail(@Param('personId') personId: string, @Req() req: any) {
-    return serializeBigInt(
-      await this.treeService.getPersonDetail(BigInt(personId), this.optionalUserId(req)),
-    );
+    const viewerId = this.optionalUserId(req);
+    const detail = await this.treeService.getPersonDetail(BigInt(personId), viewerId);
+    const access = await this.privacy.personAccess(BigInt(personId), viewerId);
+    if (!access) throw new NotFoundException('人物不存在');
+    if (!access.decision.restricted) return serializeBigInt(detail);
+    const redacted = redactPersonDetail(detail, access.decision.rules, access.generation);
+    if (!redacted) throw new NotFoundException('人物不存在');
+    return serializeBigInt(redacted);
+  }
+
+  private async presentNode(personId: bigint, viewerId: string | undefined, node: TreeNode): Promise<TreeNode> {
+    const access = await this.privacy.personAccess(personId, viewerId);
+    if (!access || !access.decision.restricted) return node;
+    const generations = await this.privacy.generationMap(access.person.clan_id);
+    const redacted = redactTreeNode(node, access.decision.rules, generations);
+    if (!redacted) throw new NotFoundException('人物不存在');
+    return redacted;
   }
 
   /**
@@ -413,11 +444,23 @@ export class TreeController {
    */
   @Public()
   @Post('kinship-check')
-  async checkKinship(@Body() dto: CheckKinshipDto) {
-    return await this.treeService.isConsanguineous(
-      BigInt(dto.person_a_id),
-      BigInt(dto.person_b_id),
-    );
+  async checkKinship(@Body() dto: CheckKinshipDto, @Req() req: any) {
+    const userId = this.optionalUserId(req);
+    const [a, b] = await Promise.all([
+      this.privacy.personAccess(BigInt(dto.person_a_id), userId),
+      this.privacy.personAccess(BigInt(dto.person_b_id), userId),
+    ]);
+    if (!a || !b) throw new NotFoundException('人物不存在');
+    const member = !a.decision.restricted && !b.decision.restricted;
+    if (!member) {
+      const aVisible = visitorMaySeePerson(a.person.is_living, a.generation, a.decision.rules);
+      const bVisible = visitorMaySeePerson(b.person.is_living, b.generation, b.decision.rules);
+      if (!aVisible || !bVisible || a.person.clan_id !== b.person.clan_id) {
+        throw new NotFoundException('人物不存在');
+      }
+    }
+    const result = await this.treeService.isConsanguineous(a.person.id, b.person.id);
+    return visitorKinshipResult(result, member);
   }
 
   /**

@@ -127,6 +127,15 @@ export interface UpdateFamilyBookPageDto {
   body?: string;
 }
 
+export interface FamilyBookPhotoCandidate {
+  id: string;
+  file_url: string;
+  display_url?: string | null;
+  thumb_url: string;
+  description: string;
+  source: 'mine' | 'library';
+}
+
 export interface PlaceFamilyBookOrderDto {
   specification: string;
   quantity?: number;
@@ -195,6 +204,22 @@ export const familyBookApi = {
   /** 删除项目 */
   deleteProject: (id: string) =>
     request.delete<{ message: string }, { message: string }>(`/api/family-book/projects/${id}`),
+
+  /** 可替换的照片：本人在该族上传的可见影像，以及该族已审核可见的影像库 */
+  listPhotoCandidates: (projectId: string) =>
+    request.get<
+      { data: FamilyBookPhotoCandidate[] },
+      { data: FamilyBookPhotoCandidate[] }
+    >(`/api/family-book/projects/${projectId}/photo-candidates`),
+
+  /** 只替换该页 content.photo_url */
+  replacePagePhoto: (projectId: string, pageId: string, mediaId: string) =>
+    request.put<
+      { message: string; photo_url: string },
+      { message: string; photo_url: string }
+    >(`/api/family-book/projects/${projectId}/pages/${pageId}/photo`, {
+      media_id: mediaId,
+    }),
 
   /** 编辑某个页面 */
   updatePage: (

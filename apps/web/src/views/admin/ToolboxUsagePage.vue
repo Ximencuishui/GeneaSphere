@@ -19,7 +19,8 @@ const pagination = ref({
 
 // 筛选
 const filters = ref({
-  tool: '',
+  toolType: '',
+  filterUserId: '',
   startDate: '',
   endDate: '',
 })
@@ -33,7 +34,8 @@ const fetchList = async () => {
         clanSlug: clanSlug.value,
         page: pagination.value.page,
         pageSize: pagination.value.pageSize,
-        tool: filters.value.tool || undefined,
+        toolType: filters.value.toolType || undefined,
+        filterUserId: filters.value.filterUserId || undefined,
         startDate: filters.value.startDate || undefined,
         endDate: filters.value.endDate || undefined,
       },
@@ -67,7 +69,7 @@ const handleSearch = () => {
 
 // 重置
 const handleReset = () => {
-  filters.value = { tool: '', startDate: '', endDate: '' }
+  filters.value = { toolType: '', filterUserId: '', startDate: '', endDate: '' }
   handleSearch()
 }
 
@@ -78,24 +80,24 @@ const handlePageChange = (page: number) => {
 }
 
 // 获取工具名称
-const getToolName = (tool: string) => {
-  const toolMap: Record<string, string> = {
-    memory_quiz: '族谱问答',
-    ocr: 'OCR识别',
-    face_compare: '人脸比对',
-    name_analysis: '姓名分析',
-    biography_rewrite: '生平改写',
-    image_enhance: '图片增强',
-  }
-  return toolMap[tool] || tool
+const TOOL_NAMES: Record<string, string> = {
+  restore: '修复',
+  color: '上色',
+  expand: '扩图',
+  remove: '去物',
+  compose: '拼图',
+  enhance: '增强',
+  animate: '动画',
 }
 
-// 获取状态标签
+const getToolName = (tool: string) => TOOL_NAMES[tool] || tool
+
 const getStatusTag = (status: string) => {
   const statusMap: Record<string, { type: string; text: string }> = {
-    success: { type: 'success', text: '成功' },
+    completed: { type: 'success', text: '完成' },
     failed: { type: 'danger', text: '失败' },
-    pending: { type: 'warning', text: '处理中' },
+    pending: { type: 'warning', text: '排队' },
+    processing: { type: 'warning', text: '处理中' },
   }
   return statusMap[status] || { type: 'info', text: status }
 }
@@ -118,25 +120,25 @@ onMounted(() => {
         <template #header>
           <span>总使用次数</span>
         </template>
-        <div class="stat-value">{{ stats.total_usage || 0 }}</div>
+        <div class="stat-value">{{ stats.total?.usage_count || 0 }}</div>
       </el-card>
       <el-card class="stat-card">
         <template #header>
           <span>本月使用</span>
         </template>
-        <div class="stat-value">{{ stats.monthly_usage || 0 }}</div>
+        <div class="stat-value">{{ stats.this_month?.usage_count || 0 }}</div>
       </el-card>
       <el-card class="stat-card">
         <template #header>
-          <span>使用成员数</span>
+          <span>本月消耗</span>
         </template>
-        <div class="stat-value">{{ stats.unique_users || 0 }}</div>
+        <div class="stat-value">{{ stats.this_month?.credits_used || 0 }}</div>
       </el-card>
       <el-card class="stat-card">
         <template #header>
-          <span>成功率</span>
+          <span>剩余免费次数</span>
         </template>
-        <div class="stat-value">{{ stats.success_rate || 0 }}%</div>
+        <div class="stat-value">{{ stats.remaining_free_credits || 0 }}</div>
       </el-card>
     </div>
 
@@ -151,16 +153,8 @@ onMounted(() => {
             {{ getToolName(row.tool) }}
           </template>
         </el-table-column>
-        <el-table-column prop="count" label="使用次数" />
-        <el-table-column prop="users" label="使用人数" />
-        <el-table-column label="占比" width="150">
-          <template #default="{ row }">
-            <el-progress
-              :percentage="stats.total_usage > 0 ? Math.round((row.count / stats.total_usage) * 100) : 0"
-              :stroke-width="8"
-            />
-          </template>
-        </el-table-column>
+        <el-table-column prop="count" label="本月次数" />
+        <el-table-column prop="credits" label="本月消耗" />
       </el-table>
     </el-card>
 
@@ -168,14 +162,18 @@ onMounted(() => {
     <el-card class="filter-card" style="margin-top: 16px;">
       <el-form :inline="true" :model="filters">
         <el-form-item label="工具类型">
-          <el-select v-model="filters.tool" placeholder="全部" clearable style="width: 150px;">
-            <el-option label="族谱问答" value="memory_quiz" />
-            <el-option label="OCR识别" value="ocr" />
-            <el-option label="人脸比对" value="face_compare" />
-            <el-option label="姓名分析" value="name_analysis" />
-            <el-option label="生平改写" value="biography_rewrite" />
-            <el-option label="图片增强" value="image_enhance" />
+          <el-select v-model="filters.toolType" placeholder="全部" clearable style="width: 150px;">
+            <el-option label="修复" value="restore" />
+            <el-option label="上色" value="color" />
+            <el-option label="扩图" value="expand" />
+            <el-option label="去物" value="remove" />
+            <el-option label="拼图" value="compose" />
+            <el-option label="增强" value="enhance" />
+            <el-option label="动画" value="animate" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="使用者">
+          <el-input v-model="filters.filterUserId" placeholder="用户ID" clearable style="width: 180px;" />
         </el-form-item>
         <el-form-item label="开始日期">
           <el-date-picker v-model="filters.startDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" />
@@ -196,24 +194,19 @@ onMounted(() => {
       <el-table-column prop="user_name" label="使用者" width="100" />
       <el-table-column label="工具" width="120">
         <template #default="{ row }">
-          {{ getToolName(row.tool) }}
+          {{ getToolName(row.tool_type) }}
         </template>
       </el-table-column>
-      <el-table-column prop="input_summary" label="输入摘要" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="output_summary" label="输出摘要" min-width="200" show-overflow-tooltip />
-      <el-table-column label="状态" width="80">
+      <el-table-column prop="image_count" label="处理图片数" width="110" />
+      <el-table-column prop="credits_used" label="消耗次数" width="100" />
+      <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="getStatusTag(row.status).type" size="small">
             {{ getStatusTag(row.status).text }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="duration_ms" label="耗时(ms)" width="100">
-        <template #default="{ row }">
-          {{ row.duration_ms ? `${row.duration_ms}ms` : '-' }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="使用时间" width="160">
+      <el-table-column prop="created_at" label="时间" width="160">
         <template #default="{ row }">
           {{ row.created_at ? new Date(row.created_at).toLocaleString() : '-' }}
         </template>

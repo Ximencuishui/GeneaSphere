@@ -49,6 +49,25 @@
         </div>
       </div>
 
+      <section id="settlement-covers" class="settlement-covers">
+        <h3 class="section-title">聚落封面</h3>
+        <p class="cover-note">村寨风貌或祭祀活动中设为封面、且已通过审核的影像。</p>
+        <p v-if="coverError" class="cover-note">{{ coverError }}</p>
+        <div v-else-if="covers.length" class="cover-grid">
+          <figure v-for="item in covers" :key="item.id" class="cover-card">
+            <img
+              :src="item.display_url || item.file_url || item.thumb_url"
+              :alt="item.description || item.taken_location || '聚落封面'"
+            />
+            <figcaption>
+              <strong>{{ item.taken_location || '未填写地点' }}</strong>
+              <span>{{ item.description || item.category || '' }}</span>
+            </figcaption>
+          </figure>
+        </div>
+        <el-empty v-else description="还没有聚落封面" />
+      </section>
+
       <!-- Statistics Cards -->
       <div class="statistics-cards">
         <el-card shadow="hover" class="stat-card">
@@ -147,6 +166,7 @@ import { ArrowLeft, Edit, Share, ArrowRight, MapLocation, Check, Close, Reading 
 import { useClanStore } from '@/stores/clan';
 import { useAuthStore } from '@/stores/auth';
 import { clanApi } from '@/api/clan';
+import { listCoverMedia } from '@/api/media';
 import type { Person } from '@/types';
 
 const route = useRoute();
@@ -160,6 +180,8 @@ const statistics = ref({
   family_count: 0,
 });
 const recentMembers = ref<Person[]>([]);
+const covers = ref<any[]>([]);
+const coverError = ref('');
 
 // 编辑对话框
 const editDialogVisible = ref(false);
@@ -234,6 +256,17 @@ onMounted(async () => {
     // Fetch statistics
     const stats = await clanApi.getStatistics(clanId);
     statistics.value = stats;
+
+    try {
+      const data = await listCoverMedia(clanId);
+      covers.value = Array.isArray(data) ? data : [];
+    } catch {
+      coverError.value = '聚落封面暂时无法显示';
+      covers.value = [];
+    }
+    if (route.hash === '#settlement-covers') {
+      document.getElementById('settlement-covers')?.scrollIntoView();
+    }
 
     // Get recent members from the clan object
     if (clanStore.currentClan && '_count' in clanStore.currentClan) {
@@ -341,6 +374,46 @@ function goToPersonDetail(personId: number) {
   font-weight: 500;
   color: #333;
   margin: 0 0 16px 0;
+}
+
+.settlement-covers {
+  padding: 24px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.cover-note {
+  margin: -8px 0 16px;
+  color: #888;
+  font-size: 13px;
+}
+
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.cover-card {
+  margin: 0;
+}
+
+.cover-card img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #f5f5f5;
+}
+
+.cover-card figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #666;
 }
 
 .member-list {

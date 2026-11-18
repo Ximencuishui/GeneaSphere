@@ -297,10 +297,11 @@ const routes: RouteRecordRaw[] = [
       { path: 'reports', name: 'admin-reports', component: () => import('@/views/admin/ReportsPage.vue'), meta: { title: '举报管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'statistics', name: 'admin-statistics', component: () => import('@/views/admin/StatisticsPage.vue'), meta: { title: '数据统计', requiresAuth: true, requiresAdmin: true } },
       { path: 'trash', name: 'admin-trash', component: () => import('@/views/admin/TrashPage.vue'), meta: { title: '回收站', requiresAuth: true, requiresAdmin: true } },
-      { path: 'media/library', name: 'admin-media-library', component: () => import('@/views/admin/MediaLibraryPage.vue'), meta: { title: '影像库', requiresAuth: true, requiresAdmin: true } },
+      { path: 'media/library', name: 'admin-media-library', component: () => import('@/views/admin/MediaLibraryPage.vue'), meta: { title: '影像库', requiresAuth: true, requiresAdmin: false, allowMediaMember: true } },
       { path: 'media/albums', name: 'admin-media-albums', component: () => import('@/views/admin/AlbumsPage.vue'), meta: { title: '相册管理', requiresAuth: true, requiresAdmin: true } },
       { path: 'toolbox-usage', name: 'admin-toolbox-usage', component: () => import('@/views/admin/ToolboxUsagePage.vue'), meta: { title: 'AI工具使用记录', requiresAuth: true, requiresAdmin: true } },
       { path: 'family-albums', name: 'admin-family-albums', component: () => import('@/views/admin/FamilyAlbumsPage.vue'), meta: { title: '家庭图册', requiresAuth: true, requiresAdmin: true } },
+      { path: 'lineage-videos', name: 'admin-lineage-videos', component: () => import('@/views/admin/LineageVideosPage.vue'), meta: { title: '直系血缘视频', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/clan-info', name: 'admin-clan-info', component: () => import('@/views/admin/ClanInfoPage.vue'), meta: { title: '家族信息', requiresAuth: true, requiresAdmin: true } },
       { path: 'settings/export', name: 'admin-export', component: () => import('@/views/admin/DataExportPage.vue'), meta: { title: '数据导出', requiresAuth: true, requiresAdmin: true } },
       { path: 'invite/qrcodes', name: 'admin-invite-qrcodes', component: () => import('@/views/admin/invite/QrcodeListPage.vue'), meta: { title: '入族核验', requiresAuth: true, requiresAdmin: true } },
@@ -690,6 +691,23 @@ router.beforeEach((to, _from, next) => {
   if (requiresAuth && !isLoggedInFamily) {
     next('/login')
     return
+  }
+
+  // 影像库对编辑者、观察员开放；其余后台页面仍只允许族长和管理员
+  if (to.meta.allowMediaMember && isLoggedInFamily) {
+    try {
+      const tokenPayload = JSON.parse(atob(familyToken!.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+      const userRole = tokenPayload.role || ''
+      const allowedRoles = ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER']
+      if (!allowedRoles.includes(userRole)) {
+        next('/clans')
+        return
+      }
+    } catch {
+      localStorage.removeItem(TOKEN_KEY)
+      next('/login')
+      return
+    }
   }
 
   // 家族管理员页面校验：检查用户角色

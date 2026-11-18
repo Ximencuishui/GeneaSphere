@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ReviewStatus } from '@prisma/client';
 import { ReviewsController } from './reviews.controller';
 
 describe('ReviewsController 谱稿初审', () => {
@@ -94,5 +95,62 @@ describe('ReviewsController 谱稿初审', () => {
       where: { id: { in: [1n] }, status: 'PENDING' },
       data: expect.objectContaining({ status: 'REJECTED', reject_reason: '不实' }),
     }));
+  });
+});
+
+describe('ReviewsController 影像审核', () => {
+  const admin = { requireAdmin: jest.fn(), logAction: jest.fn() };
+  const prisma = {
+    mediaReview: { findUnique: jest.fn(), update: jest.fn() },
+  };
+  const notification = { notifyMediaReview: jest.fn().mockResolvedValue(undefined) };
+  const controller = new ReviewsController(admin as never, prisma as never, notification as never);
+  const req = { user: { userId: 'admin-1' } };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    admin.requireAdmin.mockResolvedValue(undefined);
+    admin.logAction.mockResolvedValue(undefined);
+    notification.notifyMediaReview.mockResolvedValue(undefined);
+  });
+
+  it('approves pending media, clears the reject reason, and notifies the uploader', async () => {
+    prisma.mediaReview.findUnique.mockResolvedValue({
+      id: 5n,
+      status: ReviewStatus.PENDING,
+      media_id: 9n,
+      media: { clan_id: 2n, uploader_id: 'uploader-1' },
+    });
+    prisma.mediaReview.update.mockResolvedValue({ status: ReviewStatus.APPROVED });
+
+    await controller.approveMedia(req, '5');
+
+    expect(prisma.mediaReview.update).toHaveBeenCalledWith({
+      where: { id: 5n },
+      data: expect.objectContaining({
+        status: ReviewStatus.APPROVED,
+        reject_reason: null,
+        reviewer_id: 'admin-1',
+      }),
+    });
+    expect(notification.notifyMediaReview).toHaveBeenCalledWith(expect.objectContaining({
+      uploaderId: 'uploader-1',
+      mediaId: '9',
+      approved: true,
+    }));
+  });
+
+  it('does not approve media that is not pending', async () => {
+    prisma.mediaReview.findUnique.mockResolvedValue({
+      id: 5n,
+      status: ReviewStatus.REJECTED,
+      media_id: 9n,
+      media: { clan_id: 2n, uploader_id: 'uploader-1' },
+    });
+
+    await expect(controller.approveMedia(req, '5')).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.mediaReview.update).not.toHaveBeenCalled();
+    expect(notification.notifyMediaReview).not.toHaveBeenCalled();
   });
 });

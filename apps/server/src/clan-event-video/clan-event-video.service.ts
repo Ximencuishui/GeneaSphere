@@ -1,10 +1,19 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { VideoProjectStatus, FamilyEventType, Prisma } from '@prisma/client';
+import { CosService } from '../cos/cos.service';
+import {
+  ClanVideoSlide,
+  clipText,
+  clanVideoSlideSeconds,
+  resolveClanVideoDestination,
+} from '../jobs/clan-video-job';
 import { CreateClanEventVideoDto } from './dto/create-clan-event-video.dto';
 
 /**
@@ -17,7 +26,10 @@ import { CreateClanEventVideoDto } from './dto/create-clan-event-video.dto';
 export class ClanEventVideoService {
   private readonly logger = new Logger(ClanEventVideoService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly cosService?: CosService,
+  ) {}
 
   /**
    * 创建大事件视频项目
@@ -28,15 +40,24 @@ export class ClanEventVideoService {
       where: {
         clan_id: clanId,
         ...(dto.event_type_filter?.length ? { event_type: { in: dto.event_type_filter } } : {}),
-        ...(dto.start_year ? { event_year: { gte: dto.start_year } } : {}),
-        ...(dto.end_year ? { event_year: { lte: dto.end_year } } : {}),
+        ...(dto.start_year || dto.end_year
+          ? {
+              event_year: {
+                ...(dto.start_year ? { gte: dto.start_year } : {}),
+                ...(dto.end_year ? { lte: dto.end_year } : {}),
+              },
+            }
+          : {}),
       },
       orderBy: [{ event_year: 'asc' }, { event_date: 'asc' }],
     });
 
     if (events.length === 0) {
-      this.logger.warn(`家族 ${clanId} 在指定范围内无大事件`);
+      throw new BadRequestException('指定范围内没有可生成的事件');
     }
+
+    const style = dto.style ?? 'nostalgic';
+    const slides = await this.toEventSlides(clanId, events);
 
     // 创建项目
     const project = await this.prisma.clanEventVideo.create({
@@ -48,7 +69,7 @@ export class ClanEventVideoService {
         event_type_filter: dto.event_type_filter
           ? (dto.event_type_filter as unknown as Prisma.InputJsonValue)
           : Prisma.JsonNull,
-        style: dto.style ?? 'nostalgic',
+        style,
         status: VideoProjectStatus.queued,
         event_count: events.length,
         created_by: userId,
@@ -56,6 +77,11 @@ export class ClanEventVideoService {
     });
 
     try {
+      const destination = await resolveClanVideoDestination(
+        this.cosService,
+        'clan-event',
+        project.id.toString(),
+      );
       await this.prisma.heavyJob.create({
         data: {
           type: 'video',
@@ -65,7 +91,14 @@ export class ClanEventVideoService {
           payload: {
             kind: 'clan-event',
             projectId: project.id.toString(),
-          },
+            title: dto.title,
+            style,
+            slide_seconds: clanVideoSlideSeconds(style, slides.length),
+            events: slides,
+            public_url: destination.public_url,
+            storage_path: destination.storage_path,
+            ...(destination.upload_url ? { upload_url: destination.upload_url } : {}),
+          } as unknown as Prisma.InputJsonValue,
         },
       });
     } catch (err) {
@@ -74,6 +107,60 @@ export class ClanEventVideoService {
     }
 
     return this.toResponse(project);
+  }
+
+  private async toEventSlides(
+    clanId: bigint,
+    events: Array<{
+      event_name?: string | null;
+      event_year?: number | null;
+      location?: string | null;
+      description?: string | null;
+      media_ids?: unknown;
+    }>,
+  ): Promise<ClanVideoSlide[]> {
+    const images = await this.loadMediaUrls(
+      clanId,
+      events.flatMap((event) => this.collectMediaIds(event.media_ids)),
+    );
+    return events.map((event) => {
+      const imageId = this.collectMediaIds(event.media_ids).find((id) => images.has(id.toString()));
+      return {
+        title: clipText(event.event_name, 100) || '家族事件',
+        year: typeof event.event_year === 'number' && Number.isFinite(event.event_year) ? event.event_year : null,
+        place: clipText(event.location, 200),
+        description: clipText(event.description, 300),
+        image_url: imageId ? images.get(imageId.toString()) ?? null : null,
+      };
+    });
+  }
+
+  private collectMediaIds(value: unknown): bigint[] {
+    if (!Array.isArray(value)) return [];
+    const ids: bigint[] = [];
+    const seen = new Set<string>();
+    for (const item of value) {
+      const text = typeof item === 'number' || typeof item === 'string' ? String(item).trim() : '';
+      if (!/^\d+$/.test(text) || text === '0' || seen.has(text)) continue;
+      seen.add(text);
+      ids.push(BigInt(text));
+    }
+    return ids;
+  }
+
+  private async loadMediaUrls(clanId: bigint, ids: bigint[]): Promise<Map<string, string>> {
+    const unique = [...new Map(ids.map((id) => [id.toString(), id])).values()];
+    if (!unique.length) return new Map();
+    const rows = await this.prisma.mediaArchive.findMany({
+      where: { clan_id: clanId, id: { in: unique }, deleted_at: null },
+      select: { id: true, display_url: true, file_url: true, thumb_url: true },
+    });
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      const url = row.display_url || row.file_url || row.thumb_url;
+      if (typeof url === 'string' && url.trim()) map.set(row.id.toString(), url.trim());
+    }
+    return map;
   }
 
   private async markProjectFailed(projectId: bigint) {
@@ -141,8 +228,14 @@ export class ClanEventVideoService {
       ...(options.event_type_filter?.length
         ? { event_type: { in: options.event_type_filter } }
         : {}),
-      ...(options.start_year ? { event_year: { gte: options.start_year } } : {}),
-      ...(options.end_year ? { event_year: { lte: options.end_year } } : {}),
+      ...(options.start_year || options.end_year
+        ? {
+            event_year: {
+              ...(options.start_year ? { gte: options.start_year } : {}),
+              ...(options.end_year ? { lte: options.end_year } : {}),
+            },
+          }
+        : {}),
     };
 
     const [count, yearRange] = await this.prisma.$transaction([

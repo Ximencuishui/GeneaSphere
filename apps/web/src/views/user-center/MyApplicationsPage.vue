@@ -11,7 +11,7 @@
     <header class="page-header">
       <h2 class="page-title">我的申请</h2>
       <p class="page-tip">
-        集中查看你提交的<strong>族谱修改 / 寻亲会话 / 家庭关系变更</strong>三类申请，
+        集中查看你提交的<strong>族谱修改 / 寻亲会话 / 家庭关系变更 / 认亲申请</strong>，
         支持按状态筛选与分页加载。
       </p>
     </header>
@@ -184,6 +184,37 @@
           @current-change="(p: number) => changePage('relation_change', p)"
         />
       </ElTabPane>
+
+      <ElTabPane :label="`认亲申请 (${kinshipRows.length})`" name="kinship">
+        <div class="kinship-form">
+          <ElInput v-model="kinshipForm.clan_id" placeholder="受理家族 ID" />
+          <ElInput v-model="kinshipForm.origin_place" placeholder="祖籍地" />
+          <ElInput v-model="kinshipForm.xipai_info" placeholder="字辈，用逗号分隔，可空" />
+          <ElInput v-model="kinshipForm.ancestor_name" placeholder="祖先名，可空" />
+          <ElInput v-model="kinshipForm.migration_history" placeholder="迁徙说明，可空" />
+          <ElInput v-model="kinshipForm.applicant_clan_id" placeholder="申请方家族 ID，可空" />
+          <ElInput v-model="kinshipForm.branch_root_person_id" placeholder="支系根人物 ID，可空" />
+          <ElButton type="primary" :loading="kinshipSubmitting" @click="submitKinship">发起认亲</ElButton>
+        </div>
+        <ElTable :data="kinshipRows" v-loading="kinshipLoading" border stripe style="margin-top: 12px">
+          <ElTableColumn prop="id" label="ID" width="80" />
+          <ElTableColumn prop="origin_place" label="祖籍地" min-width="140" />
+          <ElTableColumn prop="status" label="状态" width="120" />
+          <ElTableColumn label="操作" width="120">
+            <template #default="{ row }">
+              <ElButton
+                v-if="row.status === 'PENDING'"
+                link
+                type="danger"
+                @click="withdrawKinship(row.id)"
+              >
+                撤回
+              </ElButton>
+            </template>
+          </ElTableColumn>
+        </ElTable>
+        <div v-if="!kinshipLoading && kinshipRows.length === 0" class="empty-tip">暂无认亲申请</div>
+      </ElTabPane>
     </ElTabs>
   </div>
 </template>
@@ -204,7 +235,7 @@ const userStore = useUserCenterStore()
 
 type Category = 'modification' | 'verification' | 'relation_change'
 
-const activeTab = ref<Category>('modification')
+const activeTab = ref<Category | 'kinship'>('modification')
 
 const rows = reactive<Record<Category, any[]>>({
   modification: [],
@@ -295,6 +326,70 @@ const relationTypeText = (t: string) =>
 const privacyText = (p: string) =>
   ({ self: '本人可见', admin: '管理员可见', clan: '家族可见' }[p] || p)
 
+const kinshipRows = ref<any[]>([])
+const kinshipLoading = ref(false)
+const kinshipSubmitting = ref(false)
+const kinshipForm = reactive({
+  clan_id: '',
+  origin_place: '',
+  xipai_info: '',
+  ancestor_name: '',
+  migration_history: '',
+  applicant_clan_id: '',
+  branch_root_person_id: '',
+})
+
+const loadKinship = async () => {
+  kinshipLoading.value = true
+  try {
+    const res = (await userApi.mergeApplications.list()) as { data?: any[] }
+    kinshipRows.value = res?.data || []
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '认亲申请加载失败')
+  } finally {
+    kinshipLoading.value = false
+  }
+}
+
+const submitKinship = async () => {
+  if (!kinshipForm.clan_id.trim() || !kinshipForm.origin_place.trim()) {
+    ElMessage.warning('请填写受理家族和祖籍地')
+    return
+  }
+  kinshipSubmitting.value = true
+  try {
+    await userApi.mergeApplications.create({
+      clan_id: kinshipForm.clan_id.trim(),
+      origin_place: kinshipForm.origin_place.trim(),
+      xipai_info: kinshipForm.xipai_info
+        .split(/[,，]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+      ancestor_name: kinshipForm.ancestor_name.trim() || undefined,
+      migration_history: kinshipForm.migration_history.trim() || undefined,
+      applicant_clan_id: kinshipForm.applicant_clan_id.trim() || undefined,
+      branch_root_person_id: kinshipForm.branch_root_person_id.trim() || undefined,
+    })
+    ElMessage.success('认亲申请已提交')
+    kinshipForm.origin_place = ''
+    await loadKinship()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '提交失败')
+  } finally {
+    kinshipSubmitting.value = false
+  }
+}
+
+const withdrawKinship = async (id: string) => {
+  try {
+    await userApi.mergeApplications.withdraw(id)
+    ElMessage.success('已撤回')
+    await loadKinship()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '撤回失败')
+  }
+}
+
 const fetchTab = async (category: Category) => {
   loading[category] = true
   try {
@@ -333,11 +428,16 @@ const changePage = (category: Category, p: number) => {
 
 // tab 切换 & 状态过滤变化时重新加载
 watch(activeTab, (t) => {
-  if (t) fetchTab(t as Category)
+  if (t === 'kinship') {
+    loadKinship()
+    return
+  }
+  if (t) fetchTab(t)
 })
 watch(
   () => ({ ...filterStatus }),
   () => {
+    if (activeTab.value === 'kinship') return
     pagination[activeTab.value].page = 1
     fetchTab(activeTab.value)
   },
@@ -398,5 +498,11 @@ onMounted(async () => {
 .diff-new {
   color: #5d4037;
   font-weight: 600;
+}
+.kinship-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
 }
 </style>

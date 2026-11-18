@@ -1,4 +1,4 @@
-import { IsString, IsArray, ArrayMinSize, IsOptional } from 'class-validator';
+import { IsString, IsArray, ArrayMinSize } from 'class-validator';
 
 export class CreateSearchPostDto {
   @IsString()
@@ -10,8 +10,4 @@ export class CreateSearchPostDto {
 
   @IsString()
   contact_info: string;
-
-  @IsOptional()
-  @IsString()
-  created_by?: string;
 }

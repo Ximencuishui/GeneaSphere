@@ -5,8 +5,10 @@ import { InfoFilled, Tools, Wallet, Histogram } from '@element-plus/icons-vue';
 import toolboxApi, { TOOLS } from '@/api/toolbox';
 import type { CreditInfo, UsageLog, PackageConfig } from '@/api/toolbox';
 import { useCapabilityStore } from '@/stores/capability';
+import { useClanStore } from '@/stores/clan';
 
 const capabilityStore = useCapabilityStore();
+const clanStore = useClanStore();
 
 const loading = ref(false);
 const submitting = ref(false);
@@ -154,9 +156,11 @@ async function handleProcessImage() {
 
   submitting.value = true;
   try {
+    const current = clanStore.currentClan;
     const result = await toolboxApi.process({
       tool_type: selectedTool.value.type,
       image_url: uploadedImage.value,
+      clan_slug: current?.slug || (current?.id != null ? String(current.id) : undefined),
     });
 
     if (result.success) {

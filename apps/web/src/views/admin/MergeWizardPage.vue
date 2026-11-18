@@ -188,6 +188,7 @@ const executeMerge = async () => {
     const res = await axios.post('/api/admin/merge/execute', {
       applicationId: route.params.appId,
       anchorPersonId: selectedAnchor.value.id,
+      branchRootPersonId: wizardData.value?.application?.branch_root_person_id,
       generationOffset: offsetAdjustment,
     })
     

@@ -1,85 +1,85 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const clanSlug = computed(() => route.params.slug || '1')
+const clanSlug = computed(() => String(route.params.slug || '1'))
 
-// 导出选项
 const exportOptions = ref({
   type: 'all',
-  format: 'excel',
-  includeDeceased: true,
-  includePhotos: true,
-  includeMedia: false,
+  format: 'json',
 })
-
-// 导出状态
 const exporting = ref(false)
+const tasks = ref<any[]>([])
 
-// 导出类型列表
 const exportTypes = [
-  { value: 'all', label: '全部数据' },
+  { value: 'all', label: '全部数据（ZIP）' },
   { value: 'members', label: '成员数据' },
   { value: 'relationships', label: '家族关系' },
-  { value: 'media', label: '影像数据' },
+  { value: 'media', label: '影像清单' },
   { value: 'migration', label: '迁徙记录' },
+  { value: 'logs', label: '操作日志' },
 ]
 
-// 格式选项
 const formatOptions = [
-  { value: 'excel', label: 'Excel (.xlsx)' },
-  { value: 'csv', label: 'CSV (.csv)' },
-  { value: 'json', label: 'JSON (.json)' },
+  { value: 'csv', label: 'CSV' },
+  { value: 'json', label: 'JSON' },
 ]
 
-// 执行导出
+const statusText: Record<string, string> = {
+  pending: '排队中',
+  processing: '处理中',
+  completed: '可下载',
+  failed: '失败',
+}
+
+const loadTasks = async () => {
+  const res = await axios.get('/api/admin/settings/exports', {
+    params: { clanSlug: clanSlug.value },
+  })
+  tasks.value = res.data.data || []
+}
+
 const handleExport = async () => {
   exporting.value = true
   try {
-    const params = new URLSearchParams()
-    params.append('clanId', clanSlug.value as string)
-    params.append('type', exportOptions.value.type)
-    params.append('format', exportOptions.value.format)
-    params.append('includeDeceased', String(exportOptions.value.includeDeceased))
-    params.append('includePhotos', String(exportOptions.value.includePhotos))
-    params.append('includeMedia', String(exportOptions.value.includeMedia))
-
-    ElMessage.info('正在准备导出文件，请稍候...')
-
-    const res = await axios.get(`/api/admin/settings/export?${params.toString()}`, {
-      responseType: 'blob',
+    await axios.post('/api/admin/settings/exports', {
+      clanSlug: clanSlug.value,
+      type: exportOptions.value.type,
+      format: exportOptions.value.format,
     })
-
-    // 创建下载链接
-    const blob = new Blob([res.data], { type: res.headers['content-type'] || 'application/octet-stream' })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-
-    // 生成文件名
-    const timestamp = new Date().toISOString().slice(0, 10)
-    const filename = `family_export_${timestamp}.${exportOptions.value.format}`
-    link.download = filename
-
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
-
-    ElMessage.success('导出成功')
+    ElMessage.success('已提交导出，完成后会收到站内信')
+    await loadTasks()
   } catch (e: any) {
-    if (e.response?.status === 401) {
-      ElMessage.error('请先登录')
-    } else {
-      ElMessage.error(e.message || '导出失败')
-    }
+    ElMessage.error(e.response?.data?.message || '提交失败')
   } finally {
     exporting.value = false
   }
 }
+
+const downloadTask = async (row: any) => {
+  try {
+    const res = await axios.get(`/api/admin/settings/exports/${row.id}/download`, {
+      params: { clanSlug: clanSlug.value },
+      responseType: 'blob',
+    })
+    const blob = new Blob([res.data], { type: res.headers['content-type'] || 'application/octet-stream' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = row.file_name || `export-${row.id}`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.message || '下载失败')
+  }
+}
+
+onMounted(loadTasks)
 </script>
 
 <template>
@@ -90,12 +90,12 @@ const handleExport = async () => {
 
     <el-card class="export-card">
       <template #header>
-        <span>导出设置</span>
+        <span>提交导出任务</span>
       </template>
 
       <el-form :model="exportOptions" label-width="120px">
         <el-form-item label="导出类型">
-          <el-select v-model="exportOptions.type" style="width: 200px;">
+          <el-select v-model="exportOptions.type" style="width: 240px;">
             <el-option
               v-for="item in exportTypes"
               :key="item.value"
@@ -105,8 +105,8 @@ const handleExport = async () => {
           </el-select>
         </el-form-item>
 
-        <el-form-item label="导出格式">
-          <el-select v-model="exportOptions.format" style="width: 200px;">
+        <el-form-item label="族谱格式">
+          <el-select v-model="exportOptions.format" style="width: 240px;">
             <el-option
               v-for="item in formatOptions"
               :key="item.value"
@@ -116,18 +116,42 @@ const handleExport = async () => {
           </el-select>
         </el-form-item>
 
-        <el-form-item label="导出选项">
-          <el-checkbox v-model="exportOptions.includeDeceased">包含已故成员</el-checkbox>
-          <el-checkbox v-model="exportOptions.includePhotos">包含照片信息</el-checkbox>
-          <el-checkbox v-model="exportOptions.includeMedia">包含影像文件</el-checkbox>
-        </el-form-item>
-
         <el-form-item>
           <el-button type="primary" :loading="exporting" @click="handleExport">
-            {{ exporting ? '导出中...' : '开始导出' }}
+            提交任务
           </el-button>
+          <el-button @click="loadTasks">刷新</el-button>
         </el-form-item>
       </el-form>
+    </el-card>
+
+    <el-card style="margin-top: 16px;">
+      <template #header>
+        <span>导出记录</span>
+      </template>
+      <el-table :data="tasks" stripe>
+        <el-table-column prop="created_at" label="提交时间" min-width="160">
+          <template #default="{ row }">{{ new Date(row.created_at).toLocaleString() }}</template>
+        </el-table-column>
+        <el-table-column prop="type" label="类型" width="120" />
+        <el-table-column prop="format" label="格式" width="80" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">{{ statusText[row.status] || row.status }}</template>
+        </el-table-column>
+        <el-table-column prop="error_message" label="说明" min-width="160" />
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'completed'"
+              size="small"
+              type="primary"
+              @click="downloadTask(row)"
+            >
+              下载
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <el-card class="export-tips" style="margin-top: 16px;">
@@ -135,11 +159,10 @@ const handleExport = async () => {
         <span>导出说明</span>
       </template>
       <ul class="tips-list">
-        <li>Excel 格式适合查看和打印，包含基本格式</li>
-        <li>CSV 格式适合数据迁移或导入其他系统</li>
-        <li>JSON 格式保留完整数据结构，适合程序处理</li>
-        <li>影像文件需要单独下载，不包含在导出包中</li>
-        <li>大量数据导出可能需要较长时间，请耐心等待</li>
+        <li>任务在后台生成，完成后通过站内信通知，文件保留 7 天</li>
+        <li>全部数据打成 ZIP：族谱 JSON 或 CSV、迁徙 CSV、操作日志 CSV、影像清单 CSV</li>
+        <li>本地或对象存储能读到的影像原文件会放进 ZIP；读不到的只在清单里保留下载地址</li>
+        <li>当前没有 Excel 导出，请使用 CSV 或 JSON</li>
       </ul>
     </el-card>
   </div>
@@ -148,7 +171,7 @@ const handleExport = async () => {
 <style scoped>
 .data-export-page {
   padding: 20px;
-  max-width: 800px;
+  max-width: 960px;
 }
 
 .page-header {
@@ -158,10 +181,6 @@ const handleExport = async () => {
 .page-header h2 {
   margin: 0;
   font-size: 18px;
-}
-
-.export-card {
-  margin-bottom: 0;
 }
 
 .tips-list {

@@ -65,7 +65,7 @@ const handleApprove = async (app: any) => {
 
 // 进入合并向导
 const goToMergeWizard = (app: any) => {
-  router.push(`/admin/merge/wizard/${app.id}`)
+  router.push(`/zupu/${clanSlug.value}/merge/wizard/${app.id}`)
 }
 
 const handleReject = async (app: any) => {
@@ -246,7 +246,7 @@ onMounted(() => {
             <ElButton
               type="info"
               size="small"
-              @click="router.push(`/zupu/${clanSlug}//admin/merge/applications/` + row.id)"
+              @click="router.push(`/zupu/${clanSlug}/merge/wizard/${row.id}`)"
             >
               查看详情
             </ElButton>

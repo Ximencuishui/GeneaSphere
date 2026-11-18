@@ -1,6 +1,6 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
-import { ApplicationStatus, Role } from '@prisma/client';
+import { ApplicationStatus, ChildRelationType, Role } from '@prisma/client';
 
 export interface MergeWizardData {
   application: any;
@@ -40,6 +40,8 @@ export class MergeService {
         applicant: { select: { id: true, phone: true } },
         matched_person: true,
         clan: true,
+        applicant_clan: true,
+        branch_root_person: true,
       },
     });
 
@@ -67,7 +69,7 @@ export class MergeService {
 
     return {
       application,
-      applicantClan: application.clan,
+      applicantClan: application.applicant_clan ?? application.clan,
       mainClan,
       comparison,
     };
@@ -313,17 +315,75 @@ export class MergeService {
   }
 
   /**
-   * 执行合并（在事务中）
+   * 初审通过。页面只在 PENDING 上提供该操作，合法来源只有 PENDING。
+   * 条件更新匹配 0 行时拒绝，避免从 REJECTED / MERGED / REVERTED 再次通过。
+   */
+  async approveApplication(applicationId: bigint, reviewerId: string): Promise<{ status: ApplicationStatus }> {
+    return this.transitionFromPending(applicationId, {
+      status: ApplicationStatus.APPROVED,
+      reviewed_by: reviewerId,
+      reviewed_at: new Date(),
+    }, '申请当前状态不允许通过');
+  }
+
+  /**
+   * 拒绝。页面只在 PENDING 上提供该操作。
+   */
+  async rejectApplication(
+    applicationId: bigint,
+    reviewerId: string,
+    reason: string,
+  ): Promise<{ status: ApplicationStatus }> {
+    return this.transitionFromPending(applicationId, {
+      status: ApplicationStatus.REJECTED,
+      reject_reason: reason,
+      reviewed_by: reviewerId,
+      reviewed_at: new Date(),
+    }, '申请当前状态不允许拒绝');
+  }
+
+  /**
+   * 转人工核查。页面只在 PENDING 上提供该操作。
+   */
+  async markNeedsManualReview(applicationId: bigint): Promise<{ status: ApplicationStatus }> {
+    return this.transitionFromPending(applicationId, {
+      status: ApplicationStatus.NEEDS_MANUAL_REVIEW,
+    }, '申请当前状态不允许转人工核查');
+  }
+
+  private async transitionFromPending(
+    applicationId: bigint,
+    data: {
+      status: ApplicationStatus;
+      reviewed_by?: string;
+      reviewed_at?: Date;
+      reject_reason?: string;
+    },
+    conflictMessage: string,
+  ): Promise<{ status: ApplicationStatus }> {
+    const updated = await this.prisma.mergeApplication.updateMany({
+      where: { id: applicationId, status: ApplicationStatus.PENDING },
+      data,
+    });
+    if (updated.count !== 1) {
+      throw new ConflictException(conflictMessage);
+    }
+    return { status: data.status };
+  }
+
+  /**
+   * 执行合并。generationOffset 只保留调用兼容，不写入 person_ancestry.depth。
    */
   async executeMerge(
     applicationId: bigint,
     anchorPersonId: bigint,
+    branchRootPersonId: bigint | null,
     generationOffset: number,
     operatorId: string,
   ): Promise<{ snapshotId: string; message: string }> {
+    void generationOffset;
     const app = await this.prisma.mergeApplication.findUnique({
       where: { id: applicationId },
-      include: { clan: true },
     });
 
     if (!app) {
@@ -334,100 +394,207 @@ export class MergeService {
       throw new BadRequestException('Application must be in APPROVED status to merge');
     }
 
-    const applicantClanId = app.clan_id;
-    const mainClanId = app.clan_id; // 主家族就是申请方现在关联的家族（审核通过后）
-
-    // 找到申请方始祖
-    const applicantRoot = await this.findClanRoot(applicantClanId);
-    if (!applicantRoot) {
-      throw new BadRequestException('Cannot find root person of applicant clan');
+    if (app.applicant_clan_id == null) {
+      throw new BadRequestException('申请没有申请方家族，不能执行合并');
     }
 
-    // 1. 创建快照（包括主家族和申请方家族的数据）
-    const snapshotId = await this.createFullSnapshot(
-      mainClanId,
-      applicantClanId,
-      applicationId,
-      anchorPersonId,
-      applicantRoot.id,
-      operatorId,
-    );
+    const storedRoot = app.branch_root_person_id ?? null;
+    if (storedRoot && branchRootPersonId && storedRoot !== branchRootPersonId) {
+      throw new BadRequestException('支系根与申请记录冲突');
+    }
+    const rootId = storedRoot ?? branchRootPersonId;
+    if (!rootId) {
+      throw new BadRequestException('缺少被挂载的支系根');
+    }
 
-    // 2. 在事务中执行合并
-    await this.prisma.$transaction(async (tx) => {
-      // 2.1 创建合并后的家庭单元
-      const newFamily = await tx.familyUnit.create({
+    const applicantClanId = app.applicant_clan_id;
+    const applicationBefore = {
+      status: ApplicationStatus.APPROVED,
+      merge_target_id: app.merge_target_id ? app.merge_target_id.toString() : null,
+    };
+
+    const snapshotId = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.mergeApplication.updateMany({
+        where: { id: applicationId, status: ApplicationStatus.APPROVED },
+        data: { status: ApplicationStatus.MERGED },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException('申请不是待合并状态，或已有合并正在执行');
+      }
+
+      const anchor = await tx.person.findUnique({ where: { id: anchorPersonId } });
+      const branchRoot = await tx.person.findUnique({ where: { id: rootId } });
+      if (!anchor || !branchRoot) {
+        throw new NotFoundException('挂载点或支系根不存在');
+      }
+      if (anchor.clan_id !== app.clan_id) {
+        throw new BadRequestException('挂载点不属于受理家族');
+      }
+
+      await this.assertMayAttach(tx, branchRoot, anchor, applicantClanId);
+      const merged = await this.buildMergedClosure(tx, anchor.id, branchRoot.id);
+
+      const applicantPersons = await tx.person.findMany({ where: { clan_id: applicantClanId } });
+      const ancestorIds = [...new Set(merged.anchorRows.map((row) => row.ancestor_id.toString()))].map((id) => BigInt(id));
+      const ancestorPersons = ancestorIds.length
+        ? await tx.person.findMany({ where: { id: { in: ancestorIds } } })
+        : [];
+      const personById = new Map<string, any>();
+      for (const person of [...applicantPersons, ...ancestorPersons]) {
+        personById.set(person.id.toString(), person);
+      }
+      const affectedPersons = [...personById.values()];
+      const affectedIds = affectedPersons.map((person) => person.id);
+
+      const bios = affectedIds.length
+        ? await tx.personBio.findMany({ where: { person_id: { in: affectedIds } } })
+        : [];
+      const events = affectedIds.length
+        ? await tx.personEvent.findMany({ where: { person_id: { in: affectedIds } } })
+        : [];
+      const families = await tx.familyUnit.findMany({
+        where: { clan_id: { in: [anchor.clan_id, applicantClanId] } },
+      });
+      const familyIds = families.map((family) => family.id);
+      const children = familyIds.length
+        ? await tx.familyChild.findMany({ where: { family_id: { in: familyIds } } })
+        : [];
+      const applicantPersonIds = applicantPersons.map((person) => person.id);
+      const mediaLinks = applicantPersonIds.length
+        ? await tx.mediaPersonLink.findMany({ where: { person_id: { in: applicantPersonIds } } })
+        : [];
+      const mediaIds = [...new Set(mediaLinks.map((link) => link.media_id.toString()))].map((id) => BigInt(id));
+      const mediaArchives = mediaIds.length
+        ? await tx.mediaArchive.findMany({ where: { id: { in: mediaIds } } })
+        : [];
+      const ancestry = affectedIds.length
+        ? await tx.personAncestry.findMany({
+            where: {
+              OR: [
+                { ancestor_id: { in: affectedIds } },
+                { descendant_id: { in: affectedIds } },
+              ],
+            },
+          })
+        : [];
+
+      const snapshot = await tx.dataSnapshot.create({
         data: {
-          clan_id: mainClanId,
-          husband_id: anchorPersonId,
-          wife_id: null, // 可以扩展为支持双亲
-          union_type: 'merger',
+          clan_id: anchor.clan_id,
+          merge_application_id: applicationId,
+          applicant_clan_id: applicantClanId,
+          merge_target_id: anchor.id,
+          branch_root_id: branchRoot.id,
+          operation_type: 'MERGE',
+          reason: 'Pre-merge snapshot',
+          created_by: operatorId,
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          data: {
+            applicationBefore,
+            persons: affectedPersons.map((person) => this.serializePerson(person)),
+            personBios: bios.map((bio) => this.serializeBio(bio)),
+            personEvents: events.map((event) => ({
+              id: event.id.toString(),
+              person_id: event.person_id.toString(),
+              event_year: event.event_year,
+              content: event.content,
+              sort_order: event.sort_order,
+            })),
+            mediaArchives: mediaArchives.map((media) => this.serializeMedia(media)),
+            familyUnits: families.map((family) => this.serializeFamily(family)),
+            familyChildren: children.map((child) => ({
+              id: child.id.toString(),
+              family_id: child.family_id.toString(),
+              child_id: child.child_id.toString(),
+              birth_order: child.birth_order,
+              child_type: child.child_type,
+            })),
+            ancestry: ancestry.map((edge) => ({
+              ancestor_id: edge.ancestor_id.toString(),
+              descendant_id: edge.descendant_id.toString(),
+              depth: edge.depth,
+            })),
+          },
         },
       });
 
-      // 2.2 将申请方始祖添加为挂载点的子女
-      await tx.familyChild.create({
-        data: {
-          family_id: newFamily.id,
-          child_id: applicantRoot.id,
-          birth_order: 1,
+      const existingParentEdge = await tx.familyChild.findFirst({
+        where: {
+          child_id: branchRoot.id,
+          family: {
+            husband_id: anchor.id,
+            wife_id: null,
+          },
         },
       });
+      if (!existingParentEdge) {
+        const newFamily = await tx.familyUnit.create({
+          data: {
+            clan_id: anchor.clan_id,
+            husband_id: anchor.id,
+            wife_id: null,
+            union_type: 'merger',
+          },
+        });
+        await tx.familyChild.create({
+          data: {
+            family_id: newFamily.id,
+            child_id: branchRoot.id,
+            birth_order: 1,
+            child_type: ChildRelationType.BIOLOGICAL,
+          },
+        });
+      }
 
-      // 2.3 更新申请方所有成员的 clan_id
       await tx.person.updateMany({
         where: { clan_id: applicantClanId },
-        data: { clan_id: mainClanId },
+        data: { clan_id: anchor.clan_id },
       });
-
-      // 2.4 更新 family_units 的 clan_id
       await tx.familyUnit.updateMany({
         where: { clan_id: applicantClanId },
-        data: { clan_id: mainClanId },
+        data: { clan_id: anchor.clan_id },
       });
+      if (mediaIds.length > 0) {
+        await tx.mediaArchive.updateMany({
+          where: { id: { in: mediaIds } },
+          data: { clan_id: anchor.clan_id },
+        });
+      }
 
-      // 2.5 更新 family_children 的引用（通过 family_units）
-      const applicantFamilies = await tx.familyUnit.findMany({
-        where: { clan_id: mainClanId, union_type: 'normal' }, // 原来的申请方家庭
-        select: { id: true },
+      await tx.personAncestry.deleteMany({
+        where: { descendant_id: { in: merged.branchIds } },
       });
+      await this.insertAncestry(tx, merged.edges);
 
-      // 2.6 重算闭包表
-      await this.recalculateAncestryAfterMerge(tx, mainClanId, applicantRoot.id, anchorPersonId, generationOffset);
-
-      // 2.7 更新申请状态
       await tx.mergeApplication.update({
         where: { id: applicationId },
-        data: {
-          status: ApplicationStatus.MERGED,
-          merge_target_id: anchorPersonId,
-        },
+        data: { merge_target_id: anchor.id },
       });
-
-      // 2.8 将申请人加入主家族（如果还不是成员）
       await tx.clanMember.upsert({
         where: {
           clan_id_user_id: {
-            clan_id: mainClanId,
+            clan_id: anchor.clan_id,
             user_id: app.applicant_id,
           },
         },
         update: { role: Role.EDITOR },
         create: {
-          clan_id: mainClanId,
+          clan_id: anchor.clan_id,
           user_id: app.applicant_id,
           role: Role.EDITOR,
         },
       });
-    });
+
+      return snapshot.id.toString();
+    }, { timeout: 20000 });
 
     return { snapshotId, message: 'Merge completed successfully' };
   }
 
   /**
-   * 回滚合并操作
+   * 回滚合并。过期和已回滚在事务外拒绝，事务内不写库。
    */
-  async rollbackMerge(snapshotId: bigint, operatorId: string): Promise<void> {
+  async rollbackMerge(snapshotId: bigint, _operatorId: string): Promise<void> {
     const snapshot = await this.prisma.dataSnapshot.findUnique({
       where: { id: snapshotId },
     });
@@ -435,151 +602,183 @@ export class MergeService {
     if (!snapshot) {
       throw new NotFoundException('Snapshot not found');
     }
-
     if (snapshot.is_reverted) {
       throw new BadRequestException('Snapshot has already been reverted');
     }
-
     if (new Date() > snapshot.expires_at) {
       throw new BadRequestException('Snapshot has expired (24 hour limit)');
     }
-
-    // 检查操作权限
-    // await this.adminService.requireAdmin(snapshot.clan_id, operatorId);
+    if (snapshot.operation_type !== 'MERGE') {
+      throw new BadRequestException('Snapshot is not a merge snapshot');
+    }
 
     const snapshotData = snapshot.data as any;
+    if (!snapshotData || !Array.isArray(snapshotData.persons) || !Array.isArray(snapshotData.ancestry)) {
+      throw new BadRequestException('Snapshot payload is incomplete');
+    }
 
     await this.prisma.$transaction(async (tx) => {
-      // 1. 恢复主家族数据
-      if (snapshotData.mainClanPersons) {
-        for (const person of snapshotData.mainClanPersons) {
-          await tx.person.upsert({
-            where: { id: BigInt(person.id) },
-            update: {
-              full_name: person.full_name,
-              gender: person.gender,
-              birth_date: person.birth_date ? new Date(person.birth_date) : null,
-              death_date: person.death_date ? new Date(person.death_date) : null,
-              is_living: person.is_living,
-            },
-            create: {
-              id: BigInt(person.id),
-              clan_id: snapshot.clan_id,
-              full_name: person.full_name,
-              gender: person.gender,
-              birth_date: person.birth_date ? new Date(person.birth_date) : null,
-              death_date: person.death_date ? new Date(person.death_date) : null,
-              is_living: person.is_living,
-            },
-          });
-        }
+      if (!snapshot.merge_application_id) {
+        throw new ConflictException('快照没有绑定认亲申请');
+      }
+      const previousTarget = snapshotData.applicationBefore?.merge_target_id ?? null;
+      const moved = await tx.mergeApplication.updateMany({
+        where: { id: snapshot.merge_application_id, status: ApplicationStatus.MERGED },
+        data: {
+          status: ApplicationStatus.APPROVED,
+          merge_target_id: previousTarget ? BigInt(previousTarget) : null,
+        },
+      });
+      if (moved.count !== 1) {
+        throw new ConflictException('申请不是已合并状态，不能回滚');
       }
 
-      // 2. 恢复申请方家族数据
-      if (snapshotData.applicantClanPersons) {
-        for (const person of snapshotData.applicantClanPersons) {
-          await tx.person.upsert({
-            where: { id: BigInt(person.id) },
-            update: {
-              clan_id: BigInt(person.clan_id),
-              full_name: person.full_name,
-              gender: person.gender,
-              birth_date: person.birth_date ? new Date(person.birth_date) : null,
-              death_date: person.death_date ? new Date(person.death_date) : null,
-              is_living: person.is_living,
-            },
-            create: {
-              id: BigInt(person.id),
-              clan_id: BigInt(person.clan_id),
-              full_name: person.full_name,
-              gender: person.gender,
-              birth_date: person.birth_date ? new Date(person.birth_date) : null,
-              death_date: person.death_date ? new Date(person.death_date) : null,
-              is_living: person.is_living,
-            },
-          });
-        }
+      for (const person of snapshotData.persons) {
+        await tx.person.update({
+          where: { id: BigInt(person.id) },
+          data: {
+            clan_id: BigInt(person.clan_id),
+            full_name: person.full_name,
+            gender: person.gender,
+            birth_date: this.parseIso(person.birth_date),
+            death_date: this.parseIso(person.death_date),
+            is_living: person.is_living,
+            birth_place: person.birth_place ?? null,
+            birth_lat: person.birth_lat ?? null,
+            birth_lng: person.birth_lng ?? null,
+            death_place: person.death_place ?? null,
+            death_lat: person.death_lat ?? null,
+            death_lng: person.death_lng ?? null,
+            avatar_url: person.avatar_url ?? null,
+            thumbnail_url: person.thumbnail_url ?? null,
+            migration_branch: person.migration_branch ?? null,
+            deleted_at: this.parseIso(person.deleted_at),
+            deleted_by: person.deleted_by ?? null,
+          },
+        });
       }
 
-      // 3. 恢复家庭单元
-      if (snapshotData.familyUnits) {
-        for (const family of snapshotData.familyUnits) {
-          await tx.familyUnit.upsert({
-            where: { id: BigInt(family.id) },
-            update: {
-              clan_id: BigInt(family.clan_id),
-              husband_id: family.husband_id ? BigInt(family.husband_id) : null,
-              wife_id: family.wife_id ? BigInt(family.wife_id) : null,
-              union_type: family.union_type,
-            },
-            create: {
-              id: BigInt(family.id),
-              clan_id: BigInt(family.clan_id),
-              husband_id: family.husband_id ? BigInt(family.husband_id) : null,
-              wife_id: family.wife_id ? BigInt(family.wife_id) : null,
-              union_type: family.union_type,
-            },
-          });
-        }
+      for (const bio of snapshotData.personBios ?? []) {
+        const data = this.bioData(bio);
+        await tx.personBio.upsert({
+          where: { person_id: BigInt(bio.person_id) },
+          update: data,
+          create: { person_id: BigInt(bio.person_id), ...data },
+        });
       }
 
-      // 4. 恢复家庭子女关系
-      if (snapshotData.familyChildren) {
-        for (const child of snapshotData.familyChildren) {
-          await tx.familyChild.upsert({
-            where: { id: BigInt(child.id) },
-            update: {
-              family_id: BigInt(child.family_id),
-              child_id: BigInt(child.child_id),
-              birth_order: child.birth_order,
-            },
-            create: {
-              id: BigInt(child.id),
-              family_id: BigInt(child.family_id),
-              child_id: BigInt(child.child_id),
-              birth_order: child.birth_order,
-            },
-          });
-        }
+      for (const event of snapshotData.personEvents ?? []) {
+        await tx.personEvent.upsert({
+          where: { id: BigInt(event.id) },
+          update: {
+            person_id: BigInt(event.person_id),
+            event_year: event.event_year ?? null,
+            content: event.content,
+            sort_order: event.sort_order ?? 0,
+          },
+          create: {
+            id: BigInt(event.id),
+            person_id: BigInt(event.person_id),
+            event_year: event.event_year ?? null,
+            content: event.content,
+            sort_order: event.sort_order ?? 0,
+          },
+        });
       }
 
-      // 5. 恢复闭包表
-      if (snapshotData.ancestry) {
+      for (const media of snapshotData.mediaArchives ?? []) {
+        await tx.mediaArchive.update({
+          where: { id: BigInt(media.id) },
+          data: { clan_id: BigInt(media.clan_id) },
+        });
+      }
+
+      const snapshotFamilyIds = (snapshotData.familyUnits ?? []).map((family: any) => BigInt(family.id));
+      if (snapshot.merge_target_id) {
+        await tx.familyUnit.deleteMany({
+          where: {
+            union_type: 'merger',
+            clan_id: snapshot.clan_id,
+            husband_id: snapshot.merge_target_id,
+            ...(snapshotFamilyIds.length > 0 ? { id: { notIn: snapshotFamilyIds } } : {}),
+          },
+        });
+      }
+
+      const snapshotChildIds = (snapshotData.familyChildren ?? []).map((child: any) => BigInt(child.id));
+      if (snapshot.branch_root_id) {
+        await tx.familyChild.deleteMany({
+          where: {
+            child_id: snapshot.branch_root_id,
+            ...(snapshotChildIds.length > 0 ? { id: { notIn: snapshotChildIds } } : {}),
+          },
+        });
+      }
+
+      for (const family of snapshotData.familyUnits ?? []) {
+        const data = {
+          clan_id: BigInt(family.clan_id),
+          husband_id: family.husband_id ? BigInt(family.husband_id) : null,
+          wife_id: family.wife_id ? BigInt(family.wife_id) : null,
+          union_type: family.union_type,
+          marriage_date: this.parseIso(family.marriage_date),
+          marriage_order: family.marriage_order ?? 1,
+          divorce_date: this.parseIso(family.divorce_date),
+          end_reason: family.end_reason ?? null,
+          is_current: family.is_current ?? true,
+          note: family.note ?? null,
+        };
+        await tx.familyUnit.upsert({
+          where: { id: BigInt(family.id) },
+          update: data,
+          create: { id: BigInt(family.id), ...data },
+        });
+      }
+
+      for (const child of snapshotData.familyChildren ?? []) {
+        const data = {
+          family_id: BigInt(child.family_id),
+          child_id: BigInt(child.child_id),
+          birth_order: child.birth_order,
+          child_type: child.child_type ?? 'BIOLOGICAL',
+        };
+        await tx.familyChild.upsert({
+          where: { id: BigInt(child.id) },
+          update: data,
+          create: { id: BigInt(child.id), ...data },
+        });
+      }
+
+      const affectedIds = snapshotData.persons.map((person: any) => BigInt(person.id));
+      if (affectedIds.length > 0) {
         await tx.personAncestry.deleteMany({
           where: {
             OR: [
-              { ancestor: { clan_id: snapshot.clan_id } },
-              { ancestor: { clan_id: snapshot.applicant_clan_id! } },
+              { ancestor_id: { in: affectedIds } },
+              { descendant_id: { in: affectedIds } },
             ],
           },
         });
-
-        for (const entry of snapshotData.ancestry) {
-          await tx.personAncestry.create({
-            data: {
-              ancestor_id: BigInt(entry.ancestor_id),
-              descendant_id: BigInt(entry.descendant_id),
-              depth: entry.depth,
-            },
-          }).catch(() => {}); // 忽略重复键
-        }
       }
+      await this.insertAncestry(
+        tx,
+        snapshotData.ancestry.map((edge: any) => ({
+          ancestor_id: BigInt(edge.ancestor_id),
+          descendant_id: BigInt(edge.descendant_id),
+          depth: edge.depth,
+        })),
+      );
 
-      // 6. 更新申请状态
-      if (snapshot.merge_application_id) {
-        await tx.mergeApplication.update({
-          where: { id: snapshot.merge_application_id },
-          data: { status: ApplicationStatus.REVERTED },
-        });
-      }
-
-      // 7. 标记快照已回滚
-      await tx.dataSnapshot.update({
-        where: { id: snapshotId },
+      const marked = await tx.dataSnapshot.updateMany({
+        where: { id: snapshotId, is_reverted: false },
         data: { is_reverted: true },
       });
-    });
+      if (marked.count !== 1) {
+        throw new ConflictException('快照已回滚');
+      }
+    }, { timeout: 20000 });
   }
+
 
   /**
    * 获取可回滚的合并快照
@@ -697,218 +896,222 @@ export class MergeService {
     };
   }
 
-  /**
-   * 创建完整快照（主家族 + 申请方家族）
-   */
-  private async createFullSnapshot(
-    mainClanId: bigint,
-    applicantClanId: bigint,
-    applicationId: bigint,
-    anchorPersonId: bigint,
-    branchRootId: bigint,
-    userId: string,
-  ): Promise<string> {
-    // 获取主家族数据
-    const mainClanPersons = await this.prisma.person.findMany({
-      where: { clan_id: mainClanId },
+  private async assertMayAttach(tx: any, branchRoot: any, anchor: any, applicantClanId: bigint): Promise<void> {
+    if (branchRoot.id === anchor.id) {
+      throw new BadRequestException('支系根不能是挂载点本人');
+    }
+    if (anchor.is_living !== false) {
+      throw new BadRequestException('挂载点必须是已故人员');
+    }
+    if (branchRoot.clan_id !== applicantClanId) {
+      throw new BadRequestException('支系根不属于申请方家族');
+    }
+    const parentless = await this.isParentless(tx, branchRoot.id);
+    if (branchRoot.clan_id === anchor.clan_id && parentless) {
+      throw new BadRequestException('不能把本族没有父母的人挂成子女');
+    }
+    if (branchRoot.clan_id === anchor.clan_id) {
+      throw new BadRequestException('申请方家族与挂载点家族相同');
+    }
+    const rootToAnchor = await tx.personAncestry.findFirst({
+      where: { ancestor_id: branchRoot.id, descendant_id: anchor.id, depth: { gte: 1 } },
     });
-
-    const mainClanFamilies = await this.prisma.familyUnit.findMany({
-      where: { clan_id: mainClanId },
+    const anchorToRoot = await tx.personAncestry.findFirst({
+      where: { ancestor_id: anchor.id, descendant_id: branchRoot.id, depth: { gte: 1 } },
     });
-
-    const mainClanChildren = await this.prisma.familyChild.findMany({
-      where: { family: { clan_id: mainClanId } },
-    });
-
-    // 获取申请方家族数据
-    const applicantClanPersons = await this.prisma.person.findMany({
-      where: { clan_id: applicantClanId },
-    });
-
-    const applicantFamilies = await this.prisma.familyUnit.findMany({
-      where: { clan_id: applicantClanId },
-    });
-
-    const applicantChildren = await this.prisma.familyChild.findMany({
-      where: { family: { clan_id: applicantClanId } },
-    });
-
-    // 获取闭包表
-    const ancestry = await this.prisma.personAncestry.findMany({
-      where: {
-        OR: [
-          { ancestor: { clan_id: mainClanId } },
-          { ancestor: { clan_id: applicantClanId } },
-        ],
-      },
-    });
-
-    const snapshotData = {
-      mainClanPersons: mainClanPersons.map((p) => ({
-        id: p.id.toString(),
-        full_name: p.full_name,
-        gender: p.gender,
-        birth_date: p.birth_date?.toISOString() || null,
-        death_date: p.death_date?.toISOString() || null,
-        is_living: p.is_living,
-      })),
-      mainClanFamilies: mainClanFamilies.map((f) => ({
-        id: f.id.toString(),
-        clan_id: f.clan_id.toString(),
-        husband_id: f.husband_id?.toString() || null,
-        wife_id: f.wife_id?.toString() || null,
-        union_type: f.union_type,
-      })),
-      familyChildren: [...mainClanChildren, ...applicantChildren].map((c) => ({
-        id: c.id.toString(),
-        family_id: c.family_id.toString(),
-        child_id: c.child_id.toString(),
-        birth_order: c.birth_order,
-      })),
-      applicantClanPersons: applicantClanPersons.map((p) => ({
-        id: p.id.toString(),
-        clan_id: p.clan_id.toString(),
-        full_name: p.full_name,
-        gender: p.gender,
-        birth_date: p.birth_date?.toISOString() || null,
-        death_date: p.death_date?.toISOString() || null,
-        is_living: p.is_living,
-      })),
-      familyUnits: [...mainClanFamilies, ...applicantFamilies].map((f) => ({
-        id: f.id.toString(),
-        clan_id: f.clan_id.toString(),
-        husband_id: f.husband_id?.toString() || null,
-        wife_id: f.wife_id?.toString() || null,
-        union_type: f.union_type,
-      })),
-      ancestry: ancestry.map((a) => ({
-        ancestor_id: a.ancestor_id.toString(),
-        descendant_id: a.descendant_id.toString(),
-        depth: a.depth,
-      })),
-    };
-
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24小时
-
-    const snapshot = await this.prisma.dataSnapshot.create({
-      data: {
-        clan_id: mainClanId,
-        merge_application_id: applicationId,
-        applicant_clan_id: applicantClanId,
-        merge_target_id: anchorPersonId,
-        branch_root_id: branchRootId,
-        operation_type: 'MERGE',
-        data: snapshotData,
-        reason: 'Pre-merge snapshot',
-        created_by: userId,
-        expires_at: expiresAt,
-      },
-    });
-
-    return snapshot.id.toString();
+    if (rootToAnchor || anchorToRoot) {
+      throw new BadRequestException('挂载点与被挂人之间已有血缘路径');
+    }
   }
 
-  /**
-   * 归宗合并后的闭包表重算
-   * 核心算法：为申请方支系的所有后代添加主家族挂载点以上所有祖先的路径
-   */
-  private async recalculateAncestryAfterMerge(
-    tx: any,
-    mainClanId: bigint,
-    branchRootId: bigint,
-    anchorPersonId: bigint,
-    generationOffset: number,
-  ): Promise<void> {
-    // 1. 获取主家族中 anchorPerson 的所有祖先（包括自身）
-    const mainAncestors = await tx.personAncestry.findMany({
-      where: { descendant_id: anchorPersonId, ancestor: { clan_id: mainClanId } },
-      include: { ancestor: true },
+  private async isParentless(tx: any, personId: bigint): Promise<boolean> {
+    const asChild = await tx.familyChild.findFirst({ where: { child_id: personId } });
+    if (asChild) return false;
+    const asDescendant = await tx.personAncestry.findFirst({
+      where: { descendant_id: personId, depth: { gte: 1 } },
     });
+    return !asDescendant;
+  }
 
-    // 2. 获取申请方家族中 branchRoot 的所有后代（包括自身）
-    const branchDescendants = await tx.personAncestry.findMany({
-      where: { ancestor_id: branchRootId, ancestor: { clan_id: mainClanId } }, // 注意：此时 clan_id 可能还是旧的
-      include: { descendant: true },
+  private async buildMergedClosure(tx: any, anchorId: bigint, branchRootId: bigint): Promise<{
+    edges: { ancestor_id: bigint; descendant_id: bigint; depth: number }[];
+    branchIds: bigint[];
+    anchorRows: { ancestor_id: bigint; descendant_id: bigint; depth: number }[];
+  }> {
+    const anchorRows = await tx.personAncestry.findMany({ where: { descendant_id: anchorId } });
+    const branchRows = [...await tx.personAncestry.findMany({ where: { ancestor_id: branchRootId } })];
+    const branchIds = [...new Set(branchRows.map((row: any) => row.descendant_id.toString()))].map((id) => BigInt(id));
+    if (!branchIds.some((id) => id === branchRootId)) {
+      branchIds.push(branchRootId);
+      branchRows.push({ ancestor_id: branchRootId, descendant_id: branchRootId, depth: 0 });
+    }
+
+    const edgesIntoB = await tx.personAncestry.findMany({
+      where: { descendant_id: { in: branchIds } },
     });
-
-    // 3. 收集所有需要处理的申请方成员ID
-    const branchPersonIds = new Set<string>();
-    branchDescendants.forEach((d: any) => {
-      branchPersonIds.add(d.descendant_id.toString());
-    });
-
-    // 4. 删除旧的闭包表记录（申请方相关的）
-    await tx.personAncestry.deleteMany({
+    const edgesOutOfB = await tx.personAncestry.findMany({
       where: {
-        OR: [
-          { ancestor_id: { in: Array.from(branchPersonIds).map((id) => BigInt(id)) } },
-          { descendant_id: { in: Array.from(branchPersonIds).map((id) => BigInt(id)) } },
-        ],
+        ancestor_id: { in: branchIds },
+        descendant_id: { notIn: branchIds },
       },
     });
+    if (edgesOutOfB.length > 0) {
+      throw new BadRequestException('支系已有指向外部的血缘边');
+    }
 
-    // 5. 为每个申请方成员创建新的闭包表记录
-    const newAncRecords: { ancestor_id: bigint; descendant_id: bigint; depth: number }[] = [];
+    const kept = new Map<string, { ancestor_id: bigint; descendant_id: bigint; depth: number }>();
+    for (const edge of edgesIntoB) {
+      kept.set(this.edgeKey(edge.ancestor_id, edge.descendant_id), {
+        ancestor_id: edge.ancestor_id,
+        descendant_id: edge.descendant_id,
+        depth: edge.depth,
+      });
+    }
+    for (const personId of branchIds) {
+      const key = this.edgeKey(personId, personId);
+      if (!kept.has(key)) {
+        kept.set(key, { ancestor_id: personId, descendant_id: personId, depth: 0 });
+      }
+    }
 
-    // 5.1 添加主家族祖先路径（相对于挂载点的深度偏移）
-    const anchorDepth = mainAncestors.length; // 挂载点在主家族中的深度
-
-    for (const descendant of branchDescendants) {
-      const originalDepth = descendant.depth;
-
-      // 添加主家族祖先路径
-      for (const ancestor of mainAncestors) {
-        const newDepth = ancestor.depth + originalDepth + 1 + generationOffset;
-        newAncRecords.push({
+    for (const ancestor of anchorRows) {
+      for (const descendant of branchRows) {
+        const depth = ancestor.depth + descendant.depth + 1;
+        if (depth < 1) {
+          throw new BadRequestException('闭包深度非法');
+        }
+        const key = this.edgeKey(ancestor.ancestor_id, descendant.descendant_id);
+        const existing = kept.get(key);
+        if (existing) {
+          throw new BadRequestException('闭包主键或深度冲突');
+        }
+        kept.set(key, {
           ancestor_id: ancestor.ancestor_id,
           descendant_id: descendant.descendant_id,
-          depth: newDepth,
+          depth,
         });
       }
     }
 
-    // 5.2 保留并更新支系内部的原有路径（depth 增加）
-    for (const descendant of branchDescendants) {
-      // 该成员相对于始祖的原始深度
-      const originalBranchDepth = descendant.depth;
+    return { edges: [...kept.values()], branchIds, anchorRows };
+  }
 
-      // 为该成员添加所有其他支系后代作为其子孙
-      for (const other of branchDescendants) {
-        if (other.descendant_id === descendant.descendant_id) continue;
+  private edgeKey(ancestorId: bigint, descendantId: bigint): string {
+    return `${ancestorId.toString()}:${descendantId.toString()}`;
+  }
 
-        // 计算两者之间的关系：如果 other 是 descendant 的后代，则添加
-        const otherAncestors = await tx.personAncestry.findMany({
-          where: {
-            descendant_id: other.descendant_id,
-            ancestor_id: descendant.descendant_id,
-          },
-        });
-
-        if (otherAncestors.length > 0) {
-          // other 是 descendant 的后代
-          for (const otherAncestor of otherAncestors) {
-            // 在新的闭包表中添加
-            newAncRecords.push({
-              ancestor_id: descendant.descendant_id,
-              descendant_id: other.descendant_id,
-              depth: otherAncestor.depth,
-            });
-          }
-        }
-      }
-    }
-
-    // 5.3 批量插入新记录
-    if (newAncRecords.length > 0) {
-      const batchSize = 500;
-      for (let i = 0; i < newAncRecords.length; i += batchSize) {
-        const batch = newAncRecords.slice(i, i + batchSize);
-        await tx.personAncestry.createMany({
-          data: batch,
-          skipDuplicates: true,
-        });
-      }
+  private async insertAncestry(
+    tx: any,
+    rows: { ancestor_id: bigint; descendant_id: bigint; depth: number }[],
+  ): Promise<void> {
+    const batchSize = 500;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      await tx.personAncestry.createMany({ data: rows.slice(i, i + batchSize) });
     }
   }
+
+  private parseIso(value: string | null | undefined): Date | null {
+    if (!value) return null;
+    return new Date(value);
+  }
+
+  private serializePerson(person: any) {
+    return {
+      id: person.id.toString(),
+      clan_id: person.clan_id.toString(),
+      full_name: person.full_name,
+      gender: person.gender,
+      birth_date: person.birth_date ? new Date(person.birth_date).toISOString() : null,
+      death_date: person.death_date ? new Date(person.death_date).toISOString() : null,
+      is_living: person.is_living,
+      birth_place: person.birth_place ?? null,
+      birth_lat: person.birth_lat ?? null,
+      birth_lng: person.birth_lng ?? null,
+      death_place: person.death_place ?? null,
+      death_lat: person.death_lat ?? null,
+      death_lng: person.death_lng ?? null,
+      avatar_url: person.avatar_url ?? null,
+      thumbnail_url: person.thumbnail_url ?? null,
+      migration_branch: person.migration_branch ?? null,
+      deleted_at: person.deleted_at ? new Date(person.deleted_at).toISOString() : null,
+      deleted_by: person.deleted_by ?? null,
+    };
+  }
+
+  private serializeBio(bio: any) {
+    return {
+      person_id: bio.person_id.toString(),
+      courtesy_name: bio.courtesy_name ?? null,
+      native_place: bio.native_place ?? null,
+      burial_place: bio.burial_place ?? null,
+      achievements: bio.achievements ?? null,
+      anecdotes: bio.anecdotes ?? null,
+      biography: bio.biography ?? null,
+      marital_notes: bio.marital_notes ?? null,
+      adoption_note: bio.adoption_note ?? null,
+      premature: bio.premature ?? null,
+      taboo_name: bio.taboo_name ?? null,
+      art_name: bio.art_name ?? null,
+      posthumous_name: bio.posthumous_name ?? null,
+      infant_name: bio.infant_name ?? null,
+      alias_name: bio.alias_name ?? null,
+      former_name: bio.former_name ?? null,
+      nickname: bio.nickname ?? null,
+      ethnicity: bio.ethnicity ?? null,
+      education: bio.education ?? null,
+      occupation: bio.occupation ?? null,
+      job_title: bio.job_title ?? null,
+      alma_mater: bio.alma_mater ?? null,
+      employer: bio.employer ?? null,
+      lunar_birth: bio.lunar_birth ?? null,
+      lunar_death: bio.lunar_death ?? null,
+      religion: bio.religion ?? null,
+      blood_type: bio.blood_type ?? null,
+      epitaph: bio.epitaph ?? null,
+      source_note: bio.source_note ?? null,
+      generation_char: bio.generation_char ?? null,
+      contact_phone: bio.contact_phone ?? null,
+    };
+  }
+
+  private bioData(bio: any) {
+    const serialized = this.serializeBio({ ...bio, person_id: BigInt(bio.person_id) });
+    const { person_id: _personId, ...rest } = serialized;
+    return rest;
+  }
+
+  private serializeFamily(family: any) {
+    return {
+      id: family.id.toString(),
+      clan_id: family.clan_id.toString(),
+      husband_id: family.husband_id ? family.husband_id.toString() : null,
+      wife_id: family.wife_id ? family.wife_id.toString() : null,
+      union_type: family.union_type ?? null,
+      marriage_date: family.marriage_date ? new Date(family.marriage_date).toISOString() : null,
+      marriage_order: family.marriage_order ?? 1,
+      divorce_date: family.divorce_date ? new Date(family.divorce_date).toISOString() : null,
+      end_reason: family.end_reason ?? null,
+      is_current: family.is_current ?? true,
+      note: family.note ?? null,
+    };
+  }
+
+  private serializeMedia(media: any) {
+    return {
+      id: media.id.toString(),
+      clan_id: media.clan_id.toString(),
+      file_url: media.file_url ?? null,
+      display_url: media.display_url ?? null,
+      thumb_url: media.thumb_url ?? null,
+      original_key: media.original_key ?? null,
+      media_type: media.media_type ?? null,
+      original_filename: media.original_filename ?? null,
+      description: media.description ?? null,
+      category: media.category ?? null,
+      album_id: media.album_id ? media.album_id.toString() : null,
+      privacy_level: media.privacy_level ?? null,
+      deleted_at: media.deleted_at ? new Date(media.deleted_at).toISOString() : null,
+    };
+  }
+
 }

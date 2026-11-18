@@ -989,7 +989,7 @@ export class UserService {
     }
     const clanId = membership.clan_id;
 
-    const where = { clan_id: clanId, is_active: true };
+    const where = { clan_id: clanId, is_active: true, deleted_at: null };
 
     const [rows, total, readCount] = await Promise.all([
       this.prisma.clanAnnouncement.findMany({

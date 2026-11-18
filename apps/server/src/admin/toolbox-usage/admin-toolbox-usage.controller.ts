@@ -43,14 +43,7 @@ export class AdminToolboxUsageController {
     const pageSizeNum = parseInt(pageSize || '20', 10);
     const skip = (pageNum - 1) * pageSizeNum;
 
-    // 构建查询条件 - 从 clan_members 获取该家族的用户
-    const where: any = {
-      user: {
-        clans: {
-          some: { clan_id: clanId },
-        },
-      },
-    };
+    const where: any = { clan_id: clanId };
 
     if (toolType) {
       where.tool_type = toolType;
@@ -95,6 +88,7 @@ export class AdminToolboxUsageController {
         user_id: log.user_id,
         user_name: log.user.nickname || log.user.phone,
         tool_type: log.tool_type,
+        image_count: 1,
         media_id: log.media_id?.toString(),
         credits_used: log.credits_used,
         estimated_cost: log.estimated_cost,
@@ -129,79 +123,48 @@ export class AdminToolboxUsageController {
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - 7);
 
-    // 获取本月数据
-    const monthWhere = {
-      user: {
-        clans: {
-          some: { clan_id: clanId },
-        },
-      },
-      created_at: { gte: startOfMonth },
-    };
-
-    const weekWhere = {
-      user: {
-        clans: {
-          some: { clan_id: clanId },
-        },
-      },
-      created_at: { gte: startOfWeek },
-    };
+    const clanWhere = { clan_id: clanId };
+    const monthWhere = { ...clanWhere, created_at: { gte: startOfMonth } };
+    const weekWhere = { ...clanWhere, created_at: { gte: startOfWeek } };
 
     const [
       monthlyStats,
       weeklyStats,
       totalStats,
       toolBreakdown,
+      monthUsers,
+      credits,
     ] = await Promise.all([
-      // 本月使用统计
       this.prisma.toolUsageLog.aggregate({
         where: monthWhere,
         _count: true,
         _sum: { credits_used: true },
       }),
-      // 本周使用统计
       this.prisma.toolUsageLog.aggregate({
         where: weekWhere,
         _count: true,
         _sum: { credits_used: true },
       }),
-      // 全部时间统计
       this.prisma.toolUsageLog.aggregate({
-        where: {
-          user: {
-            clans: {
-              some: { clan_id: clanId },
-            },
-          },
-        },
+        where: clanWhere,
         _count: true,
         _sum: { credits_used: true },
       }),
-      // 各工具使用次数
-      this.prisma.$queryRaw<any[]>`
-        SELECT 
-          tool_type,
-          COUNT(*) as usage_count,
-          SUM(credits_used) as total_credits
-        FROM tool_usage_logs
-        WHERE user_id IN (
-          SELECT user_id FROM clan_members WHERE clan_id = ${clanId}
-        )
-        GROUP BY tool_type
-        ORDER BY usage_count DESC
-      `,
+      this.prisma.toolUsageLog.groupBy({
+        by: ['tool_type'],
+        where: monthWhere,
+        _count: { _all: true },
+        _sum: { credits_used: true },
+      }),
+      this.prisma.toolUsageLog.groupBy({
+        by: ['user_id'],
+        where: monthWhere,
+      }),
+      this.prisma.familySharedCredit.aggregate({
+        where: { clan_id: clanId, expires_at: { gt: now } },
+        _sum: { remaining_credits: true },
+      }),
     ]);
-
-    // 获取活跃用户数
-    const activeUsers = await this.prisma.$queryRaw<any[]>`
-      SELECT COUNT(DISTINCT user_id) as count
-      FROM tool_usage_logs
-      WHERE user_id IN (
-        SELECT user_id FROM clan_members WHERE clan_id = ${clanId}
-      )
-        AND created_at >= ${startOfMonth}
-    `;
 
     return {
       total: {
@@ -211,16 +174,17 @@ export class AdminToolboxUsageController {
       this_month: {
         usage_count: monthlyStats._count || 0,
         credits_used: Number(monthlyStats._sum?.credits_used || 0),
-        active_users: Number(activeUsers[0]?.count || 0),
+        active_users: monthUsers.length,
       },
       this_week: {
         usage_count: weeklyStats._count || 0,
         credits_used: Number(weeklyStats._sum?.credits_used || 0),
       },
-      by_tool: toolBreakdown.map((t) => ({
-        tool: t.tool_type,
-        count: Number(t.usage_count),
-        credits: Number(t.total_credits),
+      remaining_free_credits: Number(credits._sum.remaining_credits || 0),
+      by_tool: toolBreakdown.map((row) => ({
+        tool: row.tool_type,
+        count: row._count._all,
+        credits: Number(row._sum.credits_used || 0),
       })),
     };
   }

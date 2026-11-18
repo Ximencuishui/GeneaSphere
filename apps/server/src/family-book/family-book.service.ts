@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
+import { publicMediaWhere } from '../media/media-visibility';
 import {
   CreateFamilyBookDto,
   UpdateFamilyBookDto,
@@ -434,6 +435,118 @@ export class FamilyBookService {
     });
 
     return { message: '页面已更新' };
+  }
+
+  /**
+   * 列出可替换的照片。
+   * 只含本族、未删除、且不在待审/驳回中的图片；没有审核单的旧数据仍可见。
+   */
+  async listPhotoCandidates(projectId: string, userId: string) {
+    const project = await this.db.familyBookProject.findFirst({
+      where: { id: BigInt(projectId), user_id: userId },
+      select: { id: true, clan_id: true },
+    });
+    if (!project) throw new NotFoundException('项目不存在');
+
+    const rows = await this.prisma.mediaArchive.findMany({
+      where: {
+        ...publicMediaWhere(project.clan_id),
+        media_type: 'image',
+      },
+      select: {
+        id: true,
+        uploader_id: true,
+        file_url: true,
+        display_url: true,
+        thumb_url: true,
+        description: true,
+        original_filename: true,
+      },
+      orderBy: { created_at: 'desc' },
+      take: 80,
+    });
+
+    return {
+      data: rows
+        .filter((row) => !!(row.display_url || row.file_url))
+        .map((row) => ({
+          id: row.id.toString(),
+          file_url: row.file_url,
+          display_url: row.display_url,
+          thumb_url: row.thumb_url || row.display_url || row.file_url,
+          description: row.description?.trim() || row.original_filename || '',
+          source: row.uploader_id === userId ? 'mine' : 'library',
+        })),
+    };
+  }
+
+  /**
+   * 只改该页 content.photo_url，不改标题、副标题和正文。
+   * 项目须属于当前用户，页面须属于该项目；已有印刷订单则拒绝。
+   */
+  async replacePagePhoto(
+    projectId: string,
+    userId: string,
+    pageId: string,
+    mediaId: string,
+  ) {
+    const project = await this.db.familyBookProject.findFirst({
+      where: { id: BigInt(projectId), user_id: userId },
+      include: { print_order: { select: { id: true } } },
+    });
+    if (!project) throw new NotFoundException('项目不存在');
+
+    const page = await this.db.familyBookPage.findFirst({
+      where: { id: BigInt(pageId), project_id: project.id },
+    });
+    if (!page) throw new NotFoundException('页面不存在');
+
+    if (project.status === 'ordered' || project.print_order) {
+      throw new BadRequestException('项目已下单，不能替换照片');
+    }
+
+    const content = this.asContent(page.content);
+    const hasPhotoSlot = page.page_type === 'person' || 'photo_url' in content;
+    if (!hasPhotoSlot) {
+      throw new BadRequestException('该页没有可替换的照片位');
+    }
+
+    let mediaKey: bigint;
+    try {
+      mediaKey = BigInt(mediaId);
+    } catch {
+      throw new NotFoundException('影像不存在或不可见');
+    }
+
+    const media = await this.prisma.mediaArchive.findFirst({
+      where: {
+        id: mediaKey,
+        ...publicMediaWhere(project.clan_id),
+        media_type: 'image',
+      },
+      select: { id: true, file_url: true, display_url: true },
+    });
+    if (!media || !(media.display_url || media.file_url)) {
+      throw new NotFoundException('影像不存在或不可见');
+    }
+
+    const photoUrl = media.display_url || media.file_url;
+    await this.db.familyBookPage.update({
+      where: { id: page.id },
+      data: {
+        content: {
+          ...content,
+          photo_url: photoUrl,
+        },
+      },
+    });
+
+    return { message: '照片已替换', photo_url: photoUrl };
+  }
+
+  private asContent(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return { ...(value as Record<string, unknown>) };
   }
 
   // ============================================================

@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Request,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
@@ -55,13 +56,22 @@ export class AdminAlbumController {
     @Request() req,
     @Query('clanSlug') clanSlug: string,
   ) {
-    const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const { clanId } = await this.adminService.resolveMediaActor(clanSlug, req.user.userId);
 
     const albums = await this.prisma.clanAlbum.findMany({
       where: { clan_id: clanId },
       orderBy: { created_at: 'desc' },
     });
+    const creatorIds = [...new Set(albums.map((album) => album.creator_id).filter((id) => !!id))];
+    const creators = creatorIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: creatorIds } },
+          select: { id: true, nickname: true, phone: true },
+        })
+      : [];
+    const creatorName = new Map(
+      creators.map((user) => [user.id, user.nickname?.trim() || user.phone || '']),
+    );
 
     return {
       data: albums.map((a) => ({
@@ -71,6 +81,8 @@ export class AdminAlbumController {
         cover_url: a.cover_url,
         default_privacy: a.default_privacy,
         photo_count: a.photo_count,
+        creator_id: a.creator_id,
+        creator_name: creatorName.get(a.creator_id) || null,
         created_at: a.created_at,
       })),
       total: albums.length,
@@ -80,14 +92,15 @@ export class AdminAlbumController {
   /**
    * 创建相册
    */
-  @Post()
+  @Post(':clanSlug')
   @ApiOperation({ summary: '创建相册' })
   async createAlbum(
     @Request() req,
+    @Param('clanSlug') clanSlug: string,
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const album = await this.prisma.clanAlbum.create({
       data: {
@@ -119,15 +132,16 @@ export class AdminAlbumController {
   /**
    * 更新相册
    */
-  @Put(':id')
+  @Put(':clanSlug/:id')
   @ApiOperation({ summary: '更新相册' })
   async updateAlbum(
     @Request() req,
+    @Param('clanSlug') clanSlug: string,
     @Param('id') id: string,
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const updateData: any = {};
     if (body.name !== undefined) updateData.name = body.name;
@@ -135,10 +149,13 @@ export class AdminAlbumController {
     if (body.cover_url !== undefined) updateData.cover_url = body.cover_url;
     if (body.default_privacy !== undefined) updateData.default_privacy = body.default_privacy;
 
-    const album = await this.prisma.clanAlbum.update({
-      where: { id: BigInt(id) },
+    const updated = await this.prisma.clanAlbum.updateMany({
+      where: { id: BigInt(id), clan_id: clanId },
       data: updateData,
     });
+    if (updated.count === 0) {
+      throw new NotFoundException('Album not found');
+    }
 
     await this.adminService.logAction({
       clanId,
@@ -150,8 +167,8 @@ export class AdminAlbumController {
     });
 
     return {
-      id: album.id.toString(),
-      updated_at: album.updated_at,
+      id,
+      updated_at: new Date(),
     };
   }
 
@@ -168,15 +185,53 @@ export class AdminAlbumController {
     const userId = req.user.userId;
     const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    // 将相册中的照片移到"未分类"
+    const albumId = BigInt(id);
+    const album = await this.prisma.clanAlbum.findFirst({
+      where: { id: albumId, clan_id: clanId },
+      select: { id: true },
+    });
+    if (!album) {
+      throw new NotFoundException('Album not found');
+    }
+
+    let unclassified = await this.prisma.clanAlbum.findFirst({
+      where: { clan_id: clanId, name: '未分类', id: { not: albumId } },
+      select: { id: true },
+    });
+    if (!unclassified) {
+      unclassified = await this.prisma.clanAlbum.create({
+        data: {
+          clan_id: clanId,
+          name: '未分类',
+          default_privacy: 'clan',
+          creator_id: userId,
+        },
+        select: { id: true },
+      });
+    }
+
+    const moving = await this.prisma.mediaArchive.count({
+      where: { album_id: albumId, clan_id: clanId, deleted_at: null },
+    });
     await this.prisma.mediaArchive.updateMany({
-      where: { album_id: BigInt(id) },
-      data: { album_id: null },
+      where: { album_id: albumId, clan_id: clanId },
+      data: { album_id: unclassified.id },
+    });
+    await this.prisma.clanAlbum.updateMany({
+      where: { id: unclassified.id, clan_id: clanId },
+      data: { photo_count: { increment: moving } },
+    });
+    await this.prisma.clanAlbum.updateMany({
+      where: { id: albumId, clan_id: clanId },
+      data: { photo_count: 0 },
     });
 
-    await this.prisma.clanAlbum.delete({
-      where: { id: BigInt(id) },
+    const deleted = await this.prisma.clanAlbum.deleteMany({
+      where: { id: BigInt(id), clan_id: clanId },
     });
+    if (deleted.count === 0) {
+      throw new NotFoundException('Album not found');
+    }
 
     await this.adminService.logAction({
       clanId,

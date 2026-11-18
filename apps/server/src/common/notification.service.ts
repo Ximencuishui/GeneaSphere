@@ -47,7 +47,7 @@ export class NotificationService {
         clanId: params.clanId,
         type: NotificationType.MEDIA_APPROVED,
         title: '照片已通过审核',
-        content: '您上传的照片已通过审核，现已在相册中展示。',
+        content: '您上传的照片已通过审核。',
         targetType: 'MediaArchive',
         targetId: params.mediaId,
       });

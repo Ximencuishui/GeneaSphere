@@ -10,11 +10,10 @@
 支持的任务类型：
   - ocr:          从 COS 下载图片 → Tesseract OCR → 回传文字结果
   - puppeteer:    从 COS 下载 HTML → Puppeteer 渲染 → 上传截图到 COS
-  - video:        视频生成任务
+  - video:        家族大事件 / 迁徙历史幻灯片成片（ffmpeg）
   - image_process: 图片处理（如 Sharp 做不到的重度处理）
 """
 
-import json
 import os
 import sys
 import time
@@ -201,15 +200,331 @@ def handle_puppeteer(job: dict) -> dict:
     }
 
 
+CLAN_VIDEO_KINDS = {"clan-event", "clan-migration"}
+CLAN_VIDEO_MAX_SECONDS = 600
+# 与服务端 clanVideoSlideSeconds 一致：modern 6 / nostalgic 8 / solemn 10，总长不超过 600 秒。
+CLAN_VIDEO_STYLE_SECONDS = {"nostalgic": 8, "modern": 6, "solemn": 10}
+CLAN_VIDEO_PALETTE = {
+    "nostalgic": {
+        "bg": (74, 49, 28),
+        "fg": (247, 232, 204),
+        "muted": (214, 176, 122),
+        "card": (112, 76, 42),
+        "accent": (196, 140, 70),
+    },
+    "modern": {
+        "bg": (244, 247, 251),
+        "fg": (22, 27, 34),
+        "muted": (84, 98, 116),
+        "card": (255, 255, 255),
+        "accent": (36, 112, 184),
+    },
+    "solemn": {
+        "bg": (16, 16, 16),
+        "fg": (236, 236, 236),
+        "muted": (168, 168, 168),
+        "card": (38, 38, 38),
+        "accent": (196, 196, 196),
+    },
+}
+# 色调再过一遍 ffmpeg，避免风格只写在字符串上。
+CLAN_VIDEO_VF = {
+    "nostalgic": "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
+    "modern": "eq=contrast=1.08:saturation=1.25:brightness=0.02",
+    "solemn": "hue=s=0,eq=contrast=1.12:brightness=-0.03",
+}
+_CJK_FONTS = [
+    r"C:\Windows\Fonts\msyh.ttc",
+    r"C:\Windows\Fonts\msyhbd.ttc",
+    r"C:\Windows\Fonts\simhei.ttf",
+    r"C:\Windows\Fonts\simsun.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+]
+
+
+def _normalize_video_style(style) -> str:
+    if style in CLAN_VIDEO_STYLE_SECONDS:
+        return style
+    return "nostalgic"
+
+
+def _resolve_slide_seconds(payload: dict, count: int, style: str) -> float:
+    raw = payload.get("slide_seconds")
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        seconds = 0
+    if seconds <= 0:
+        seconds = float(CLAN_VIDEO_STYLE_SECONDS[style])
+    if count > 0 and seconds * count > CLAN_VIDEO_MAX_SECONDS:
+        seconds = CLAN_VIDEO_MAX_SECONDS / count
+    return seconds
+
+
+def _require_ffmpeg() -> str:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg 不可用，无法生成视频")
+    return ffmpeg
+
+
+def _load_cjk_font(size: int):
+    from PIL import ImageFont
+    for font_path in _CJK_FONTS:
+        if not os.path.isfile(font_path):
+            continue
+        try:
+            return ImageFont.truetype(font_path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _text_width(draw, text: str, font) -> float:
+    try:
+        return float(draw.textlength(text, font=font))
+    except Exception:
+        return float(len(text) * getattr(font, "size", 16))
+
+
+def _wrap_text(draw, text: str, font, width: int, limit: int) -> list:
+    if not text:
+        return []
+    lines = []
+    current = ""
+    for ch in text:
+        trial = current + ch
+        if current and _text_width(draw, trial, font) > width:
+            lines.append(current)
+            current = ch
+            if len(lines) >= limit:
+                break
+        else:
+            current = trial
+    if current and len(lines) < limit:
+        lines.append(current)
+    if len(lines) == limit and len("".join(lines)) < len(text):
+        lines[-1] = lines[-1].rstrip() + "…"
+    return lines
+
+
+def _tint_photo(img, style: str):
+    from PIL import Image, ImageEnhance, ImageOps
+    if img.mode in ("RGBA", "LA"):
+        base = Image.new("RGB", img.size, (0, 0, 0))
+        base.paste(img, mask=img.split()[-1])
+        img = base
+    else:
+        img = img.convert("RGB")
+    if style == "solemn":
+        return ImageOps.grayscale(img).convert("RGB")
+    if style == "modern":
+        img = ImageEnhance.Color(img).enhance(1.25)
+        return ImageEnhance.Contrast(img).enhance(1.1)
+    img = ImageEnhance.Color(img).enhance(0.35)
+    warm = Image.new("RGB", img.size, (176, 126, 74))
+    return Image.blend(img, warm, 0.35)
+
+
+def _try_download(url: str, dest: str):
+    try:
+        download_file(url, dest)
+    except Exception as exc:
+        log(f"图片下载失败，改用文字卡: {exc}")
+        return None
+    return dest if os.path.isfile(dest) else None
+
+
+def _open_slide_image(url, work_dir: str, style: str):
+    if not isinstance(url, str) or not url.strip():
+        return None
+    url = url.strip()
+    local = None
+    if url.startswith("/media/"):
+        name = url[len("/media/"):].lstrip("/").replace("\\", "/")
+        root = os.environ.get("STORAGE_PATH") or os.path.join(os.getcwd(), "storage", "media")
+        flattened = os.path.join(root, name.replace("/", "_"))
+        nested = os.path.join(root, name)
+        if os.path.isfile(flattened):
+            local = flattened
+        elif os.path.isfile(nested):
+            local = nested
+        else:
+            local = _try_download(LIGHTHOUSE_URL.rstrip("/") + url, os.path.join(work_dir, "photo"))
+    elif url.startswith("http://") or url.startswith("https://"):
+        local = _try_download(url, os.path.join(work_dir, "photo"))
+    elif os.path.isfile(url):
+        local = url
+    if not local:
+        return None
+    try:
+        from PIL import Image
+        img = Image.open(local)
+        img.load()
+        return _tint_photo(img, style)
+    except Exception as exc:
+        log(f"事件图片无法使用，改用文字卡: {exc}")
+        return None
+
+
+def _render_slide(path: str, event: dict, style: str, project_title: str, work_dir: str):
+    try:
+        from PIL import Image, ImageDraw, ImageOps
+    except ImportError as exc:
+        raise RuntimeError("幻灯片渲染需要 Pillow: pip install Pillow") from exc
+
+    palette = CLAN_VIDEO_PALETTE[style]
+    canvas = Image.new("RGB", (1920, 1080), palette["bg"])
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((0, 0, 1920, 14), fill=palette["accent"])
+
+    photo = _open_slide_image(event.get("image_url"), work_dir, style)
+    text_x = 96
+    text_width = 1728
+    if photo is not None:
+        fitted = ImageOps.fit(photo, (820, 820), Image.LANCZOS)
+        card = (1040, 110, 1880, 970)
+        draw.rectangle(card, fill=palette["card"])
+        canvas.paste(fitted, (1050, 130))
+        text_width = 880
+
+    title_font = _load_cjk_font(64)
+    meta_font = _load_cjk_font(36)
+    body_font = _load_cjk_font(32)
+    header_font = _load_cjk_font(28)
+    y = 80
+    header = (project_title or "").strip()
+    if header:
+        draw.text((text_x, y), header[:40], font=header_font, fill=palette["muted"])
+        y += 56
+
+    title = str(event.get("title") or "未命名").strip() or "未命名"
+    for line in _wrap_text(draw, title, title_font, text_width, 2):
+        draw.text((text_x, y), line, font=title_font, fill=palette["fg"])
+        y += 78
+
+    year = event.get("year")
+    year_text = f"{year}年" if isinstance(year, int) or (isinstance(year, float) and year == int(year)) else "年份不详"
+    if isinstance(year, float):
+        year_text = f"{int(year)}年"
+    place = str(event.get("place") or "").strip()
+    meta = year_text if not place else f"{year_text}  ·  {place}"
+    y += 8
+    draw.text((text_x, y), meta[:80], font=meta_font, fill=palette["accent"])
+    y += 64
+
+    description = str(event.get("description") or "").replace("\n", " ").strip()
+    for line in _wrap_text(draw, description, body_font, text_width, 6):
+        draw.text((text_x, y), line, font=body_font, fill=palette["fg"])
+        y += 48
+
+    if photo is None:
+        draw.rectangle((text_x, 980, text_x + 180, 988), fill=palette["accent"])
+
+    canvas.save(path, "PNG")
+
+
+def _assemble_mp4(frame_dir: str, count: int, seconds: float, style: str, output_path: str):
+    ffmpeg = _require_ffmpeg()
+    # 输入帧率 = 1/每条秒数，再拉到 30fps，这样静帧会按设定时长停留。
+    rate = 1.0 / seconds if seconds > 0 else 1.0
+    pattern = os.path.join(frame_dir, "frame_%04d.png").replace("\\", "/")
+    cmd = [
+        ffmpeg, "-y",
+        "-framerate", f"{rate:.6f}",
+        "-start_number", "0",
+        "-i", pattern,
+        "-vf", f"fps=30,{CLAN_VIDEO_VF[style]},format=yuv420p",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+    proc = subprocess.run(cmd, check=False, timeout=900, capture_output=True, text=True)
+    if proc.returncode != 0 or not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
+        tail = (proc.stderr or proc.stdout or "")[-500:]
+        raise RuntimeError(f"ffmpeg 生成失败: {tail}")
+    if count < 1:
+        raise RuntimeError("ffmpeg 没有可合成的画面")
+
+
+def _publish_video(payload: dict, output_file: str):
+    size = os.path.getsize(output_file)
+    upload_url = payload.get("upload_url")
+    public_url = payload.get("public_url")
+    storage_path = payload.get("storage_path")
+    if isinstance(upload_url, str) and upload_url.strip():
+        log("上传成片")
+        with open(output_file, "rb") as handle:
+            resp = requests.put(upload_url.strip(), data=handle, timeout=300)
+            resp.raise_for_status()
+        if not isinstance(public_url, str) or not public_url.strip():
+            raise RuntimeError("已上传成片，但任务没有可访问地址 public_url")
+        return public_url.strip(), size
+    if (
+        isinstance(storage_path, str) and storage_path.strip()
+        and isinstance(public_url, str) and public_url.strip()
+    ):
+        dest = storage_path.strip()
+        parent = os.path.dirname(dest)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        shutil.copyfile(output_file, dest)
+        if not os.path.isfile(dest) or os.path.getsize(dest) <= 0:
+            raise RuntimeError("成片没有写入本地存储")
+        log(f"成片已写入 {dest}")
+        return public_url.strip(), size
+    raise RuntimeError("没有 upload_url 或本地存储路径，无法产出可访问的视频地址")
+
+
 def handle_video(job: dict) -> dict:
     """
-    视频生成尚未实现。
-    process_job 不读取返回值里的 status：正常返回会 callback completed，
-    只有抛出异常才会 callback failed。阶段一必须抛出。
+    clan-event / clan-migration：按事件快照做成图片或文字幻灯片，ffmpeg 合成 MP4。
+    未知 kind 仍抛错。缺 ffmpeg、缺事件快照、上传失败都会抛错，由 process_job 走 failed。
+    不做 TTS、背景音乐、分享链接、朝代疆域。
     """
-    payload = job.get("payload")
-    log(f"视频生成任务尚未实现: {json.dumps(payload, ensure_ascii=False)[:200]}")
-    raise NotImplementedError("视频生成尚未实现，阶段一不产出文件")
+    payload = job.get("payload") if isinstance(job, dict) else None
+    if not isinstance(payload, dict):
+        raise NotImplementedError("视频生成尚未实现，阶段一不产出文件")
+    kind = payload.get("kind")
+    if kind not in CLAN_VIDEO_KINDS:
+        log(f"视频生成任务尚未实现: {kind}")
+        raise NotImplementedError(f"视频生成尚未实现: {kind}")
+
+    events = payload.get("events")
+    if not isinstance(events, list) or not events:
+        raise ValueError("视频任务缺少事件快照")
+
+    style = _normalize_video_style(payload.get("style"))
+    seconds = _resolve_slide_seconds(payload, len(events), style)
+    _require_ffmpeg()
+    log(f"生成{kind}幻灯片: {len(events)} 条, style={style}, 每条 {seconds:.2f}s")
+
+    work = tempfile.mkdtemp(prefix=f"video_{job.get('id')}_", dir=WORK_DIR)
+    try:
+        frames = []
+        for index, event in enumerate(events):
+            if not isinstance(event, dict):
+                event = {}
+            frame = os.path.join(work, f"frame_{index:04d}.png")
+            _render_slide(frame, event, style, str(payload.get("title") or ""), work)
+            frames.append(frame)
+        output = os.path.join(work, "out.mp4")
+        _assemble_mp4(work, len(frames), seconds, style, output)
+        video_url, file_size = _publish_video(payload, output)
+        duration = int(round(min(CLAN_VIDEO_MAX_SECONDS, seconds * len(frames))))
+        return {
+            "video_url": video_url,
+            "videoUrl": video_url,
+            "duration_seconds": duration,
+            "durationSeconds": duration,
+            "file_size": file_size,
+            "fileSize": file_size,
+        }
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def handle_image_process(job: dict) -> dict:

@@ -9,13 +9,20 @@ import {
   Req,
   ParseIntPipe,
 } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
+import { MemoryQuizStatus } from '@prisma/client';
 import { MemoryService } from './memory.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminService } from '../admin/admin.service';
+import { clientIp } from '../common/client-ip';
 import { GetQuizDto, SubmitQuizAnswersDto, CreateQuizDto, CreateAnswerDto, MemoryWallQueryDto } from './dto/memory.dto';
 
 @Controller('api/memory')
 export class MemoryController {
-  constructor(private readonly memoryService: MemoryService) {}
+  constructor(
+    private readonly memoryService: MemoryService,
+    private readonly adminService: AdminService,
+  ) {}
 
   // ==================== 公开接口（无需登录） ====================
 
@@ -65,7 +72,7 @@ export class MemoryController {
   @Post('quiz/create')
   @UseGuards(JwtAuthGuard)
   async createQuiz(@Req() req: any, @Body() body: CreateQuizDto) {
-    return this.memoryService.createQuiz(req.user.id, body);
+    return this.memoryService.createQuiz(req.user.userId || req.user.id, body);
   }
 
   /**
@@ -113,15 +120,15 @@ export class MemoryController {
   @UseGuards(JwtAuthGuard)
   async getPendingQuizzes(
     @Req() req: any,
+    @Query('clanSlug') clanSlug: string,
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
+    @Query('status') status?: string,
   ) {
-    // Check admin role
-    const role = req.user.role || '';
-    if (!['OWNER', 'ADMIN', 'super', 'operator'].includes(role)) {
-      return { error: '无权限' };
-    }
-    return this.memoryService.getPendingQuizzes(page || 1, pageSize || 20);
+    const userId = req.user.userId || req.user.id;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const quizStatus = status === 'ALL' ? 'ALL' : (status as MemoryQuizStatus | undefined);
+    return this.memoryService.getPendingQuizzes(clanId, Number(page) || 1, Number(pageSize) || 20, quizStatus);
   }
 
   /**
@@ -134,11 +141,23 @@ export class MemoryController {
     @Param('id', ParseIntPipe) id: number,
     @Body('status') status: string,
     @Body('answer') answer?: string,
+    @Body('reject_reason') rejectReason?: string,
+    @Query('clanSlug') clanSlug?: string,
   ) {
-    const role = req.user.role || '';
-    if (!['OWNER', 'ADMIN', 'super', 'operator'].includes(role)) {
-      return { error: '无权限' };
-    }
-    return this.memoryService.reviewQuiz(id, status as any, answer);
+    const userId = req.user.userId || req.user.id;
+    const slug = clanSlug || req.body?.clanSlug;
+    if (!slug) throw new ForbiddenException('缺少家族标识');
+    const clanId = await this.adminService.requireAdminBySlug(slug, userId);
+    const result = await this.memoryService.reviewQuiz(id, clanId, status as MemoryQuizStatus, answer, rejectReason);
+    await this.adminService.logAction({
+      clanId,
+      userId,
+      action: status === 'REJECTED' ? 'REJECT_MEMORY_QUIZ' : 'APPROVE_MEMORY_QUIZ',
+      targetType: 'LocalMemoryQuiz',
+      targetId: String(id),
+      details: rejectReason || answer || status,
+      ipAddress: clientIp(req),
+    });
+    return result;
   }
 }

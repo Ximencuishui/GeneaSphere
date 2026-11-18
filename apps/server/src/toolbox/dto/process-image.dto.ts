@@ -27,4 +27,8 @@ export class ProcessImageDto {
   @IsOptional()
   @IsString()
   person_ids?: string; // JSON array of person IDs for compose feature
+
+  @IsOptional()
+  @IsString()
+  clan_slug?: string;
 }

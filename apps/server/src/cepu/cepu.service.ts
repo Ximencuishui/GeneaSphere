@@ -11,6 +11,7 @@ import { catalogCss, renderCatalogBook, renderGenerationIndex, renderPlaceholder
 import { buildBookCatalog, isBiographyVolume, isLadiesVolume, isLineageVolume, type BookProfile, type CatalogEntry } from './book-catalog';
 import { htmlToRules, isFamilyRulesTitle, rulesToHtml } from './clan-rules';
 import { GenealogyEditionService } from '../genealogy-edition/genealogy-edition.service';
+import { redactCepuEntries, redactDocumentHtml, type NamedPerson, type VisitorPrivacyRules } from '../privacy/visitor-privacy';
 import { injectPdfFonts, PUPPETEER_PDF_ARGS } from '../print/pdf-fonts';
 
 /**
@@ -777,8 +778,10 @@ export class CepuService {
     const bio = await this.prisma.personBio.findUnique({ where: { person_id: personId } });
     return {
       person_id: personId.toString(),
+      clan_id: person.clan_id.toString(),
       full_name: person.full_name,
       gender: person.gender,
+      is_living: person.is_living,
       ...(bio ?? {}),
       id: bio ? bio.person_id.toString() : undefined,
     };
@@ -881,6 +884,7 @@ export class CepuService {
         id: true,
         full_name: true,
         gender: true,
+        is_living: true,
         birth_date: true,
         death_date: true,
         bio: { select: { courtesy_name: true, burial_place: true } },
@@ -903,6 +907,7 @@ export class CepuService {
         person_id: p.id.toString(),
         full_name: p.full_name,
         gender: p.gender,
+        is_living: p.is_living,
         courtesy_name: p.bio?.courtesy_name,
         burial_place: p.bio?.burial_place,
         birth_year: p.birth_date ? new Date(p.birth_date).getFullYear() : undefined,
@@ -955,6 +960,7 @@ export class CepuService {
       framePt?: number;
       continueNote?: 'brief' | 'full';
       showAvatars?: boolean;
+      visitor?: { rules: VisitorPrivacyRules; people: NamedPerson[] };
     } = {},
   ): Promise<Buffer> {
     const [clan, volumes] = await Promise.all([
@@ -969,6 +975,7 @@ export class CepuService {
     const sections = await this.buildBookSections(clanId, volumes, annotationMap, {
       forceLayout: opts.forceLayout,
       electronic: opts.edition !== 'print',
+      visitor: opts.visitor,
       script: opts.script,
       titleVertical: opts.titleVertical,
       pack: opts.pack,
@@ -1062,6 +1069,7 @@ export class CepuService {
       framePt?: number;
       continueNote?: 'brief' | 'full';
       showAvatars?: boolean;
+      visitor?: { rules: VisitorPrivacyRules; people: NamedPerson[] };
     } = {},
   ): Promise<Buffer> {
     const [clan, volumes] = await Promise.all([
@@ -1076,6 +1084,7 @@ export class CepuService {
     const sections = await this.buildBookSections(clanId, volumes, annotationMap, {
       forceLayout: opts.forceLayout,
       electronic: false,
+      visitor: opts.visitor,
       script: opts.script,
       titleVertical: opts.titleVertical,
       pack: opts.pack,
@@ -1446,6 +1455,7 @@ ${sections.join('')}
       framePt?: number;
       continueNote?: 'brief' | 'full';
       showAvatars?: boolean;
+      visitor?: { rules: VisitorPrivacyRules; people: NamedPerson[] };
     } = {},
   ): Promise<string[]> {
     const profile = options.profile ?? 'compact';
@@ -1466,7 +1476,10 @@ ${sections.join('')}
       const found = loaded.get(key);
       if (found) return found;
       const content = await this.getVolume(clanId, id);
-      const packed = { entries: content.entries ?? [] };
+      const entries = options.visitor
+        ? redactCepuEntries(content.entries ?? [], options.visitor.rules)
+        : (content.entries ?? []);
+      const packed = { entries };
       loaded.set(key, packed);
       return packed;
     };
@@ -1523,6 +1536,7 @@ ${sections.join('')}
       framePt?: number;
       continueNote?: 'brief' | 'full';
       showAvatars?: boolean;
+      visitor?: { rules: VisitorPrivacyRules; people: NamedPerson[] };
     },
     lineageEntries: () => Promise<ShiluEntry[]>,
   ): Promise<string> {
@@ -1541,11 +1555,15 @@ ${sections.join('')}
         });
         if (clan?.rules?.trim()) content = rulesToHtml(clan.rules);
       }
+      if (options.visitor) content = redactDocumentHtml(content, options.visitor.rules, options.visitor.people);
       const body = `<div id="${this.esc(entry.anchor)}"><h2 class="vol-title">${this.esc(entry.text)}</h2><div class="vol-content">${content}</div></div>`;
       return options.script === 'antique' ? `<div class="book-prose is-antique">${body}</div>` : body;
     }
     const cfg = ((v.config as ShiluConfig | null) ?? {}) as ShiluConfig;
-    const { entries } = await this.getVolume(clanId, v.id);
+    const loaded = await this.getVolume(clanId, v.id);
+    const entries = options.visitor
+      ? redactCepuEntries(loaded.entries ?? [], options.visitor.rules)
+      : (loaded.entries ?? []);
     const lineageStyle = options.forceLayout === 'su'
       ? 'su'
       : options.forceLayout === 'ou' || options.forceLayout === 'ou_chart'

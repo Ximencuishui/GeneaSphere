@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
+
+const route = useRoute()
+const clanSlug = computed(() => String(route.params.slug || ''))
 
 const quizzes = ref<any[]>([])
 const loading = ref(false)
@@ -14,7 +18,12 @@ const filterStatus = ref<'PENDING' | 'ALL'>('PENDING')
 async function loadQuizzes() {
   loading.value = true
   try {
-    const params: any = { page: page.value, pageSize: pageSize.value }
+    const params: any = {
+      page: page.value,
+      pageSize: pageSize.value,
+      clanSlug: clanSlug.value,
+      status: filterStatus.value,
+    }
     const res = await axios.get('/api/memory/admin/pending', { params })
     quizzes.value = res.data.quizzes
     total.value = res.data.total
@@ -28,7 +37,7 @@ async function loadQuizzes() {
 
 async function approveQuiz(id: number) {
   try {
-    await axios.post(`/api/memory/admin/review/${id}`, { status: 'VERIFIED' })
+    await axios.post(`/api/memory/admin/review/${id}`, { status: 'VERIFIED', clanSlug: clanSlug.value }, { params: { clanSlug: clanSlug.value } })
     ElMessage.success('已审核通过')
     loadQuizzes()
   } catch (err: any) {
@@ -38,11 +47,17 @@ async function approveQuiz(id: number) {
 
 async function rejectQuiz(id: number) {
   try {
-    await ElMessageBox.prompt('请输入驳回原因', '驳回题目', {
+    const { value } = await ElMessageBox.prompt('请输入驳回原因', '驳回题目', {
       confirmButtonText: '确定',
       cancelButtonText: '取消',
+      inputPattern: /\S+/,
+      inputErrorMessage: '请填写驳回原因',
     })
-    await axios.post(`/api/memory/admin/review/${id}`, { status: 'REJECTED' })
+    await axios.post(`/api/memory/admin/review/${id}`, {
+      status: 'REJECTED',
+      reject_reason: value,
+      clanSlug: clanSlug.value,
+    }, { params: { clanSlug: clanSlug.value } })
     ElMessage.success('已驳回')
     loadQuizzes()
   } catch (err: any) {
@@ -61,7 +76,8 @@ async function setAnswer(id: number) {
     await axios.post(`/api/memory/admin/review/${id}`, {
       status: 'VERIFIED',
       answer: value,
-    })
+      clanSlug: clanSlug.value,
+    }, { params: { clanSlug: clanSlug.value } })
     ElMessage.success('已设置答案并审核通过')
     loadQuizzes()
   } catch (err: any) {
@@ -76,7 +92,11 @@ onMounted(loadQuizzes)
   <div class="memory-quiz-management">
     <div class="page-header">
       <h2>题库管理</h2>
-      <p class="header-desc">审核用户提交的地方记忆题目</p>
+      <p class="header-desc">只审核本家族成员创建的地方记忆题目</p>
+      <el-select v-model="filterStatus" style="width: 140px; margin-top: 8px;" @change="loadQuizzes">
+        <el-option label="待审核" value="PENDING" />
+        <el-option label="全部" value="ALL" />
+      </el-select>
     </div>
 
     <div class="table-container" v-loading="loading">

@@ -13,6 +13,13 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const activeTab = ref('PENDING')
+const uploaderId = ref('')
+const uploaders = ref<{ user_id: string; label: string }[]>([])
+const rejectVisible = ref(false)
+const rejectTarget = ref<any>(null)
+const rejectPreset = ref('涉及隐私')
+const rejectNote = ref('')
+const rejecting = ref(false)
 
 // 批量审核状态
 const selectedReviews = ref<any[]>([])
@@ -35,6 +42,7 @@ const fetchReviews = async () => {
         page: currentPage.value,
         pageSize: pageSize.value,
         status: activeTab.value,
+        uploaderId: uploaderId.value || undefined,
       },
     })
     reviews.value = res.data.data
@@ -58,28 +66,46 @@ const handleApprove = async (review: any) => {
   }
 }
 
-const handleReject = async (review: any) => {
+const loadUploaders = async () => {
   try {
-    const { value } = await ElMessageBox.prompt(
-      '请输入驳回理由',
-      '驳回审核',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        inputPattern: /.+/,
-        inputErrorMessage: '理由不能为空',
-        inputType: 'textarea',
-      }
-    )
-    await axios.post(`/api/admin/reviews/media/${review.id}/reject`, {
-      reason: value,
+    const res = await axios.get('/api/admin/members', {
+      params: { clanSlug: clanSlug.value, page: 1, pageSize: 100 },
+    })
+    uploaders.value = (res.data?.data || []).map((member: any) => ({
+      user_id: member.user_id,
+      label: member.full_name || member.nickname || member.phone,
+    }))
+  } catch {
+    uploaders.value = []
+  }
+}
+
+const handleReject = (review: any) => {
+  rejectTarget.value = review
+  rejectPreset.value = '涉及隐私'
+  rejectNote.value = ''
+  rejectVisible.value = true
+}
+
+const submitReject = async () => {
+  if (!rejectTarget.value) return
+  if (rejectPreset.value === '其他' && !rejectNote.value.trim()) {
+    ElMessage.warning('选择「其他」时请填写说明')
+    return
+  }
+  rejecting.value = true
+  try {
+    await axios.post(`/api/admin/reviews/media/${rejectTarget.value.id}/reject`, {
+      reason: rejectPreset.value,
+      custom_reason: rejectPreset.value === '其他' ? rejectNote.value.trim() : undefined,
     })
     ElMessage.success('已驳回')
+    rejectVisible.value = false
     fetchReviews()
   } catch (error: any) {
-    if (error.response?.data?.message) {
-      ElMessage.error(error.response.data.message)
-    }
+    ElMessage.error(error.response?.data?.message || '操作失败')
+  } finally {
+    rejecting.value = false
   }
 }
 
@@ -211,6 +237,7 @@ const allSelectedIds = computed(() => selectedReviews.value.map((r) => r.id))
 
 onMounted(() => {
   clanSlug.value = route.params.slug as string || '1'
+  loadUploaders()
   fetchReviews()
 })
 </script>
@@ -262,6 +289,13 @@ onMounted(() => {
         </div>
       </template>
 
+      <div class="review-filter">
+        <span>上传者</span>
+        <ElSelect v-model="uploaderId" clearable placeholder="全部" style="width: 180px;" @change="fetchReviews">
+          <ElOption v-for="item in uploaders" :key="item.user_id" :label="item.label" :value="item.user_id" />
+        </ElSelect>
+      </div>
+
       <ElTabs v-model="activeTab" @tab-change="fetchReviews">
         <ElTabPane label="待审核" name="PENDING" />
         <ElTabPane label="已通过" name="APPROVED" />
@@ -291,7 +325,7 @@ onMounted(() => {
             />
           </div>
           <div class="review-info">
-            <p><strong>上传者：</strong>{{ review.uploader_id }}</p>
+            <p><strong>上传者：</strong>{{ review.uploader_name || review.uploader_id }}</p>
             <p v-if="review.taken_year">
               <strong>拍摄年份：</strong>{{ review.taken_year }}
             </p>
@@ -326,6 +360,25 @@ onMounted(() => {
       </div>
 
       <ElEmpty v-if="!loading && reviews.length === 0" description="暂无数据" />
+
+      <ElDialog v-model="rejectVisible" title="驳回审核" width="480px">
+        <p>请选择驳回理由</p>
+        <ElRadioGroup v-model="rejectPreset" class="reject-presets">
+          <ElRadio v-for="preset in presetRejectReasons" :key="preset" :value="preset">{{ preset }}</ElRadio>
+        </ElRadioGroup>
+        <ElInput
+          v-if="rejectPreset === '其他'"
+          v-model="rejectNote"
+          type="textarea"
+          :rows="3"
+          placeholder="请填写说明"
+          style="margin-top: 12px;"
+        />
+        <template #footer>
+          <ElButton @click="rejectVisible = false">取消</ElButton>
+          <ElButton type="danger" :loading="rejecting" @click="submitReject">确定驳回</ElButton>
+        </template>
+      </ElDialog>
 
       <ElPagination
         v-model:current-page="currentPage"
@@ -420,6 +473,20 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.review-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.reject-presets {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .pagination {

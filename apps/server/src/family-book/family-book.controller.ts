@@ -20,6 +20,7 @@ import {
   CreateFamilyBookDto,
   UpdateFamilyBookDto,
   UpdateFamilyBookPageDto,
+  ReplaceFamilyBookPhotoDto,
   PlaceFamilyBookOrderDto,
 } from './dto/family-book.dto';
 
@@ -121,6 +122,29 @@ export class FamilyBookController {
   @ApiOperation({ summary: '删除家庭图册项目' })
   async deleteProject(@Request() req, @Param('id') id: string) {
     return this.service.deleteProject(id, req.user.userId);
+  }
+
+  /**
+   * 可选照片：当前用户在该族上传的可见影像，以及该族已审核可见的影像库。
+   */
+  @Get('projects/:id/photo-candidates')
+  @ApiOperation({ summary: '列出可替换到图册的照片' })
+  async listPhotoCandidates(@Request() req, @Param('id') id: string) {
+    return this.service.listPhotoCandidates(id, req.user.userId);
+  }
+
+  /**
+   * 替换某一页 content 中的照片引用。
+   */
+  @Put('projects/:id/pages/:pageId/photo')
+  @ApiOperation({ summary: '替换图册页面照片' })
+  async replacePagePhoto(
+    @Request() req,
+    @Param('id') id: string,
+    @Param('pageId') pageId: string,
+    @Body() dto: ReplaceFamilyBookPhotoDto,
+  ) {
+    return this.service.replacePagePhoto(id, req.user.userId, pageId, dto.media_id);
   }
 
   /**

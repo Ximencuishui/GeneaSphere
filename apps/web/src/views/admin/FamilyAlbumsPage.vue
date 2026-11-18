@@ -7,8 +7,47 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const route = useRoute()
 const clanSlug = computed(() => route.params.slug || '1')
 
-// 数据列表
-const albums = ref<any[]>([])
+const STATUS_LABEL: Record<string, string> = {
+  draft: '草稿',
+  preview: '已生成预览',
+  ordered: '已下单',
+}
+
+const COVER_LABEL: Record<string, string> = {
+  red: '喜庆红',
+  gold: '典雅金',
+  green: '清新绿',
+  ink: '水墨风',
+  modern: '现代简约',
+}
+
+const GROUPING_LABEL: Record<string, string> = {
+  family: '按家庭',
+  branch: '按房支',
+  generation: '按世代',
+}
+
+const PAGE_TYPE_LABEL: Record<string, string> = {
+  cover: '封面',
+  toc: '目录',
+  section: '章节扉页',
+  person: '个人介绍页',
+  family: '家庭组页',
+  epilogue: '后记',
+}
+
+const statusLabel = (status?: string) => (status && STATUS_LABEL[status]) || status || '-'
+const coverLabel = (value?: string) => (value && COVER_LABEL[value]) || value || '-'
+const groupingLabel = (value?: string) => (value && GROUPING_LABEL[value]) || value || '-'
+const pageTypeLabel = (value?: string) => (value && PAGE_TYPE_LABEL[value]) || value || '-'
+
+const readError = (e: any, fallback: string) => {
+  const msg = e?.response?.data?.message
+  if (Array.isArray(msg)) return msg.join('；')
+  return msg || e?.message || fallback
+}
+
+const projects = ref<any[]>([])
 const loading = ref(false)
 const pagination = ref({
   page: 1,
@@ -16,24 +55,20 @@ const pagination = ref({
   total: 0,
 })
 
-// 详情弹窗
 const detailVisible = ref(false)
-const currentAlbum = ref<any>(null)
-const photos = ref<any[]>([])
-const photosLoading = ref(false)
+const currentProject = ref<any>(null)
+const pages = ref<any[]>([])
+const detailLoading = ref(false)
 
-// 编辑弹窗
 const editDialogVisible = ref(false)
-const editingAlbum = ref<any>(null)
+const editingProject = ref<any>(null)
+const editLoading = ref(false)
 const editForm = ref({
   title: '',
-  description: '',
-  family_name: '',
-  generation: '',
-  cover_url: '',
+  preface: '',
+  status: 'draft',
 })
 
-// 加载数据
 const fetchData = async () => {
   loading.value = true
   try {
@@ -44,64 +79,79 @@ const fetchData = async () => {
         pageSize: pagination.value.pageSize,
       },
     })
-    albums.value = res.data.data
+    projects.value = res.data.data
     pagination.value.total = res.data.total
   } catch (e: any) {
-    ElMessage.error(e.message || '加载失败')
+    ElMessage.error(readError(e, '加载失败'))
   } finally {
     loading.value = false
   }
 }
 
-// 查看详情
 const handleViewDetail = async (row: any) => {
-  currentAlbum.value = row
-  photosLoading.value = true
+  currentProject.value = { ...row }
+  pages.value = []
   detailVisible.value = true
+  detailLoading.value = true
   try {
     const res = await axios.get(`/api/admin/family-albums/${row.id}`, {
       params: { clanSlug: clanSlug.value },
     })
-    photos.value = res.data.photos || []
+    currentProject.value = res.data
+    pages.value = res.data.pages || []
   } catch (e: any) {
-    ElMessage.error(e.message || '加载详情失败')
+    ElMessage.error(readError(e, '加载详情失败'))
   } finally {
-    photosLoading.value = false
+    detailLoading.value = false
   }
 }
 
-// 打开编辑
-const handleEdit = (row: any) => {
-  editingAlbum.value = row
+const handleEdit = async (row: any) => {
+  editingProject.value = row
   editForm.value = {
     title: row.title || '',
-    description: row.description || '',
-    family_name: row.family_name || '',
-    generation: row.generation || '',
-    cover_url: row.cover_url || '',
+    preface: '',
+    status: row.status || 'draft',
   }
   editDialogVisible.value = true
+  editLoading.value = true
+  try {
+    const res = await axios.get(`/api/admin/family-albums/${row.id}`, {
+      params: { clanSlug: clanSlug.value },
+    })
+    if (editingProject.value?.id !== row.id) return
+    editForm.value = {
+      title: res.data.title ?? '',
+      preface: res.data.preface ?? '',
+      status: res.data.status || 'draft',
+    }
+  } catch (e: any) {
+    ElMessage.error(readError(e, '加载图册失败'))
+  } finally {
+    editLoading.value = false
+  }
 }
 
-// 保存编辑
 const handleSave = async () => {
+  if (editLoading.value) return
   if (!editForm.value.title.trim()) {
     ElMessage.warning('请输入图册标题')
     return
   }
   try {
-    await axios.put(`/api/admin/family-albums/${editingAlbum.value.id}`, editForm.value, {
-      params: { clanSlug: clanSlug.value },
+    await axios.put(`/api/admin/family-albums/${clanSlug.value}/${editingProject.value.id}`, {
+      title: editForm.value.title,
+      preface: editForm.value.preface,
+      status: editForm.value.status,
     })
     ElMessage.success('保存成功')
     editDialogVisible.value = false
     fetchData()
   } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
+    ElMessage.error(readError(e, '保存失败'))
   }
 }
 
-// 删除
 const handleDelete = async (id: string) => {
   try {
     await ElMessageBox.confirm('确定要删除该图册吗？', '提示', { type: 'warning' })
@@ -112,15 +162,75 @@ const handleDelete = async (id: string) => {
     fetchData()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '删除失败')
+      ElMessage.error(readError(e, '删除失败'))
     }
   }
 }
 
-// 分页
+const pageEditVisible = ref(false)
+const pageSaving = ref(false)
+const editingPage = ref<any>(null)
+const pageForm = ref({
+  title: '',
+  subtitle: '',
+  body: '',
+})
+
+const openPageEdit = (row: any) => {
+  editingPage.value = row
+  pageForm.value = {
+    title: row.title || '',
+    subtitle: row.subtitle || '',
+    body: row.body || '',
+  }
+  pageEditVisible.value = true
+}
+
+const reloadDetail = async (id: string) => {
+  detailLoading.value = true
+  try {
+    const res = await axios.get(`/api/admin/family-albums/${id}`, {
+      params: { clanSlug: clanSlug.value },
+    })
+    currentProject.value = res.data
+    pages.value = res.data.pages || []
+  } catch (e: any) {
+    ElMessage.error(readError(e, '加载详情失败'))
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+const handleSavePage = async () => {
+  if (pageSaving.value) return
+  const projectId = currentProject.value?.id
+  const pageId = editingPage.value?.id
+  if (!projectId || !pageId) return
+  pageSaving.value = true
+  try {
+    await axios.put(`/api/admin/family-albums/${clanSlug.value}/${projectId}/pages/${pageId}`, {
+      title: pageForm.value.title,
+      subtitle: pageForm.value.subtitle,
+      body: pageForm.value.body,
+    })
+    ElMessage.success('页面已保存')
+    pageEditVisible.value = false
+    await reloadDetail(projectId)
+  } catch (e: any) {
+    ElMessage.error(readError(e, '保存失败'))
+  } finally {
+    pageSaving.value = false
+  }
+}
+
 const handlePageChange = (page: number) => {
   pagination.value.page = page
   fetchData()
+}
+
+const spouseLabel = (value: boolean | null | undefined) => {
+  if (value == null) return '-'
+  return value ? '是' : '否'
 }
 
 onMounted(() => {
@@ -134,25 +244,23 @@ onMounted(() => {
       <h2>家庭图册</h2>
     </div>
 
-    <el-table :data="albums" v-loading="loading" stripe>
-      <el-table-column label="封面" width="100">
+    <el-table :data="projects" v-loading="loading" stripe>
+      <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
+      <el-table-column label="状态" width="120">
         <template #default="{ row }">
-          <el-image
-            v-if="row.cover_url"
-            :src="row.cover_url"
-            fit="cover"
-            style="width: 60px; height: 60px; cursor: pointer;"
-            @click="handleViewDetail(row)"
-          />
-          <span v-else>-</span>
+          {{ statusLabel(row.status) }}
         </template>
       </el-table-column>
-      <el-table-column prop="title" label="图册标题" min-width="150" />
-      <el-table-column prop="family_name" label="家庭名称" width="150" />
-      <el-table-column prop="generation" label="世代" width="80" />
-      <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="photo_count" label="照片数" width="100" />
-      <el-table-column prop="created_at" label="创建时间" width="160">
+      <el-table-column prop="generations" label="世代数" width="90" />
+      <el-table-column prop="page_count" label="页数" width="80" />
+      <el-table-column prop="person_count" label="人数" width="80" />
+      <el-table-column label="起始人" width="140" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.start_person?.name || '-' }}
+        </template>
+      </el-table-column>
+      <el-table-column prop="user_name" label="创建者" width="140" show-overflow-tooltip />
+      <el-table-column prop="created_at" label="创建时间" width="170">
         <template #default="{ row }">
           {{ row.created_at ? new Date(row.created_at).toLocaleString() : '-' }}
         </template>
@@ -166,7 +274,6 @@ onMounted(() => {
       </el-table-column>
     </el-table>
 
-    <!-- 分页 -->
     <el-pagination
       v-model:current-page="pagination.page"
       :total="pagination.total"
@@ -176,52 +283,87 @@ onMounted(() => {
       class="pagination"
     />
 
-    <!-- 详情弹窗 -->
-    <el-dialog v-model="detailVisible" :title="currentAlbum?.title || '图册详情'" width="800px" destroy-on-close>
-      <div class="album-detail">
+    <el-dialog v-model="detailVisible" :title="currentProject?.title || '图册详情'" width="960px" destroy-on-close>
+      <div v-loading="detailLoading">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="家庭名称">{{ currentAlbum?.family_name || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="世代">{{ currentAlbum?.generation || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">{{ currentAlbum?.description || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="序言" :span="2">{{ currentProject?.preface || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="封面模板">{{ coverLabel(currentProject?.cover_template) }}</el-descriptions-item>
+          <el-descriptions-item label="含配偶">{{ spouseLabel(currentProject?.include_spouse) }}</el-descriptions-item>
+          <el-descriptions-item label="分组方式">{{ groupingLabel(currentProject?.grouping) }}</el-descriptions-item>
         </el-descriptions>
 
-        <h4 style="margin-top: 20px;">照片列表</h4>
-        <div v-loading="photosLoading" class="photo-grid">
-          <div v-if="photos.length === 0" class="empty-tip">暂无照片</div>
-          <el-image
-            v-for="photo in photos"
-            :key="photo.id"
-            :src="photo.url"
-            :preview-src-list="photos.map(p => p.url)"
-            fit="cover"
-            class="photo-item"
-          />
-        </div>
+        <h4 class="section-title">页面</h4>
+        <el-table :data="pages" size="small" stripe>
+          <el-table-column prop="page_number" label="页码" width="80" />
+          <el-table-column label="页类型" width="140">
+            <template #default="{ row }">
+              {{ pageTypeLabel(row.page_type) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="标题" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.title || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="副标题" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.subtitle || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="正文" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.body || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openPageEdit(row)">编辑</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
     </el-dialog>
 
-    <!-- 编辑弹窗 -->
     <el-dialog v-model="editDialogVisible" title="编辑图册" width="500px" destroy-on-close>
-      <el-form :model="editForm" label-width="100px">
+      <el-form :model="editForm" label-width="100px" v-loading="editLoading">
         <el-form-item label="图册标题" required>
           <el-input v-model="editForm.title" placeholder="请输入图册标题" />
         </el-form-item>
-        <el-form-item label="家庭名称">
-          <el-input v-model="editForm.family_name" placeholder="请输入家庭名称" />
+        <el-form-item label="序言">
+          <el-input v-model="editForm.preface" type="textarea" :rows="4" placeholder="请输入序言" />
         </el-form-item>
-        <el-form-item label="世代">
-          <el-input v-model="editForm.generation" placeholder="如：第12世" />
-        </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="请输入描述" />
-        </el-form-item>
-        <el-form-item label="封面URL">
-          <el-input v-model="editForm.cover_url" placeholder="请输入封面图片URL" />
+        <el-form-item label="状态" required>
+          <el-select v-model="editForm.status" style="width: 100%">
+            <el-option
+              v-for="(label, value) in STATUS_LABEL"
+              :key="value"
+              :label="label"
+              :value="value"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSave">保存</el-button>
+        <el-button type="primary" :loading="editLoading" @click="handleSave">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="pageEditVisible" title="编辑页面" width="560px" destroy-on-close>
+      <el-form :model="pageForm" label-width="80px">
+        <el-form-item label="标题">
+          <el-input v-model="pageForm.title" placeholder="页面标题" />
+        </el-form-item>
+        <el-form-item label="副标题">
+          <el-input v-model="pageForm.subtitle" placeholder="副标题" />
+        </el-form-item>
+        <el-form-item label="正文">
+          <el-input v-model="pageForm.body" type="textarea" :rows="6" placeholder="页面正文" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="pageEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="pageSaving" @click="handleSavePage">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -247,24 +389,7 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-.photo-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.photo-item {
-  width: 150px;
-  height: 150px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.empty-tip {
-  grid-column: 1 / -1;
-  text-align: center;
-  color: #999;
-  padding: 40px 0;
+.section-title {
+  margin: 20px 0 12px;
 }
 </style>

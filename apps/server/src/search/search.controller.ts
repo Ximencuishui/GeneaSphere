@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, Param, UseGuards, Request, UnauthorizedException } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { CreateSearchPostDto } from './dto/create-search-post.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
@@ -11,13 +11,16 @@ export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
   @Post('post')
-  @Public()
-  async createPost(@Body() dto: CreateSearchPostDto) {
+  async createPost(@Request() req, @Body() dto: CreateSearchPostDto) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('请先登录');
+    }
     return await this.searchService.createPost(
       dto.origin_place,
       dto.xipai_keywords,
       dto.contact_info,
-      dto.created_by
+      userId,
     );
   }
 
@@ -33,8 +36,18 @@ export class SearchController {
   }
 
   @Get('post/:id/contact')
-  async getContactInfo(@Param('id') id: string) {
-    const contactInfo = await this.searchService.decryptContactInfo(BigInt(id), true);
+  async getContactInfo(
+    @Request() req,
+    @Param('id') id: string,
+    @Query('isAdmin') isAdmin?: string,
+  ) {
+    // isAdmin 只可能来自查询串，服务端忽略它，权限以登录用户在库里的身份为准。
+    void isAdmin;
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new UnauthorizedException('请先登录');
+    }
+    const contactInfo = await this.searchService.getContactForUser(BigInt(id), userId);
     return { contact_info: contactInfo };
   }
 }

@@ -24,6 +24,8 @@ import { WechatService } from './wechat.service';
 import { NotificationService } from '../common/notification.service';
 import { AdminService } from '../admin/admin.service';
 import { CosService } from '../cos/cos.service';
+import { PrivacyService } from '../privacy/privacy.service';
+import { mapRelativeQuestionTypes, relativeMaxAttempts } from '../privacy/visitor-privacy';
 
 const SESSION_TTL_MINUTES = 30;
 const PEER_QRCODE_TTL_MINUTES = 30;
@@ -61,6 +63,7 @@ export class InviteService {
     private readonly admin: AdminService,
     private readonly cosService: CosService,
     private readonly edition: GenealogyEditionService,
+    private readonly privacy: PrivacyService,
   ) {}
 
   // ==================== 邀请二维码（管理端） ====================
@@ -713,30 +716,69 @@ export class InviteService {
     });
     if (!session) throw new NotFoundException('会话不存在');
 
+    const policy = await this.privacy.load(session.clan_id);
+    if (!policy.enable_relative_verify) {
+      await this.completeSession(sessionId, {
+        method: VerifyMethod.INFO_CONFIRM,
+        personId: session.matched_person_id || undefined,
+      });
+      return {
+        required: false,
+        skipped: true,
+        passed: true,
+        session_id: sessionId.toString(),
+        questions: [],
+        total: 0,
+        required_correct: 0,
+        max_retry: 0,
+      };
+    }
+    const maxRetry = relativeMaxAttempts(policy.verify_max_attempts);
+
     const target = await this.resolveQuizTarget(session);
     if (!target) {
       throw new BadRequestException('缺少可出题的人物数据，请先填写或匹配信息');
     }
+    const quizTarget = { ...target, _sessionId: sessionId };
+    const selected = mapRelativeQuestionTypes(policy.verify_questions);
+    if (selected.length > 0) {
+      const configured = await this.buildSelectedQuestions(session.clan_id, quizTarget, selected);
+      if (configured.length === 0) {
+        throw new BadRequestException('已选的亲属验证题在族谱里没有对应数据，无法出题');
+      }
+      return {
+        session_id: sessionId.toString(),
+        total: configured.length,
+        required_correct: Math.min(QUIZ_REQUIRED_CORRECT, configured.length),
+        max_retry: maxRetry,
+        questions: configured.map((q) => ({
+          attempt_id: q.attempt_id,
+          question: q.question,
+          options: q.options,
+          difficulty: q.difficulty,
+          category: q.category,
+        })),
+      };
+    }
 
-    // 1 道"父名"（必答 EASY）
+    // 未选题型时才使用默认题，并且写入答题记录。
     const easyQuestions: QuizQuestion[] = [];
     if (target.father_id) {
       const father = await this.prisma.person.findUnique({ where: { id: target.father_id } });
       if (father) {
         const distractors = await this.fetchDistractorNames(session.clan_id, father.full_name);
-        easyQuestions.push(this.buildQuestion({
+        easyQuestions.push(await this.persistAttempt(
           sessionId,
-          text: `你父亲的名字是？`,
-          correct: father.full_name,
-          distractors,
-          difficulty: QuizDifficulty.EASY,
-          category: 'direct_elder',
-        }));
+          '你父亲的名字是？',
+          this.shuffle([father.full_name, ...distractors]).slice(0, 4),
+          father.full_name,
+          QuizDifficulty.EASY,
+          'direct_elder',
+        ));
       }
     }
 
-    // 2 道随机题
-    const mediumQuestions = await this.buildRandomQuestions(session.clan_id, target, 2 - easyQuestions.length);
+    const mediumQuestions = await this.buildRandomQuestions(session.clan_id, quizTarget, 2 - easyQuestions.length);
     const questions = [...easyQuestions, ...mediumQuestions].slice(0, QUIZ_TOTAL);
 
     // 如果仍不足 3 道（数据不足），补通用题
@@ -748,7 +790,7 @@ export class InviteService {
       session_id: sessionId.toString(),
       total: questions.length,
       required_correct: QUIZ_REQUIRED_CORRECT,
-      max_retry: MAX_QUIZ_RETRY,
+      max_retry: maxRetry,
       questions: questions.map((q) => ({
         attempt_id: q.attempt_id,
         question: q.question,
@@ -797,8 +839,18 @@ export class InviteService {
     retryRound = 0,
   ) {
     await this.assertSessionPending(sessionId);
+    const session = await this.prisma.verificationSession.findUnique({ where: { id: sessionId } });
+    const policy = session ? await this.privacy.load(session.clan_id) : null;
+    const maxRetry = policy ? relativeMaxAttempts(policy.verify_max_attempts) : MAX_QUIZ_RETRY;
+    if (policy && !policy.enable_relative_verify) {
+      await this.completeSession(sessionId, {
+        method: VerifyMethod.INFO_CONFIRM,
+        personId: session?.matched_person_id || undefined,
+      });
+      return { passed: true, skipped: true, required: false };
+    }
 
-    if (retryRound >= MAX_QUIZ_RETRY) {
+    if (retryRound >= maxRetry) {
       await this.markSessionFailed(sessionId, '答题重抽次数已用尽');
       return { passed: false, fail_reason: 'retry_exhausted' };
     }
@@ -834,14 +886,14 @@ export class InviteService {
     }
 
     // 全部答错或答对不足
-    if (retryRound + 1 >= MAX_QUIZ_RETRY) {
+    if (retryRound + 1 >= maxRetry) {
       await this.markSessionFailed(sessionId, '答题未通过');
       return { passed: false, fail_reason: 'insufficient_correct', correct_count: correctCount };
     }
     return {
       passed: false,
       can_retry: true,
-      retry_remaining: MAX_QUIZ_RETRY - retryRound - 1,
+      retry_remaining: maxRetry - retryRound - 1,
       correct_count: correctCount,
     };
   }
@@ -1292,31 +1344,6 @@ export class InviteService {
     };
   }
 
-  private buildQuestion(opts: {
-    sessionId: bigint;
-    text: string;
-    correct: string;
-    distractors: string[];
-    difficulty: QuizDifficulty;
-    category: string;
-  }): QuizQuestion {
-    const all = this.shuffle([opts.correct, ...opts.distractors]).slice(0, 4);
-    // 保证 correct 在内
-    if (!all.includes(opts.correct)) {
-      all[0] = opts.correct;
-    }
-    // 这里先返回一个临时 attempt_id，调用方需在写入 DB 后回填
-    const attempt = {
-      attempt_id: 0, // 占位
-      question: opts.text,
-      options: all,
-      difficulty: opts.difficulty,
-      category: opts.category,
-    } as QuizQuestion;
-    // 同步创建 DB 记录
-    return attempt;
-  }
-
   private async persistAttempt(
     sessionId: bigint,
     text: string,
@@ -1342,6 +1369,97 @@ export class InviteService {
       difficulty: created.difficulty,
       category: created.category,
     };
+  }
+
+  private async buildSelectedQuestions(
+    clanId: bigint,
+    target: { id: bigint; full_name: string; father_id: bigint | null; spouse_id: bigint | null; siblings: bigint[]; birth_date?: Date; birth_place?: string | null; _sessionId?: bigint },
+    types: string[],
+  ): Promise<QuizQuestion[]> {
+    const sessionId = target._sessionId;
+    if (!sessionId) return [];
+    const out: QuizQuestion[] = [];
+    for (const type of types) {
+      if (out.length >= QUIZ_TOTAL) break;
+      if ((type === 'father_name' || type === 'direct_elder') && target.father_id) {
+        const father = await this.prisma.person.findUnique({ where: { id: target.father_id } });
+        if (!father) continue;
+        const distractors = await this.fetchDistractorNames(clanId, father.full_name);
+        out.push(await this.persistAttempt(
+          sessionId,
+          '你父亲的名字是？',
+          this.shuffle([father.full_name, ...distractors]).slice(0, 4),
+          father.full_name,
+          QuizDifficulty.EASY,
+          'direct_elder',
+        ));
+        continue;
+      }
+      if (type === 'grandfather_birth_year' || type === 'direct_elder_year') {
+        const fatherContext = target.father_id ? await this.fetchPersonContext(target.father_id) : null;
+        const elderId = type === 'direct_elder_year' ? target.father_id : fatherContext?.father_id;
+        if (!elderId) continue;
+        const elder = await this.prisma.person.findUnique({ where: { id: elderId } });
+        if (!elder?.birth_date) continue;
+        const year = elder.birth_date.getFullYear();
+        const distractors = await this.fetchDistractorYears(clanId, year);
+        out.push(await this.persistAttempt(
+          sessionId,
+          type === 'direct_elder_year' ? '你的父亲出生于哪一年？' : '你的祖父出生于哪一年？',
+          this.shuffle([String(year), ...distractors]).slice(0, 4),
+          String(year),
+          QuizDifficulty.MEDIUM,
+          type,
+        ));
+        continue;
+      }
+      if (type === 'great_grandfather_spouse_surname' && target.father_id) {
+        const fatherContext = await this.fetchPersonContext(target.father_id);
+        const grandfather = fatherContext?.father_id ? await this.fetchPersonContext(fatherContext.father_id) : null;
+        const great = grandfather?.father_id ? await this.fetchPersonContext(grandfather.father_id) : null;
+        if (!great?.spouse_id) continue;
+        const spouse = await this.prisma.person.findUnique({ where: { id: great.spouse_id } });
+        const surname = spouse?.full_name?.slice(0, 1);
+        if (!surname) continue;
+        const names = await this.fetchDistractorNames(clanId, spouse!.full_name);
+        const distractors = names.map((name) => name.slice(0, 1)).filter((item) => item && item !== surname);
+        out.push(await this.persistAttempt(
+          sessionId,
+          '你曾祖父的配偶姓什么？',
+          this.shuffle([surname, ...distractors]).slice(0, 4),
+          surname,
+          QuizDifficulty.HARD,
+          type,
+        ));
+        continue;
+      }
+      if (type === 'sibling_name' && target.siblings?.length) {
+        const sibling = await this.prisma.person.findUnique({ where: { id: target.siblings[0] } });
+        if (!sibling) continue;
+        const distractors = await this.fetchDistractorNames(clanId, sibling.full_name);
+        out.push(await this.persistAttempt(
+          sessionId,
+          '以下哪一位是你的同辈？',
+          this.shuffle([sibling.full_name, ...distractors]).slice(0, 4),
+          sibling.full_name,
+          QuizDifficulty.MEDIUM,
+          'sibling_name',
+        ));
+        continue;
+      }
+      if (type === 'birth_place' && target.birth_place) {
+        const distractors = await this.fetchDistractorNames(clanId, target.birth_place, 4);
+        out.push(await this.persistAttempt(
+          sessionId,
+          '你的出生地是哪里？',
+          this.shuffle([target.birth_place, ...distractors]).slice(0, 4),
+          target.birth_place,
+          QuizDifficulty.EASY,
+          'birth_place',
+        ));
+      }
+    }
+    return out;
   }
 
   private async buildRandomQuestions(

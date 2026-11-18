@@ -8,6 +8,7 @@ import familyBookApi, {
 import type {
   FamilyBookProject,
   FamilyBookPage,
+  FamilyBookPhotoCandidate,
   PlaceFamilyBookOrderDto,
 } from '@/api/familyBook'
 
@@ -29,6 +30,13 @@ const editingBody = ref('')
 const editingTitle = ref('')
 const editingSubtitle = ref('')
 const editSaving = ref(false)
+
+// 替换照片
+const photoDialogVisible = ref(false)
+const photoLoading = ref(false)
+const photoSaving = ref(false)
+const photoCandidates = ref<FamilyBookPhotoCandidate[]>([])
+const selectedMediaId = ref('')
 
 // 下单弹窗
 const orderDialogVisible = ref(false)
@@ -77,7 +85,7 @@ function prevPage() {
 }
 
 function handleKeyDown(e: KeyboardEvent) {
-  if (editDialogVisible.value || orderDialogVisible.value) return
+  if (editDialogVisible.value || orderDialogVisible.value || photoDialogVisible.value) return
   if (e.key === 'ArrowRight') nextPage()
   else if (e.key === 'ArrowLeft') prevPage()
   else if (e.key === 'Escape' && fullscreen.value) {
@@ -125,6 +133,71 @@ function openEditDialog() {
   editingSubtitle.value = currentPage.value.subtitle || ''
   editingBody.value = currentPage.value.body || ''
   editDialogVisible.value = true
+}
+
+const minePhotos = computed(() =>
+  photoCandidates.value.filter((item) => item.source === 'mine'),
+)
+const libraryPhotos = computed(() =>
+  photoCandidates.value.filter((item) => item.source === 'library'),
+)
+const photoLocked = computed(
+  () => project.value?.status === 'ordered' || !!project.value?.print_order,
+)
+
+function pageHasPhotoSlot(page?: FamilyBookPage | null) {
+  if (!page) return false
+  if (page.page_type === 'person') return true
+  return !!page.content && Object.prototype.hasOwnProperty.call(page.content, 'photo_url')
+}
+
+const canReplacePhoto = computed(() => pageHasPhotoSlot(currentPage.value))
+
+async function openPhotoDialog() {
+  if (!canReplacePhoto.value) return
+  selectedMediaId.value = ''
+  photoCandidates.value = []
+  photoDialogVisible.value = true
+  photoLoading.value = true
+  try {
+    const res = (await familyBookApi.listPhotoCandidates(projectId.value)) as {
+      data?: FamilyBookPhotoCandidate[]
+    }
+    photoCandidates.value = res?.data || []
+    const currentUrl = currentPage.value?.content?.photo_url
+    const matched = photoCandidates.value.find(
+      (item) =>
+        item.file_url === currentUrl ||
+        item.display_url === currentUrl ||
+        item.thumb_url === currentUrl,
+    )
+    if (matched) selectedMediaId.value = matched.id
+  } catch (err: any) {
+    ElMessage.error(err?.message || '加载照片失败')
+  } finally {
+    photoLoading.value = false
+  }
+}
+
+async function confirmReplacePhoto() {
+  if (!currentPage.value || !selectedMediaId.value || photoLocked.value) return
+  photoSaving.value = true
+  const pageIndex = currentPageIndex.value
+  try {
+    await familyBookApi.replacePagePhoto(
+      projectId.value,
+      currentPage.value.id,
+      selectedMediaId.value,
+    )
+    ElMessage.success('照片已替换')
+    photoDialogVisible.value = false
+    await fetchProject()
+    currentPageIndex.value = pageIndex
+  } catch (err: any) {
+    ElMessage.error(err?.message || '替换失败')
+  } finally {
+    photoSaving.value = false
+  }
 }
 
 async function saveEdit() {
@@ -324,6 +397,7 @@ const pageRef = ref<HTMLElement | null>(null)
               <div class="person-photo-wrap">
                 <ElImage
                   v-if="currentPage.content?.photo_url"
+                  :key="currentPage.content.photo_url"
                   :src="currentPage.content.photo_url"
                   fit="cover"
                   class="person-photo"
@@ -331,6 +405,13 @@ const pageRef = ref<HTMLElement | null>(null)
                 <div v-else class="person-photo placeholder">
                   <ElIcon :size="60" color="#fff"><UserFilled /></ElIcon>
                 </div>
+                <ElButton
+                  class="replace-photo-btn"
+                  size="small"
+                  @click="openPhotoDialog"
+                >
+                  替换照片
+                </ElButton>
               </div>
               <div class="person-info">
                 <div class="person-name">
@@ -433,6 +514,14 @@ const pageRef = ref<HTMLElement | null>(null)
           <ElIcon><EditPen /></ElIcon>
           编辑文字
         </ElButton>
+        <ElButton
+          v-if="canReplacePhoto"
+          size="small"
+          @click="openPhotoDialog"
+        >
+          <ElIcon><Picture /></ElIcon>
+          替换照片
+        </ElButton>
         <ElButton size="small" @click="toggleFullscreen">
           <ElIcon><FullScreen /></ElIcon>
           全屏
@@ -491,6 +580,77 @@ const pageRef = ref<HTMLElement | null>(null)
         <ElButton @click="editDialogVisible = false">取消</ElButton>
         <ElButton type="primary" :loading="editSaving" @click="saveEdit">
           保存
+        </ElButton>
+      </template>
+    </ElDialog>
+
+    <!-- 替换照片 -->
+    <ElDialog
+      v-model="photoDialogVisible"
+      title="替换照片"
+      width="720px"
+      destroy-on-close
+    >
+      <p class="photo-picker-hint">
+        从你在本族上传的影像，或本族已审核可见的影像库中选择一张。待审、驳回和其他家族的影像不会出现。
+      </p>
+      <ElAlert
+        v-if="photoLocked"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="该图册已下单，不能替换照片。"
+        style="margin-bottom: 12px"
+      />
+      <div v-loading="photoLoading" class="photo-picker">
+        <ElEmpty
+          v-if="!photoLoading && photoCandidates.length === 0"
+          description="暂无可选照片"
+        />
+        <template v-else>
+          <section v-if="minePhotos.length">
+            <h4 class="photo-group-title">我上传的</h4>
+            <div class="photo-grid">
+              <button
+                v-for="item in minePhotos"
+                :key="item.id"
+                type="button"
+                class="photo-card"
+                :class="{ selected: selectedMediaId === item.id }"
+                @click="selectedMediaId = item.id"
+              >
+                <img :src="item.thumb_url || item.file_url" :alt="item.description || '照片'" />
+                <span class="photo-desc">{{ item.description || '无描述' }}</span>
+              </button>
+            </div>
+          </section>
+          <section v-if="libraryPhotos.length">
+            <h4 class="photo-group-title">家族影像库</h4>
+            <div class="photo-grid">
+              <button
+                v-for="item in libraryPhotos"
+                :key="item.id"
+                type="button"
+                class="photo-card"
+                :class="{ selected: selectedMediaId === item.id }"
+                @click="selectedMediaId = item.id"
+              >
+                <img :src="item.thumb_url || item.file_url" :alt="item.description || '照片'" />
+                <span class="photo-desc">{{ item.description || '无描述' }}</span>
+              </button>
+            </div>
+          </section>
+        </template>
+      </div>
+      <template #footer>
+        <ElButton @click="photoDialogVisible = false">取消</ElButton>
+        <ElButton
+          type="primary"
+          :loading="photoSaving"
+          :disabled="!selectedMediaId || photoLocked"
+          @click="confirmReplacePhoto"
+        >
+          确认替换
         </ElButton>
       </template>
     </ElDialog>
@@ -797,6 +957,7 @@ const pageRef = ref<HTMLElement | null>(null)
 }
 
 .person-photo-wrap {
+  position: relative;
   width: 100%;
   height: 50%;
   display: flex;
@@ -805,6 +966,13 @@ const pageRef = ref<HTMLElement | null>(null)
   background: linear-gradient(135deg, #faf8f5, #fff);
   border-radius: 8px;
   overflow: hidden;
+}
+
+.replace-photo-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
 }
 
 .person-photo {
@@ -1021,6 +1189,63 @@ const pageRef = ref<HTMLElement | null>(null)
   color: #f56c6c;
   font-size: 20px;
   font-weight: 700;
+}
+
+.photo-picker-hint {
+  margin: 0 0 12px;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.photo-picker {
+  min-height: 120px;
+}
+
+.photo-group-title {
+  margin: 4px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.photo-card {
+  border: 2px solid transparent;
+  background: #faf8f5;
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.photo-card.selected {
+  border-color: #5d4037;
+}
+
+.photo-card img {
+  width: 100%;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+  background: #eee;
+}
+
+.photo-desc {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.4;
+  max-height: 2.8em;
+  overflow: hidden;
 }
 
 @media (max-width: 768px) {

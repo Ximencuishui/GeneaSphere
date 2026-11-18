@@ -25,8 +25,17 @@ export interface CosDriver {
   /** 检查文件是否存在 */
   doesFileExist(key: string, bucketType?: 'hot' | 'cold'): Promise<boolean>;
 
+  /** 按对象 key 读取内容。读不到时抛错，调用方跳过。 */
+  readObject(key: string, bucketType?: 'hot' | 'cold'): Promise<Buffer>;
+
   /** 获取 CDN URL（仅热Bucket） */
   getCdnUrl(key: string): string;
+}
+
+function assertObjectKey(key: string): void {
+  if (!key || key.includes('..') || key.includes('\\') || key.startsWith('/') || path.isAbsolute(key)) {
+    throw new Error('对象 key 无效');
+  }
 }
 
 // ==================== 本地文件系统驱动 ====================
@@ -75,6 +84,17 @@ export class LocalCosDriver implements CosDriver {
 
   async doesFileExist(key: string, _bucketType?: 'hot' | 'cold'): Promise<boolean> {
     return fs.existsSync(this.resolvePath(key));
+  }
+
+  async readObject(key: string): Promise<Buffer> {
+    assertObjectKey(key);
+    const abs = path.resolve(this.resolvePath(key));
+    const relative = path.relative(path.resolve(this.storageRoot), abs);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('对象 key 无效');
+    }
+    if (!fs.existsSync(abs)) throw new Error('文件不存在');
+    return fs.readFileSync(abs);
   }
 
   getCdnUrl(key: string): string {
@@ -205,6 +225,56 @@ export class TencentCosDriver implements CosDriver {
     });
   }
 
+  /** 给线下 worker PUT 成片用。签名不含 Content-Type，与 worker 的裸 PUT 一致。 */
+  async getPresignedPutUrl(key: string, expiresIn = 21600): Promise<string> {
+    if (!this.isReady || !this.cos) {
+      throw new Error('COS 客户端未就绪');
+    }
+    const bucket = this.getBucket('hot');
+    const expires = expiresIn || 21600;
+    return new Promise((resolve, reject) => {
+      this.cos.getObjectUrl(
+        {
+          Bucket: bucket,
+          Region: this.region,
+          Key: key,
+          Method: 'PUT',
+          Sign: true,
+          Expires: expires,
+        },
+        (err: any, data: any) => {
+          const url = typeof data === 'string' ? data : data?.Url;
+          if (err || !url) {
+            reject(new Error(`生成上传地址失败: ${err?.message || err || 'empty url'}`));
+          } else {
+            resolve(url);
+          }
+        },
+      );
+    });
+  }
+
+  async readObject(key: string, bucketType?: 'hot' | 'cold'): Promise<Buffer> {
+    assertObjectKey(key);
+    if (!this.isReady || !this.cos) throw new Error('COS 客户端未就绪');
+    const bucket = this.getBucket(bucketType);
+    return new Promise((resolve, reject) => {
+      this.cos.getObject(
+        { Bucket: bucket, Region: this.region, Key: key },
+        (err: any, data: any) => {
+          const body = data?.Body;
+          if (err || body == null) {
+            reject(new Error(err?.message || '读取失败'));
+            return;
+          }
+          if (Buffer.isBuffer(body)) resolve(body);
+          else if (typeof body === 'string') resolve(Buffer.from(body));
+          else reject(new Error('读取失败'));
+        },
+      );
+    });
+  }
+
   async doesFileExist(key: string, bucketType?: 'hot' | 'cold'): Promise<boolean> {
     if (!this.isReady || !this.cos) return false;
     const bucket = this.getBucket(bucketType);
@@ -301,6 +371,14 @@ export class CosService {
     return this.driver.getPresignedUrl(key, bucketType, expiresIn);
   }
 
+  /** COS 模式下的 PUT 预签名。本地驱动没有上传端点，调用方应改走本地文件路径。 */
+  async getPresignedPutUrl(key: string, expiresIn?: number): Promise<string> {
+    if (this.getDriverType() !== 'cos') {
+      throw new Error('本地存储不使用预签名上传');
+    }
+    return (this.driver as TencentCosDriver).getPresignedPutUrl(key, expiresIn);
+  }
+
   /** 获取 CDN URL */
   getCdnUrl(key: string): string {
     return this.driver.getCdnUrl(key);
@@ -309,6 +387,14 @@ export class CosService {
   /** 检查文件是否存在 */
   async doesFileExist(key: string, bucketType?: 'hot' | 'cold'): Promise<boolean> {
     return this.driver.doesFileExist(key, bucketType);
+  }
+
+  /** 按对象 key 读取内容。驱动读不到时抛错。 */
+  async readObject(key: string, bucketType?: 'hot' | 'cold'): Promise<Buffer> {
+    if (typeof this.driver.readObject !== 'function') {
+      throw new Error('当前存储驱动不能按 key 读取内容');
+    }
+    return this.driver.readObject(key, bucketType);
   }
 
   /** 获取当前驱动类型 */

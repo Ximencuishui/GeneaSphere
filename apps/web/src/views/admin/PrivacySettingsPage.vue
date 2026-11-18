@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
+const router = useRouter()
 
 const clanSlug = ref('')
 const loading = ref(false)
@@ -55,26 +56,8 @@ const handleSave = async () => {
   }
 }
 
-const handleExportData = async () => {
-  try {
-    ElMessage.info('正在导出数据...')
-    const res = await axios.get('/api/admin/settings/export', {
-      params: { clanSlug: clanSlug.value },
-    })
-    // 导出为 JSON 文件
-    const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `geneasphere_clan_${clanSlug.value}_${new Date().toISOString().slice(0, 10)}.json`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
-    ElMessage.success('数据导出成功')
-  } catch (error) {
-    ElMessage.error('导出失败')
-  }
+const handleExportData = () => {
+  router.push(`/zupu/${clanSlug.value}/settings/export`)
 }
 
 onMounted(() => {

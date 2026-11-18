@@ -72,7 +72,7 @@ describe('AdminAnnouncementController 公告隔离', () => {
     await expect(controller.getAnnouncement(req, 8, 'zhu')).rejects.toBeInstanceOf(NotFoundException);
 
     expect(prisma.clanAnnouncement.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 8n, clan_id: 1n },
+      where: { id: 8n, clan_id: 1n, deleted_at: null },
     }));
   });
 
@@ -97,7 +97,7 @@ describe('AdminAnnouncementController 公告隔离', () => {
     prisma.clanAnnouncement.findFirst.mockResolvedValue(null);
 
     await expect(controller.deleteAnnouncement(req, 8, 'zhu')).rejects.toBeInstanceOf(NotFoundException);
-    expect(prisma.clanAnnouncement.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.clanAnnouncement.updateMany).not.toHaveBeenCalled();
   });
 
   it('管理员更新公告时按公告 id 与家族 id 写入', async () => {
@@ -127,7 +127,7 @@ describe('AdminAnnouncementController 公告隔离', () => {
     await controller.updateAnnouncement(req, 8, { clanSlug: 'zhu', title: '新标题', content: '正文' });
 
     expect(tx.clanAnnouncement.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 8n, clan_id: 1n },
+      where: { id: 8n, clan_id: 1n, deleted_at: null },
       data: expect.objectContaining({ title: '新标题', content: '正文' }),
     }));
   });
@@ -146,7 +146,7 @@ describe('AdminAnnouncementController 公告隔离', () => {
     await controller.toggleStatus(req, 8, 'zhu', { isActive: true });
 
     expect(prisma.clanAnnouncement.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 8n, clan_id: 1n },
+      where: { id: 8n, clan_id: 1n, deleted_at: null },
       data: expect.objectContaining({ is_active: true, published_at: expect.any(Date) }),
     }));
 
@@ -162,7 +162,7 @@ describe('AdminAnnouncementController 公告隔离', () => {
     await controller.toggleStatus(req, 8, 'zhu', { isActive: false });
 
     expect(prisma.clanAnnouncement.updateMany).toHaveBeenLastCalledWith({
-      where: { id: 8n, clan_id: 1n },
+      where: { id: 8n, clan_id: 1n, deleted_at: null },
       data: { is_active: false },
     });
   });
@@ -243,7 +243,7 @@ describe('AdminAnnouncementController 公告隔离', () => {
       where: { clan_id_user_id: { clan_id: 1n, user_id: 'admin-a' } },
     });
     expect(permissionPrisma.clanAnnouncement.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 8n, clan_id: 1n },
+      where: { id: 8n, clan_id: 1n, deleted_at: null },
     }));
     expect(permissionPrisma.$transaction).not.toHaveBeenCalled();
     expect(tx.clanAnnouncement.updateMany).not.toHaveBeenCalled();
@@ -275,7 +275,7 @@ describe('AdminAnnouncementController 公告隔离', () => {
     expect(error).toBeInstanceOf(NotFoundException);
     expect((error as NotFoundException).message).toBe('公告不存在');
     expect(permissionPrisma.clanAnnouncement.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 8n, clan_id: 1n },
+      where: { id: 8n, clan_id: 1n, deleted_at: null },
     }));
     expect(permissionPrisma.clanAnnouncement.updateMany).not.toHaveBeenCalled();
   });

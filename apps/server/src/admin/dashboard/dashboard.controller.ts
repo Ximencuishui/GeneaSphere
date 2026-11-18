@@ -118,7 +118,7 @@ export class DashboardController {
           ancestor_name: a.ancestor_name,
           match_score: a.match_score,
           created_at: a.created_at,
-          link: `/admin/merge/applications?appId=${a.id}`,
+          link: `/zupu/${clanSlug}/merge/wizard/${a.id}`,
         })),
       },
     };

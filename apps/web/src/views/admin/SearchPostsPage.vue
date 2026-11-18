@@ -41,22 +41,34 @@ const fetchPosts = async () => {
   }
 }
 
+const CONTACT_MASK = '***'
+
 const openEditDialog = (post: any) => {
   editingPost.value = post
   editForm.value = {
     origin_place: post.origin_place,
     xipai_keywords: Array.isArray(post.xipai_keywords) ? post.xipai_keywords.join(', ') : post.xipai_keywords || '',
-    contact_info: post.contact_info || '',
+    contact_info: CONTACT_MASK,
   }
   editDialogVisible.value = true
 }
 
 const saveEdit = async () => {
   try {
-    await axios.post(`/api/admin/merge/posts/${editingPost.value.id}/edit`, {
+    const payload: {
+      origin_place: string
+      xipai_keywords: string[]
+      contact_info?: string
+    } = {
       origin_place: editForm.value.origin_place,
       xipai_keywords: editForm.value.xipai_keywords.split(',').map((s: string) => s.trim()).filter(Boolean),
-      contact_info: editForm.value.contact_info,
+    }
+    const contact = editForm.value.contact_info.trim()
+    if (contact && contact !== CONTACT_MASK) {
+      payload.contact_info = contact
+    }
+    await axios.post(`/api/admin/merge/posts/${editingPost.value.id}/edit`, payload, {
+      params: { clanSlug: clanSlug.value },
     })
     ElMessage.success('寻亲帖已更新')
     editDialogVisible.value = false
@@ -73,7 +85,9 @@ const handleDelete = async (post: any) => {
       '确认删除',
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
-    await axios.post(`/api/admin/merge/posts/${post.id}/delete`)
+    await axios.post(`/api/admin/merge/posts/${post.id}/delete`, null, {
+      params: { clanSlug: clanSlug.value },
+    })
     ElMessage.success('寻亲帖已删除')
     fetchPosts()
   } catch (error: any) {
@@ -107,7 +121,9 @@ onMounted(() => {
             </ElTag>
           </template>
         </ElTableColumn>
-        <ElTableColumn prop="contact_info" label="联系方式" width="200" />
+        <ElTableColumn label="联系方式" width="200">
+          <template #default>***</template>
+        </ElTableColumn>
         <ElTableColumn prop="created_by" label="创建者" width="150" />
         <ElTableColumn prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
@@ -150,7 +166,7 @@ onMounted(() => {
           <ElInput v-model="editForm.xipai_keywords" placeholder="多个关键词用逗号分隔" />
         </ElFormItem>
         <ElFormItem label="联系方式">
-          <ElInput v-model="editForm.contact_info" type="textarea" :rows="3" />
+          <ElInput v-model="editForm.contact_info" type="textarea" :rows="3" placeholder="不修改请保持 ***" />
         </ElFormItem>
       </ElForm>
       <template #footer>

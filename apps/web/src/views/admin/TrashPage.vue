@@ -20,6 +20,10 @@ const media = ref<any[]>([])
 const mediaLoading = ref(false)
 const mediaPagination = ref({ page: 1, pageSize: 30, total: 0 })
 
+const announcements = ref<any[]>([])
+const announcementsLoading = ref(false)
+const announcementsPagination = ref({ page: 1, pageSize: 20, total: 0 })
+
 // 加载成员
 const fetchMembers = async () => {
   membersLoading.value = true
@@ -34,7 +38,7 @@ const fetchMembers = async () => {
     members.value = res.data.data
     membersPagination.value.total = res.data.total
   } catch (e: any) {
-    ElMessage.error(e.message || '加载失败')
+    ElMessage.error(e?.response?.data?.message || e.message || '加载失败')
   } finally {
     membersLoading.value = false
   }
@@ -54,7 +58,7 @@ const fetchMedia = async () => {
     media.value = res.data.data
     mediaPagination.value.total = res.data.total
   } catch (e: any) {
-    ElMessage.error(e.message || '加载失败')
+    ElMessage.error(e?.response?.data?.message || e.message || '加载失败')
   } finally {
     mediaLoading.value = false
   }
@@ -71,7 +75,7 @@ const handleRestoreMember = async (id: string) => {
     fetchMembers()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '恢复失败')
+      ElMessage.error(e?.response?.data?.message || e.message || '恢复失败')
     }
   }
 }
@@ -90,7 +94,7 @@ const handlePermanentDeleteMember = async (id: string) => {
     fetchMembers()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '删除失败')
+      ElMessage.error(e?.response?.data?.message || e.message || '删除失败')
     }
   }
 }
@@ -104,7 +108,7 @@ const handleRestoreMedia = async (id: string) => {
     ElMessage.success('恢复成功')
     fetchMedia()
   } catch (e: any) {
-    ElMessage.error(e.message || '恢复失败')
+    ElMessage.error(e?.response?.data?.message || e.message || '恢复失败')
   }
 }
 
@@ -122,7 +126,7 @@ const handlePermanentDeleteMedia = async (id: string) => {
     fetchMedia()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '删除失败')
+      ElMessage.error(e?.response?.data?.message || e.message || '删除失败')
     }
   }
 }
@@ -137,11 +141,62 @@ const handleMediaPageChange = (page: number) => {
   fetchMedia()
 }
 
+const fetchAnnouncements = async () => {
+  announcementsLoading.value = true
+  try {
+    const res = await axios.get('/api/admin/trash/announcements', {
+      params: {
+        clanSlug: clanSlug.value,
+        page: announcementsPagination.value.page,
+        pageSize: announcementsPagination.value.pageSize,
+      },
+    })
+    announcements.value = res.data.data
+    announcementsPagination.value.total = res.data.total
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message || '加载失败')
+  } finally {
+    announcementsLoading.value = false
+  }
+}
+
+const handleRestoreAnnouncement = async (id: string) => {
+  try {
+    await axios.post(`/api/admin/trash/announcements/${id}/restore`, {}, {
+      params: { clanSlug: clanSlug.value },
+    })
+    ElMessage.success('恢复成功')
+    fetchAnnouncements()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e.message || '恢复失败')
+  }
+}
+
+const handlePermanentDeleteAnnouncement = async (id: string) => {
+  try {
+    await ElMessageBox.confirm('此操作不可逆，确定要永久删除吗？', '危险操作', {
+      type: 'error',
+      confirmButtonText: '永久删除',
+    })
+    await axios.delete(`/api/admin/trash/announcements/${id}`, {
+      params: { clanSlug: clanSlug.value },
+    })
+    ElMessage.success('已永久删除')
+    fetchAnnouncements()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.response?.data?.message || e.message || '删除失败')
+    }
+  }
+}
+
 const handleTabChange = (tab: string) => {
   if (tab === 'members' && members.value.length === 0) {
     fetchMembers()
   } else if (tab === 'media' && media.value.length === 0) {
     fetchMedia()
+  } else if (tab === 'announcements' && announcements.value.length === 0) {
+    fetchAnnouncements()
   }
 }
 
@@ -222,6 +277,31 @@ onMounted(() => {
           :total="mediaPagination.total"
           :page-size="mediaPagination.pageSize"
           @current-change="handleMediaPageChange"
+          layout="total, prev, pager, next"
+          class="pagination"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane label="已删除公告" name="announcements">
+        <el-table :data="announcements" v-loading="announcementsLoading" stripe>
+          <el-table-column prop="title" label="标题" min-width="200" />
+          <el-table-column prop="deleted_at" label="删除时间" width="180">
+            <template #default="{ row }">
+              {{ row.deleted_at ? new Date(row.deleted_at).toLocaleString() : '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="handleRestoreAnnouncement(row.id)">恢复</el-button>
+              <el-button link type="danger" @click="handlePermanentDeleteAnnouncement(row.id)">永久删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination
+          v-model:current-page="announcementsPagination.page"
+          :total="announcementsPagination.total"
+          :page-size="announcementsPagination.pageSize"
+          @current-change="(page: number) => { announcementsPagination.page = page; fetchAnnouncements() }"
           layout="total, prev, pager, next"
           class="pagination"
         />

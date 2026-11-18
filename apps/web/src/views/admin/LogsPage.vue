@@ -28,6 +28,14 @@ const actionOptions = ref([
   { label: '驳回生平审核', value: 'REJECT_BIO' },
   { label: '合并支系', value: 'MERGE_BRANCH' },
   { label: '修改隐私配置', value: 'UPDATE_PRIVACY_SETTINGS' },
+  { label: '导出家族数据', value: 'EXPORT_CLAN_DATA' },
+  { label: '恢复成员', value: 'RESTORE_MEMBER' },
+  { label: '永久删除成员', value: 'PERMANENT_DELETE_MEMBER' },
+  { label: '恢复影像', value: 'RESTORE_MEDIA' },
+  { label: '永久删除影像', value: 'PERMANENT_DELETE_MEDIA' },
+  { label: '通过题目', value: 'APPROVE_MEMORY_QUIZ' },
+  { label: '驳回题目', value: 'REJECT_MEMORY_QUIZ' },
+  { label: '通过存储扩容', value: 'STORAGE_UPGRADE_APPROVED' },
   { label: '修改字辈', value: 'UPDATE_XIPAI' },
 ])
 
@@ -113,6 +121,13 @@ onMounted(() => {
             :value="opt.value"
           />
         </ElSelect>
+        <ElInput
+          v-model="filterUserId"
+          placeholder="操作人用户ID"
+          clearable
+          style="width: 180px;"
+          @change="fetchLogs"
+        />
         <ElDatePicker
           v-model="filterStartDate"
           type="date"

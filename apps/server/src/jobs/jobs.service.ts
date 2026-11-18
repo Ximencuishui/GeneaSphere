@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@geneasphere/db';
 import { VideoProjectStatus } from '@prisma/client';
+import { readClanVideoResult } from './clan-video-job';
 
 export type JobType = 'ocr' | 'video' | 'puppeteer' | 'image_process';
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
@@ -84,7 +85,43 @@ export class JobsService {
     });
 
     this.logger.log(`任务完成: ${jobId} (${job.type})`);
+    await this.markClanVideoCompleted(job.payload, result);
     return job;
+  }
+
+  /**
+   * 成片回调写回项目。没有可访问地址时只把 status 改成 failed，不写 error_message。
+   * 项目已删除或 id 无法解析时吞掉错误，任务行保持 completed。
+   */
+  private async markClanVideoCompleted(payload: unknown, result: unknown) {
+    if (!payload || typeof payload !== 'object') return;
+    const { kind, projectId } = payload as { kind?: string; projectId?: string };
+    if (kind !== 'clan-event' && kind !== 'clan-migration') return;
+    if (projectId == null || projectId === '') return;
+
+    try {
+      const id = BigInt(projectId);
+      const parsed = readClanVideoResult(result);
+      const data = parsed
+        ? {
+            status: VideoProjectStatus.completed,
+            video_url: parsed.video_url,
+            duration_seconds: parsed.duration_seconds,
+            file_size: parsed.file_size,
+            completed_at: new Date(),
+          }
+        : { status: VideoProjectStatus.failed };
+      if (!parsed) {
+        this.logger.error(`视频项目 ${projectId} 完成回调没有视频地址，已标为 failed`);
+      }
+      if (kind === 'clan-event') {
+        await this.prisma.clanEventVideo.updateMany({ where: { id }, data });
+      } else {
+        await this.prisma.clanMigrationVideo.updateMany({ where: { id }, data });
+      }
+    } catch (err: any) {
+      this.logger.error(`视频项目完成状态未写入：${err?.message ?? err}`);
+    }
   }
 
   /**

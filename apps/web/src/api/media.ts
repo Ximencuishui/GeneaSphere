@@ -28,6 +28,10 @@ export function uploadMedia(data: {
 /**
  * 获取家族的媒体档案列表
  */
+export function listCoverMedia(clanId: string | number) {
+  return request.get<any[], any[]>('/api/media/clan/' + clanId + '/covers');
+}
+
 export function listMedia(
   clanId: string | number,
   filters?: {

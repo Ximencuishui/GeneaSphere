@@ -1,5 +1,5 @@
-import { IsEnum, IsOptional, IsString, IsInt, IsDateString, MaxLength, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsArray, IsEnum, IsOptional, IsString, IsInt, IsDateString, Matches, MaxLength, Min, Max } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { FamilyEventType } from '@prisma/client';
 
 export class CreateFamilyEventDto {
@@ -30,6 +30,18 @@ export class CreateFamilyEventDto {
   @IsString()
   description?: string;
 
+  /** 诞辰/逝世去重用。必须是本族人物；不传则不写 person_id。 */
   @IsOptional()
-  media_ids?: number[];
+  @Transform(({ value }) => (value === undefined || value === null || value === '' ? undefined : String(value)))
+  @IsString()
+  @Matches(/^\d+$/, { message: 'person_id 必须是数字' })
+  person_id?: string;
+
+  /**
+   * 元素可以是数字或数字字符串，去重和本族校验在 FamilyEventService。
+   * 空数组允许。
+   */
+  @IsOptional()
+  @IsArray({ message: 'media_ids 必须是数组' })
+  media_ids?: Array<number | string>;
 }

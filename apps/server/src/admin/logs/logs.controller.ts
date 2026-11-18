@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, UseGuards, Request, Query } from '@nestjs/common';
+import { Controller, Get, UseGuards, Request, Query, StreamableFile } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
+import { toCsv } from './csv-export';
 
 @ApiTags('admin/logs')
 @Controller('api/admin/logs')
@@ -30,7 +31,7 @@ export class LogsController {
     @Query('endDate') endDateStr?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
@@ -102,7 +103,7 @@ export class LogsController {
     @Query('endDate') endDateStr?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const where: any = { clan_id: clanId };
 
@@ -124,17 +125,23 @@ export class LogsController {
       orderBy: { created_at: 'desc' },
     });
 
-    // 生成 CSV
-    const header = 'ID,用户,操作,目标类型,目标ID,详情,IP地址,时间\n';
-    const rows = logs.map(l =>
-      `${l.id},${l.user.phone},${l.action},${l.target_type || ''},${l.target_id || ''},${l.details || ''},${l.ip_address || ''},${l.created_at.toISOString()}\n`
+    const csv = toCsv(
+      ['ID', '用户', '操作', '目标类型', '目标ID', '详情', 'IP地址', '时间'],
+      logs.map((log) => [
+        log.id.toString(),
+        log.user.phone,
+        log.action,
+        log.target_type || '',
+        log.target_id || '',
+        log.details || '',
+        log.ip_address || '',
+        log.created_at.toISOString(),
+      ]),
     );
-    const csv = header + rows.join('');
-
-    return {
-      filename: `audit_logs_${clanSlug}_${new Date().toISOString().split('T')[0]}.csv`,
-      content: csv,
-      content_type: 'text/csv',
-    };
+    const filename = `audit_logs_${clanSlug}_${new Date().toISOString().split('T')[0]}.csv`;
+    return new StreamableFile(Buffer.from(csv, 'utf8'), {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${filename}"`,
+    });
   }
 }

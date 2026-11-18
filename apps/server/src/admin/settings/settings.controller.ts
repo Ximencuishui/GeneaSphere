@@ -1,12 +1,15 @@
-import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, Request, NotFoundException, BadRequestException, Header, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, Request, NotFoundException, BadRequestException, StreamableFile } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
-import { Role } from '@prisma/client';
 import { serializeBigInt } from '../../common/bigint-serializer';
 import { refreshFamilyRulesVolume } from '../../cepu/clan-rules';
 import { GenealogyEditionService } from '../../genealogy-edition/genealogy-edition.service';
+import { clientIp } from '../../common/client-ip';
+import { clanStorageQuotaBytes, summarizeMediaUsage } from '../storage/storage-quota';
+import { assertExportRequest } from './clan-export-format';
+import { ClanExportService } from './clan-export.service';
 
 @ApiTags('admin/settings')
 @Controller('api/admin/settings')
@@ -17,6 +20,7 @@ export class SettingsController {
     private readonly adminService: AdminService,
     private readonly prisma: PrismaService,
     private readonly edition: GenealogyEditionService,
+    private readonly exports: ClanExportService,
   ) {}
 
   // ==================== 隐私配置 ====================
@@ -100,6 +104,7 @@ export class SettingsController {
       action: 'UPDATE_PRIVACY_SETTINGS',
       targetType: 'PrivacySetting',
       targetId: settings.id.toString(),
+      ipAddress: clientIp(req),
     });
 
     return { message: 'Privacy settings updated successfully', settings };
@@ -271,144 +276,96 @@ export class SettingsController {
   ) {
     const userId = req.user.userId;
     const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
-
-
-    // 获取各类文件大小
-    // 说明：云存储分项计数（视频/其他文件）暂仅返回 0，
-// 需求文档 4.5.3 中明确表示"本次暂不实现"，仅展示提示。
-// 后续可扩展为根据 media_type 字段聚合统计。
-const [photos, videos, others] = await Promise.all([
-      this.prisma.mediaArchive.count({
-        where: { clan_id: clanId },
-      }),
-      Promise.resolve(0), // 视频数量统计预留，当前 schema 未提供 media_type 字段
-      Promise.resolve(0), // 其他文件数量统计预留，当前 schema 未提供 media_type 字段
-    ]);
-
-    const totalSize = await this.calculateStorageUsage(clanId);
-    const maxStorage = 5 * 1024 * 1024 * 1024; // 5GB
+    const clan = await this.prisma.clan.findUnique({
+      where: { id: clanId },
+      select: { settings_json: true },
+    });
+    const maxStorage = clanStorageQuotaBytes(clan?.settings_json);
+    const groups = await this.prisma.mediaArchive.groupBy({
+      by: ['media_type'],
+      where: { clan_id: clanId },
+      _count: { _all: true },
+      _sum: { file_size: true },
+    });
+    const summary = summarizeMediaUsage(groups.map((group) => ({
+      media_type: group.media_type,
+      count: group._count._all,
+      bytes: Number(group._sum.file_size || 0),
+    })));
 
     return {
-      used_bytes: totalSize,
-      used_percentage: Math.round((totalSize / maxStorage) * 100),
+      used_bytes: summary.used,
+      used_percentage: maxStorage > 0 ? Math.round((summary.used / maxStorage) * 100) : 0,
       max_bytes: maxStorage,
-      breakdown: {
-        photos: photos,
-        videos: videos,
-        others: others,
-      },
+      breakdown: summary.breakdown,
     };
-  }
-
-  private async calculateStorageUsage(clanId: bigint): Promise<number> {
-    // 这里假设 media_archives 有 file_size 字段
-    // 如果没有，需要在 schema 中添加
-    const result = await this.prisma.$queryRaw<[{ total: bigint }]>`
-      SELECT COALESCE(SUM(file_size), 0) as total
-      FROM media_archives
-      WHERE clan_id = ${clanId}
-    `.catch(() => [{ total: BigInt(0) }]);
-
-    return Number(result[0]?.total || 0);
   }
 
   // ==================== 数据导出 ====================
 
-  /**
-   * 导出家族全部数据（JSON 格式）
-   */
-  @Get('export')
-  @ApiOperation({ summary: 'Export all clan data as JSON' })
-  async exportClanData(
+  @Post('exports')
+  @ApiOperation({ summary: '提交家族数据异步导出任务' })
+  async createExport(
     @Request() req,
-    @Query('clanSlug') clanSlug: string,
+    @Body() body: { clanSlug: string; type?: string; format?: string },
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
-
-
-    // 收集所有家族数据
-    const [
-      clan,
-      persons,
-      families,
-      familyChildren,
-      ancestry,
-      media,
-      xipai,
-      privacySettings,
-      members,
-    ] = await Promise.all([
-      this.prisma.clan.findUnique({ where: { id: clanId } }),
-      this.prisma.person.findMany({ where: { clan_id: clanId } }),
-      this.prisma.familyUnit.findMany({ where: { clan_id: clanId } }),
-      this.prisma.familyChild.findMany({
-        where: { family: { clan_id: clanId } },
-      }),
-      this.prisma.personAncestry.findMany({
-        where: { ancestor: { clan_id: clanId } },
-      }),
-      this.prisma.mediaArchive.findMany({ where: { clan_id: clanId } }),
-      this.prisma.xipai.findMany({ where: { clan_id: clanId } }),
-      this.prisma.privacySetting.findUnique({ where: { clan_id: clanId } }),
-      this.prisma.clanMember.findMany({ where: { clan_id: clanId } }),
-    ]);
-
-    const exportData = {
-      exported_at: new Date().toISOString(),
-      clan: {
-        id: clan?.id.toString(),
-        name: clan?.name,
-        description: clan?.description,
-        created_at: clan?.created_at,
-      },
-      persons: persons.map(p => ({
-        id: p.id.toString(),
-        full_name: p.full_name,
-        gender: p.gender,
-        birth_date: p.birth_date,
-        death_date: p.death_date,
-        is_living: p.is_living,
-      })),
-      families: families.map(f => ({
-        id: f.id.toString(),
-        husband_id: f.husband_id?.toString(),
-        wife_id: f.wife_id?.toString(),
-      })),
-      family_children: familyChildren.map(fc => ({
-        family_id: fc.family_id.toString(),
-        child_id: fc.child_id.toString(),
-        birth_order: fc.birth_order,
-      })),
-      ancestry: ancestry.map(a => ({
-        ancestor_id: a.ancestor_id.toString(),
-        descendant_id: a.descendant_id.toString(),
-        depth: a.depth,
-      })),
-      media_count: media.length,
-      xipai: xipai.map(x => ({
-        generation: x.generation,
-        character: x.character,
-      })),
-      privacy_settings: privacySettings ? {
-        allow_visitor_deceased: privacySettings.allow_visitor_deceased,
-        max_generations_visible: privacySettings.max_generations_visible,
-        hide_living_photos: privacySettings.hide_living_photos,
-        hide_living_spouses: privacySettings.hide_living_spouses,
-      } : null,
-      members_count: members.length,
-    };
-
+    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
+    const request = assertExportRequest(body.type || 'all', body.format || 'json');
+    const task = await this.exports.createPending(clanId, userId, body.clanSlug, request.type, request.format);
     await this.adminService.logAction({
       clanId,
       userId,
       action: 'EXPORT_CLAN_DATA',
-      targetType: 'Clan',
-      targetId: clanId.toString(),
+      targetType: 'ClanExportTask',
+      targetId: task.id.toString(),
+      details: `${request.type}/${request.format}`,
+      ipAddress: clientIp(req),
     });
+    return {
+      id: task.id.toString(),
+      status: task.status,
+      type: task.export_type,
+      format: task.format,
+      expires_at: task.expires_at,
+    };
+  }
 
-    // 返回 JSON（后续可扩展为压缩包下载）
-    return exportData;
+  @Get('exports')
+  @ApiOperation({ summary: '本家族导出任务' })
+  async listExports(@Request() req, @Query('clanSlug') clanSlug: string) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const rows = await this.exports.list(clanId);
+    return {
+      data: rows.map((row) => ({
+        id: row.id.toString(),
+        type: row.export_type,
+        format: row.format,
+        status: row.status,
+        file_name: row.file_name,
+        error_message: row.error_message,
+        created_at: row.created_at,
+        completed_at: row.completed_at,
+        expires_at: row.expires_at,
+      })),
+    };
+  }
+
+  @Get('exports/:id/download')
+  @ApiOperation({ summary: '下载已完成的导出文件' })
+  async downloadExport(
+    @Request() req,
+    @Param('id') id: string,
+    @Query('clanSlug') clanSlug: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const file = await this.exports.openDownload(clanId, BigInt(id));
+    return new StreamableFile(file.stream, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.filename}"`,
+    });
   }
 
   // ==================== 家族信息编辑 ====================

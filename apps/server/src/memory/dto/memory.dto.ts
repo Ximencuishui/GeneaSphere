@@ -51,6 +51,10 @@ export class CreateQuizDto {
   @IsOptional()
   @IsString()
   tags?: string;
+
+  @IsOptional()
+  @IsString()
+  clanSlug?: string;
 }
 
 export class CreateAnswerDto {

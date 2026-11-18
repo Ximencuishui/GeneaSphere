@@ -192,6 +192,7 @@ const menuItems = computed<MenuEntry[]>(() => [
       { title: '影像库', path: `/zupu/${clanSlug.value}/media/library` },
       { title: '相册管理', path: `/zupu/${clanSlug.value}/media/albums` },
       { title: '家庭图册', path: `/zupu/${clanSlug.value}/family-albums` },
+      { title: '直系血缘视频', path: `/zupu/${clanSlug.value}/lineage-videos` },
       // 影像审核：从原【审核中心】调整到【历史影像】
       { title: '影像审核', path: `/zupu/${clanSlug.value}/reviews/media` },
     ],
@@ -367,8 +368,10 @@ const handleLogout = () => {
 const filteredMenuItems = computed<MenuEntry[]>(() => {
   const kw = menuKeyword.value.trim().toLowerCase()
   const hideSmsGroup = capabilityStore.loaded && !capabilityStore.isAvailable('sms')
+  const mediaMember = authStore.user?.role === 'EDITOR' || authStore.user?.role === 'VIEWER'
   const result: MenuEntry[] = []
   for (const item of menuItems.value) {
+    if (mediaMember && (isLeaf(item) || item.title !== '历史影像')) continue
     if (hideSmsGroup && item.title === '通知与短信') continue
     if (isLeaf(item)) {
       // 顶级直达项（leaf）：关键字命中则保留
@@ -379,9 +382,12 @@ const filteredMenuItems = computed<MenuEntry[]>(() => {
     }
     // 顶级分组（group）：子项命中则保留分组，否则隐藏
     const group = item as MenuGroup
+    const source = mediaMember
+      ? group.children.filter((child) => child.title === '影像库')
+      : group.children
     const children = !kw
-      ? group.children
-      : group.children.filter((c) => c.title.toLowerCase().includes(kw))
+      ? source
+      : source.filter((c) => c.title.toLowerCase().includes(kw))
     if (children.length > 0) {
       result.push({ ...group, children })
     }

@@ -2,9 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaClient, MediaArchive } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import sharp from 'sharp';
 import { AvatarService } from './avatar.service';
 import { CosService } from '../cos/cos.service';
 import { ImageProcessorService } from '../cos/image-processor.service';
+import { MediaCaptureInput, originalFilename } from './capture-fields';
+import { hiddenUntilApproved, publicMediaWhere } from './media-visibility';
 
 const prisma = new PrismaClient();
 
@@ -41,31 +44,50 @@ export class MediaService {
     uploader_id: string,
     taken_year?: number,
     taken_location?: string,
-    description?: string
+    description?: string,
+    category?: string,
+    album_id?: bigint | null,
+    capture?: MediaCaptureInput,
   ): Promise<MediaArchive> {
     // 检查是否是图片且 COS 已启用 -> 三档处理
     const isImage = file.mimetype.startsWith('image/');
     const useCos = this.cosService.getDriverType() === 'cos' || process.env.COS_ENABLED === 'true';
 
     if (isImage && useCos) {
-      return this.uploadImageToCos(file, clan_id, uploader_id, taken_year, taken_location, description);
+      return this.uploadImageToCos(
+        file,
+        clan_id,
+        uploader_id,
+        taken_year,
+        taken_location,
+        description,
+        category,
+        album_id,
+        capture,
+      );
     }
 
-    // 非图片或本地模式：本地存储
-    const filename = `${Date.now()}_${file.originalname}`;
+    // 非图片或本地模式：本地存储。原始名可能带路径，只留文件名再落盘。
+    const safeName = originalFilename(file.originalname) || 'file';
+    const filename = `${Date.now()}_${safeName}`;
     const filePath = path.join(this.storageRoot, filename);
     fs.writeFileSync(filePath, file.buffer);
     const fileUrl = `/media/${filename}`;
+    const mediaType = file.mimetype?.startsWith('video/') ? 'video' : 'image';
+    const captured = await this.captureColumns(file, taken_year, capture);
 
     return await prisma.mediaArchive.create({
       data: {
         clan_id,
         uploader_id,
         file_url: fileUrl,
-        taken_year,
         taken_location,
         description,
+        category,
+        album_id: album_id ?? undefined,
         file_size: file.size,
+        media_type: mediaType,
+        ...captured,
       },
     });
   }
@@ -79,7 +101,10 @@ export class MediaService {
     uploader_id: string,
     taken_year?: number,
     taken_location?: string,
-    description?: string
+    description?: string,
+    category?: string,
+    album_id?: bigint | null,
+    capture?: MediaCaptureInput,
   ): Promise<MediaArchive> {
     const result = await this.imageProcessor.processImage(
       file.buffer,
@@ -88,6 +113,7 @@ export class MediaService {
     );
 
     const fileUrl = result.displayUrl;
+    const captured = await this.captureColumns(file, taken_year, capture);
 
     return await prisma.mediaArchive.create({
       data: {
@@ -97,13 +123,40 @@ export class MediaService {
         display_url: result.displayUrl,
         thumb_url: result.thumbUrl,
         original_key: result.originalKey,
-        taken_year,
         taken_location,
         description,
+        category,
+        album_id: album_id ?? undefined,
         file_size: file.size,
         media_type: 'image',
+        ...captured,
       },
     });
+  }
+
+  private async captureColumns(
+    file: Express.Multer.File,
+    taken_year: number | undefined,
+    capture?: MediaCaptureInput,
+  ) {
+    const filename = originalFilename(file.originalname);
+    const takenOn = capture?.taken_on instanceof Date && !Number.isNaN(capture.taken_on.getTime())
+      ? new Date(Date.UTC(
+        capture.taken_on.getUTCFullYear(),
+        capture.taken_on.getUTCMonth(),
+        capture.taken_on.getUTCDate(),
+      ))
+      : undefined;
+    const size = file.mimetype?.startsWith('image/') ? await readImageSize(file.buffer) : undefined;
+    return {
+      taken_year: takenOn ? takenOn.getUTCFullYear() : taken_year,
+      ...(filename ? { original_filename: filename } : {}),
+      ...(takenOn ? { taken_on: takenOn } : {}),
+      ...(size ? { width: size.width, height: size.height } : {}),
+      ...(typeof capture?.latitude === 'number' && typeof capture.longitude === 'number'
+        ? { latitude: capture.latitude, longitude: capture.longitude }
+        : {}),
+    };
   }
 
   /**
@@ -121,20 +174,8 @@ export class MediaService {
   }
 
   async listMedia(clan_id: bigint, filters?: QueryFilters): Promise<MediaArchive[]> {
-    const where: any = { clan_id };
-
-    if (filters?.taken_year !== undefined) {
-      where.taken_year = filters.taken_year;
-    }
-
-    if (filters?.taken_location) {
-      where.taken_location = {
-        contains: filters.taken_location,
-      };
-    }
-
     return await prisma.mediaArchive.findMany({
-      where,
+      where: publicMediaWhere(clan_id, filters),
       orderBy: { created_at: 'desc' },
     });
   }
@@ -155,7 +196,10 @@ export class MediaService {
   }
 
   async deleteMedia(id: bigint): Promise<void> {
-    await prisma.mediaArchive.delete({ where: { id } });
+    await prisma.mediaArchive.update({
+      where: { id },
+      data: { deleted_at: new Date() },
+    });
   }
 
   /**
@@ -275,6 +319,7 @@ export class MediaService {
           contains: location,
           mode: 'insensitive',
         },
+        ...hiddenUntilApproved,
         ...yearFilter,
       },
       orderBy: { created_at: 'desc' },
@@ -282,5 +327,17 @@ export class MediaService {
     });
 
     return mediaRecords;
+  }
+}
+
+async function readImageSize(buffer: Buffer): Promise<{ width: number; height: number } | undefined> {
+  try {
+    const meta = await sharp(buffer).metadata();
+    const width = meta.width;
+    const height = meta.height;
+    if (!width || !height || !Number.isInteger(width) || !Number.isInteger(height)) return undefined;
+    return { width, height };
+  } catch {
+    return undefined;
   }
 }

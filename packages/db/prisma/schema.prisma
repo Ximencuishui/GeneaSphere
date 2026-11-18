@@ -46,6 +46,7 @@ model User {
   photo_claims            PhotoClaimRecord[]
   print_orders            PrintOrder[]
   tool_usage_logs         ToolUsageLog[]
+  export_tasks            ClanExportTask[]
   ocr_usage_logs          OcrUsageLog[]
   pdf_import_logs         PdfImportLog[]
   pdf_import_tasks        PdfImportTask[]
@@ -141,6 +142,7 @@ model Clan {
   pdf_import_logs          PdfImportLog[]
   pdf_import_tasks         PdfImportTask[]
   merge_applications       MergeApplication[]
+  merge_applications_as_applicant MergeApplication[] @relation("MergeApplicantClan")
   persons                  Person[]
   print_orders             PrintOrder[]
   privacy_settings         PrivacySetting?
@@ -189,6 +191,9 @@ model Clan {
   revision_team_members  ClanRevisionTeamMember[]
   wechat_config          ClanWechatConfig?
   wechat_articles        ClanWechatArticle[]
+  export_tasks           ClanExportTask[]
+  tool_usage_logs        ToolUsageLog[]
+  memory_quizzes         LocalMemoryQuiz[]
 
   @@index([status])
   @@index([register_ip])
@@ -224,6 +229,7 @@ model Person {
   wife_in                 FamilyUnit[]               @relation("WifeRelation")
   media_links             MediaPersonLink[]
   matched_persons         MergeApplication[]         @relation("MatchedPerson")
+  merge_branch_roots      MergeApplication[]         @relation("MergeBranchRoot")
   ancestor_links          PersonAncestry[]           @relation("AncestorRelation")
   descendant_links        PersonAncestry[]           @relation("DescendantRelation")
   video_projects          VideoProject[]
@@ -456,7 +462,13 @@ model MediaArchive {
   uploader_id                  String                     @map("uploader_id")
   file_url                     String                     @map("file_url")
   taken_year                   Int?                       @map("taken_year")
+  taken_on                     DateTime?                  @map("taken_on")
   taken_location               String?                    @map("taken_location")
+  latitude                     Float?                     @map("latitude")
+  longitude                    Float?                     @map("longitude")
+  width                        Int?                       @map("width")
+  height                       Int?                       @map("height")
+  original_filename            String?                    @map("original_filename") @db.VarChar(255)
   description                  String?                    @map("description")
   category                     String?                    @map("category") // 影像分类：个人照片、村寨风貌、祭祀活动等
   is_cover                     Boolean                    @default(false) @map("is_cover") // 是否为聚落封面
@@ -577,15 +589,21 @@ model MergeApplication {
   match_details     String?           @map("match_details")
   status            ApplicationStatus @default(PENDING) @map("status")
   reject_reason     String?           @map("reject_reason")
-  merge_target_id   BigInt?           @map("merge_target_id")
-  reviewed_by       String?           @map("reviewed_by")
-  reviewed_at       DateTime?         @map("reviewed_at")
-  created_at        DateTime          @default(now()) @map("created_at")
-  applicant         User              @relation("Applicant", fields: [applicant_id], references: [id], onDelete: Cascade)
-  clan              Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
-  matched_person    Person?           @relation("MatchedPerson", fields: [matched_person_id], references: [id])
-  reviewer          User?             @relation("ApplicationReviewer", fields: [reviewed_by], references: [id])
+  merge_target_id       BigInt?           @map("merge_target_id")
+  applicant_clan_id     BigInt?           @map("applicant_clan_id")
+  branch_root_person_id BigInt?           @map("branch_root_person_id")
+  reviewed_by           String?           @map("reviewed_by")
+  reviewed_at           DateTime?         @map("reviewed_at")
+  created_at            DateTime          @default(now()) @map("created_at")
+  applicant             User              @relation("Applicant", fields: [applicant_id], references: [id], onDelete: Cascade)
+  clan                  Clan              @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  applicant_clan        Clan?             @relation("MergeApplicantClan", fields: [applicant_clan_id], references: [id], onDelete: SetNull)
+  matched_person        Person?           @relation("MatchedPerson", fields: [matched_person_id], references: [id])
+  branch_root_person    Person?           @relation("MergeBranchRoot", fields: [branch_root_person_id], references: [id], onDelete: SetNull)
+  reviewer              User?             @relation("ApplicationReviewer", fields: [reviewed_by], references: [id])
 
+  @@index([applicant_clan_id])
+  @@index([branch_root_person_id])
   @@map("merge_applications")
 }
 
@@ -650,6 +668,28 @@ model AuditLog {
   @@index([user_id])
   @@index([action])
   @@map("audit_logs")
+}
+
+// 家族数据导出任务。文件保留 7 天，由定时任务删除。
+model ClanExportTask {
+  id            BigInt    @id @default(autoincrement()) @map("id")
+  clan_id       BigInt    @map("clan_id")
+  requested_by  String    @map("requested_by")
+  export_type   String    @map("export_type") @db.VarChar(32)
+  format        String    @map("format") @db.VarChar(8)
+  status        String    @default("pending") @map("status") @db.VarChar(16)
+  file_path     String?   @map("file_path")
+  file_name     String?   @map("file_name")
+  error_message String?   @map("error_message") @db.Text
+  created_at    DateTime  @default(now()) @map("created_at")
+  completed_at  DateTime? @map("completed_at")
+  expires_at    DateTime  @map("expires_at")
+  clan          Clan      @relation(fields: [clan_id], references: [id], onDelete: Cascade)
+  requester     User      @relation(fields: [requested_by], references: [id], onDelete: Cascade)
+
+  @@index([clan_id, created_at])
+  @@index([expires_at])
+  @@map("clan_export_tasks")
 }
 
 model Notification {
@@ -988,6 +1028,7 @@ model PdfParseTemp {
 model ToolUsageLog {
   id             BigInt          @id @default(autoincrement()) @map("id")
   user_id        String          @map("user_id")
+  clan_id        BigInt?         @map("clan_id")
   tool_type      ToolType        @map("tool_type")
   media_id       BigInt?         @map("media_id")
   credits_used   Int             @map("credits_used")
@@ -998,11 +1039,13 @@ model ToolUsageLog {
   created_at     DateTime        @default(now()) @map("created_at")
   completed_at   DateTime?       @map("completed_at")
   user           User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  clan           Clan?           @relation(fields: [clan_id], references: [id], onDelete: SetNull)
 
   @@index([user_id])
   @@index([tool_type])
   @@index([status])
   @@index([created_at])
+  @@index([clan_id, created_at])
   @@map("tool_usage_logs")
 }
 
@@ -1240,6 +1283,7 @@ enum ApplicationStatus {
   NEEDS_MANUAL_REVIEW
   MERGED
   REVERTED
+  WITHDRAWN
 }
 
 enum OrderStatus {
@@ -2105,18 +2149,22 @@ model LocalMemoryQuiz {
   decade     Int              @map("decade")
   question   String           @map("question")
   answer     String?          @map("answer")
-  status     MemoryQuizStatus @default(PENDING) @map("status")
-  creator_id String           @map("creator_id")
-  tags       String?          @map("tags")
+  status        MemoryQuizStatus @default(PENDING) @map("status")
+  reject_reason String?          @map("reject_reason") @db.Text
+  creator_id    String           @map("creator_id")
+  clan_id       BigInt?          @map("clan_id")
+  tags          String?          @map("tags")
   created_at DateTime         @default(now()) @map("created_at")
   updated_at DateTime         @updatedAt @map("updated_at")
 
   creator User                @relation(fields: [creator_id], references: [id], onDelete: Cascade)
+  clan    Clan?               @relation(fields: [clan_id], references: [id], onDelete: SetNull)
   answers LocalMemoryAnswer[]
 
   @@index([location, decade])
   @@index([status])
   @@index([creator_id])
+  @@index([clan_id, status])
   @@map("local_memory_quizzes")
 }
 
@@ -2269,6 +2317,8 @@ model ClanAnnouncement {
   is_active    Boolean   @default(true) @map("is_active")
   published_at DateTime? @map("published_at")
   created_by   String    @map("created_by")
+  deleted_at   DateTime? @map("deleted_at")
+  deleted_by   String?   @map("deleted_by")
   created_at   DateTime  @default(now()) @map("created_at")
   updated_at   DateTime  @updatedAt @map("updated_at")
   clan         Clan      @relation(fields: [clan_id], references: [id], onDelete: Cascade)
@@ -2276,6 +2326,7 @@ model ClanAnnouncement {
 
   @@index([clan_id, is_active, published_at])
   @@index([clan_id, is_pinned])
+  @@index([clan_id, deleted_at])
   @@map("clan_announcements")
 }
 

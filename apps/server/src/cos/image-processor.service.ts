@@ -49,16 +49,7 @@ export class ImageProcessorService {
       bucketType: 'hot',
     });
 
-    // 3. 生成并上传缩略图 (300px WebP)
-    const thumbBuffer = await sharp(buffer)
-      .resize(300, undefined, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 75 })
-      .toBuffer();
-    const thumbKey = `media/thumb/${clanIdStr}/${uuid}.webp`;
-    const thumbResult = await this.cosService.uploadFile(thumbKey, thumbBuffer, {
-      contentType: 'image/webp',
-      bucketType: 'hot',
-    });
+    const thumbResult = await this.writeThumb(buffer, clanIdStr, uuid);
 
     this.logger.log(`图片处理完成: original=${originalKey}, display=OK, thumb=OK`);
 
@@ -68,6 +59,27 @@ export class ImageProcessorService {
       thumbUrl: thumbResult.url,
       originalExt: ext,
     };
+  }
+
+  /**
+   * 从原图重新生成 300px WebP 缩略图，沿用上传时的三档缩略图处理。
+   */
+  async regenerateThumb(buffer: Buffer, clanId: string | bigint): Promise<string> {
+    const uuid = uuidv4().replace(/-/g, '');
+    const thumb = await this.writeThumb(buffer, clanId.toString(), uuid);
+    return thumb.url;
+  }
+
+  private async writeThumb(buffer: Buffer, clanIdStr: string, uuid: string) {
+    const thumbBuffer = await sharp(buffer)
+      .resize(300, undefined, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 75 })
+      .toBuffer();
+    const thumbKey = `media/thumb/${clanIdStr}/${uuid}.webp`;
+    return this.cosService.uploadFile(thumbKey, thumbBuffer, {
+      contentType: 'image/webp',
+      bucketType: 'hot',
+    });
   }
 
   /**

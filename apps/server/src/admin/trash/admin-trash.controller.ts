@@ -7,11 +7,14 @@ import {
   Query,
   UseGuards,
   Request,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AdminService } from '../admin.service';
 import { PrismaService } from '@geneasphere/db';
+import { clientIp } from '../../common/client-ip';
 
 @ApiTags('admin/trash')
 @Controller('api/admin/trash')
@@ -35,7 +38,7 @@ export class AdminTrashController {
     @Query('pageSize') pageSize?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -93,23 +96,26 @@ export class AdminTrashController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    const person = await this.prisma.person.findUnique({
-      where: { id: BigInt(id) },
+    const person = await this.prisma.person.findFirst({
+      where: { id: BigInt(id), clan_id: clanId, deleted_at: { not: null } },
     });
 
-    if (!person || !person.deleted_at) {
-      throw new Error('Member not found or not deleted');
+    if (!person) {
+      throw new NotFoundException('成员不存在或不属于当前家族回收站');
     }
 
-    const restored = await this.prisma.person.update({
-      where: { id: BigInt(id) },
+    const restored = await this.prisma.person.updateMany({
+      where: { id: person.id, clan_id: clanId, deleted_at: { not: null } },
       data: {
         deleted_at: null,
         deleted_by: null,
       },
     });
+    if (restored.count === 0) {
+      throw new NotFoundException('成员不存在或不属于当前家族回收站');
+    }
 
     await this.adminService.logAction({
       clanId,
@@ -118,11 +124,12 @@ export class AdminTrashController {
       targetType: 'Person',
       targetId: id,
       details: `恢复成员: ${person.full_name}`,
+      ipAddress: clientIp(req),
     });
 
     return {
-      id: restored.id.toString(),
-      full_name: restored.full_name,
+      id: person.id.toString(),
+      full_name: person.full_name,
       restored_at: new Date(),
     };
   }
@@ -138,37 +145,36 @@ export class AdminTrashController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    const person = await this.prisma.person.findUnique({
-      where: { id: BigInt(id) },
-      include: {
-        ancestor_links: true,
-        descendant_links: true,
-        children_in: true,
-        husband_in: true,
-        wife_in: true,
-      },
+    const person = await this.prisma.person.findFirst({
+      where: { id: BigInt(id), clan_id: clanId, deleted_at: { not: null } },
     });
 
     if (!person) {
-      throw new Error('Member not found');
+      throw new NotFoundException('成员不存在或不属于当前家族回收站');
     }
 
-    // 检查是否有未删除的关联数据
-    const hasActiveRelations =
-      person.ancestor_links?.length > 0 ||
-      person.descendant_links?.length > 0 ||
-      person.children_in?.length > 0;
-
-    if (hasActiveRelations) {
-      throw new Error('Cannot permanently delete member with active relationships');
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.personAncestry.deleteMany({
+          where: { OR: [{ ancestor_id: person.id }, { descendant_id: person.id }] },
+        });
+        await tx.familyChild.deleteMany({ where: { child_id: person.id } });
+        await tx.familyUnit.updateMany({
+          where: { clan_id: clanId, husband_id: person.id },
+          data: { husband_id: null },
+        });
+        await tx.familyUnit.updateMany({
+          where: { clan_id: clanId, wife_id: person.id },
+          data: { wife_id: null },
+        });
+        await tx.person.delete({ where: { id: person.id } });
+      });
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      throw new BadRequestException('永久删除失败，该成员仍被其他资料引用');
     }
-
-    // 永久删除
-    await this.prisma.person.delete({
-      where: { id: BigInt(id) },
-    });
 
     await this.adminService.logAction({
       clanId,
@@ -177,6 +183,7 @@ export class AdminTrashController {
       targetType: 'Person',
       targetId: id,
       details: `永久删除成员: ${person.full_name}`,
+      ipAddress: clientIp(req),
     });
 
     return { success: true };
@@ -194,7 +201,7 @@ export class AdminTrashController {
     @Query('pageSize') pageSize?: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const pageNum = parseInt(page || '1', 10);
     const pageSizeNum = parseInt(pageSize || '20', 10);
@@ -253,23 +260,33 @@ export class AdminTrashController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    const media = await this.prisma.mediaArchive.findUnique({
-      where: { id: BigInt(id) },
+    const media = await this.prisma.mediaArchive.findFirst({
+      where: { id: BigInt(id), clan_id: clanId, deleted_at: { not: null } },
     });
 
-    if (!media || !media.deleted_at) {
-      throw new Error('Media not found or not deleted');
+    if (!media) {
+      throw new NotFoundException('Media not found');
     }
 
-    const restored = await this.prisma.mediaArchive.update({
-      where: { id: BigInt(id) },
+    const restored = await this.prisma.mediaArchive.updateMany({
+      where: { id: BigInt(id), clan_id: clanId, deleted_at: { not: null } },
       data: {
         deleted_at: null,
         deleted_by: null,
       },
     });
+    if (restored.count === 0) {
+      throw new NotFoundException('Media not found');
+    }
+
+    if (media.album_id != null) {
+      await this.prisma.clanAlbum.updateMany({
+        where: { id: media.album_id, clan_id: clanId },
+        data: { photo_count: { increment: 1 } },
+      });
+    }
 
     await this.adminService.logAction({
       clanId,
@@ -278,10 +295,11 @@ export class AdminTrashController {
       targetType: 'MediaArchive',
       targetId: id,
       details: `恢复影像: ${media.file_url}`,
+      ipAddress: clientIp(req),
     });
 
     return {
-      id: restored.id.toString(),
+      id,
       restored_at: new Date(),
     };
   }
@@ -297,10 +315,10 @@ export class AdminTrashController {
     @Query('clanSlug') clanSlug: string,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
-    const media = await this.prisma.mediaArchive.findUnique({
-      where: { id: BigInt(id) },
+    const media = await this.prisma.mediaArchive.findFirst({
+      where: { id: BigInt(id), clan_id: clanId },
       include: {
         person_links: true,
         reviews: true,
@@ -308,7 +326,7 @@ export class AdminTrashController {
     });
 
     if (!media) {
-      throw new Error('Media not found');
+      throw new NotFoundException('Media not found');
     }
 
     // 先删除关联数据
@@ -326,16 +344,6 @@ export class AdminTrashController {
       where: { id: BigInt(id) },
     });
 
-    // 更新相册照片数
-    if (media.album_id) {
-      await this.prisma.clanAlbum.update({
-        where: { id: media.album_id },
-        data: {
-          photo_count: { decrement: 1 },
-        },
-      }).catch(() => {});
-    }
-
     await this.adminService.logAction({
       clanId,
       userId,
@@ -343,8 +351,97 @@ export class AdminTrashController {
       targetType: 'MediaArchive',
       targetId: id,
       details: `永久删除影像: ${media.file_url}`,
+      ipAddress: clientIp(req),
     });
 
+    return { success: true };
+  }
+
+  @Get('announcements')
+  @ApiOperation({ summary: '获取已删除公告列表' })
+  async getDeletedAnnouncements(
+    @Request() req,
+    @Query('clanSlug') clanSlug: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const pageNum = parseInt(page || '1', 10);
+    const pageSizeNum = parseInt(pageSize || '20', 10);
+    const skip = (pageNum - 1) * pageSizeNum;
+    const where = { clan_id: clanId, deleted_at: { not: null } };
+    const [rows, total] = await Promise.all([
+      this.prisma.clanAnnouncement.findMany({
+        where,
+        orderBy: { deleted_at: 'desc' },
+        skip,
+        take: pageSizeNum,
+      }),
+      this.prisma.clanAnnouncement.count({ where }),
+    ]);
+    return {
+      data: rows.map((row) => ({
+        id: row.id.toString(),
+        title: row.title,
+        deleted_at: row.deleted_at,
+        deleted_by: row.deleted_by,
+      })),
+      total,
+      page: pageNum,
+      pageSize: pageSizeNum,
+      totalPages: Math.ceil(total / pageSizeNum),
+    };
+  }
+
+  @Post('announcements/:id/restore')
+  @ApiOperation({ summary: '恢复已删除公告' })
+  async restoreAnnouncement(
+    @Request() req,
+    @Param('id') id: string,
+    @Query('clanSlug') clanSlug: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const restored = await this.prisma.clanAnnouncement.updateMany({
+      where: { id: BigInt(id), clan_id: clanId, deleted_at: { not: null } },
+      data: { deleted_at: null, deleted_by: null, is_active: false },
+    });
+    if (restored.count === 0) throw new NotFoundException('公告不存在');
+    await this.adminService.logAction({
+      clanId,
+      userId,
+      action: 'RESTORE_ANNOUNCEMENT',
+      targetType: 'ClanAnnouncement',
+      targetId: id,
+      details: '恢复公告',
+      ipAddress: clientIp(req),
+    });
+    return { id, restored_at: new Date() };
+  }
+
+  @Delete('announcements/:id')
+  @ApiOperation({ summary: '永久删除公告' })
+  async permanentDeleteAnnouncement(
+    @Request() req,
+    @Param('id') id: string,
+    @Query('clanSlug') clanSlug: string,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+    const removed = await this.prisma.clanAnnouncement.deleteMany({
+      where: { id: BigInt(id), clan_id: clanId, deleted_at: { not: null } },
+    });
+    if (removed.count === 0) throw new NotFoundException('公告不存在');
+    await this.adminService.logAction({
+      clanId,
+      userId,
+      action: 'PERMANENT_DELETE_ANNOUNCEMENT',
+      targetType: 'ClanAnnouncement',
+      targetId: id,
+      details: '永久删除公告',
+      ipAddress: clientIp(req),
+    });
     return { success: true };
   }
 }

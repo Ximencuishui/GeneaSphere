@@ -6,32 +6,18 @@
         迁徙事件管理
       </h2>
       <div class="page-actions">
-        <el-select
-          v-model="selectedClanSlug"
-          placeholder="选择家族"
-          filterable
-          style="width: 240px"
-          @change="onClanChange"
-        >
-          <el-option
-            v-for="clan in myClans"
-            :key="clan.slug || clan.id"
-            :label="clan.name"
-            :value="clan.slug"
-          />
-        </el-select>
-        <el-button type="primary" :disabled="!selectedClanSlug" @click="openCreateDialog">
+        <el-button type="primary" :disabled="!clanSlug" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
           新建迁徙事件
         </el-button>
-        <el-button :disabled="!selectedClanSlug" @click="showMissingDialog = true">
+        <el-button :disabled="!clanSlug" @click="showMissingDialog = true">
           <el-icon><Warning /></el-icon>
           补全经纬度 ({{ missingLocations.length }})
         </el-button>
       </div>
     </div>
 
-    <div v-if="selectedClanSlug" class="content-body">
+    <div class="content-body">
       <!-- 统计卡片 -->
       <div class="stat-cards">
         <el-card shadow="hover" class="stat-card">
@@ -126,8 +112,6 @@
       </el-card>
     </div>
 
-    <el-empty v-else description="请先选择一个家族" class="empty-state" />
-
     <!-- 新建/编辑对话框 -->
     <el-dialog
       v-model="dialogVisible"
@@ -164,7 +148,13 @@
           </el-col>
         </el-form-item>
         <el-form-item label="关联人物">
-          <el-select v-model="form.person_id" placeholder="可选" filterable clearable>
+          <el-select
+            v-model="form.person_id"
+            placeholder="缺少按家族查询人物的接口"
+            filterable
+            clearable
+            disabled
+          >
             <el-option
               v-for="p in persons"
               :key="p.id"
@@ -234,27 +224,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import { Location, Plus, Warning, Right } from '@element-plus/icons-vue';
-import { useClanStore } from '@/stores/clan';
 import { migrationApi } from '@/api/migration';
 import type { MigrationEvent, CreateMigrationEventDto, Branch } from '@/types';
 
-const clanStore = useClanStore();
+const route = useRoute();
+/** 父路由 /zupu/:slug 的 slug，是当前家族的唯一标识 */
+const clanSlug = computed(() => String(route.params.slug ?? ''));
 
-const myClans = computed(() => {
-  const list = clanStore.clans || [];
-  // 同时暴露 slug（用于 API 调用）和 id（fallback/展示），与项目 slug 规范一致
-  return list.map((c: any) => ({
-    id: c.id?.toString?.() ?? String(c.id ?? ''),
-    slug: (c.slug ?? '').toString(),
-    name: c.name,
-  }));
-});
-
-const selectedClanSlug = ref<string>('');
 const events = ref<MigrationEvent[]>([]);
 const branches = ref<Branch[]>([]);
 const persons = ref<Array<{ id: string; full_name: string }>>([]);
@@ -297,21 +278,16 @@ const rules: FormRules = {
 
 const showMissingDialog = ref(false);
 
-onMounted(async () => {
-  await clanStore.fetchClans();
-});
-
-watch(selectedClanSlug, async (slug) => {
-  if (!slug) return;
-  await loadEvents(slug);
-  await loadBranches(slug);
-  await loadMissingLocations(slug);
-  // 简化：这里只取前 50 个人物作为关联候选
-  persons.value = Array.from({ length: 50 }, (_, i) => ({
-    id: (i + 1).toString(),
-    full_name: `示例人物 ${i + 1}`,
-  }));
-});
+watch(
+  clanSlug,
+  async (slug) => {
+    if (!slug) return;
+    await loadEvents(slug);
+    await loadBranches(slug);
+    await loadMissingLocations(slug);
+  },
+  { immediate: true },
+);
 
 async function loadEvents(clanSlug: string) {
   loading.value = true;
@@ -346,8 +322,10 @@ async function loadMissingLocations(clanSlug: string) {
   }
 }
 
-function onClanChange(slug: string) {
-  selectedClanSlug.value = slug;
+function eventPayload(): CreateMigrationEventDto {
+  const payload = { ...form.value };
+  if (!payload.person_id) delete payload.person_id;
+  return payload;
 }
 
 function openCreateDialog() {
@@ -384,16 +362,17 @@ async function submitForm() {
     if (!valid) return;
     submitting.value = true;
     try {
+      const payload = eventPayload();
       if (editingId.value) {
-        await migrationApi.updateEvent(selectedClanSlug.value, editingId.value, form.value);
+        await migrationApi.updateEvent(clanSlug.value, editingId.value, payload);
         ElMessage.success('已更新');
       } else {
-        await migrationApi.createEvent(selectedClanSlug.value, form.value);
+        await migrationApi.createEvent(clanSlug.value, payload);
         ElMessage.success('已创建');
       }
       dialogVisible.value = false;
-      await loadEvents(selectedClanSlug.value);
-      await loadMissingLocations(selectedClanSlug.value);
+      await loadEvents(clanSlug.value);
+      await loadMissingLocations(clanSlug.value);
     } catch (e: any) {
       ElMessage.error('保存失败：' + (e?.message || ''));
     } finally {
@@ -409,10 +388,10 @@ async function confirmDelete(row: MigrationEvent) {
     { type: 'warning' },
   );
   try {
-    await migrationApi.deleteEvent(selectedClanSlug.value, row.id);
+    await migrationApi.deleteEvent(clanSlug.value, row.id);
     ElMessage.success('已删除');
-    await loadEvents(selectedClanSlug.value);
-    await loadMissingLocations(selectedClanSlug.value);
+    await loadEvents(clanSlug.value);
+    await loadMissingLocations(clanSlug.value);
   } catch (e: any) {
     if (e === 'cancel') return;
     ElMessage.error('删除失败：' + (e?.message || ''));
@@ -420,7 +399,7 @@ async function confirmDelete(row: MigrationEvent) {
 }
 
 async function batchFillCoords() {
-  if (!selectedClanSlug.value) return;
+  if (!clanSlug.value) return;
   const toFill = missingLocations.value.filter(
     (loc) => typeof loc.lat === 'number' && typeof loc.lng === 'number' && (loc.lat !== null && loc.lng !== null),
   );
@@ -431,7 +410,7 @@ async function batchFillCoords() {
   fillingCoords.value = true;
   try {
     for (const loc of toFill) {
-      await migrationApi.fillCoords(selectedClanSlug.value, {
+      await migrationApi.fillCoords(clanSlug.value, {
         location_name: loc.name,
         lat: loc.lat as number,
         lng: loc.lng as number,
@@ -439,7 +418,7 @@ async function batchFillCoords() {
     }
     ElMessage.success(`已补全 ${toFill.length} 个地点的经纬度`);
     showMissingDialog.value = false;
-    await loadMissingLocations(selectedClanSlug.value);
+    await loadMissingLocations(clanSlug.value);
   } catch (e: any) {
     ElMessage.error('批量补全失败：' + (e?.message || ''));
   } finally {
@@ -548,7 +527,4 @@ function reasonLabel(r: string): string {
   color: #a0aec0;
 }
 
-.empty-state {
-  margin-top: 80px;
-}
 </style>

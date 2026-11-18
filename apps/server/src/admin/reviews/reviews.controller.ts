@@ -30,6 +30,7 @@ export class ReviewsController {
     @Query('page') pageStr = '1',
     @Query('pageSize') pageSizeStr = '20',
     @Query('status') status = 'PENDING',
+    @Query('uploaderId') uploaderId?: string,
   ) {
     const userId = req.user.userId;
     const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
@@ -37,36 +38,40 @@ export class ReviewsController {
     const page = parseInt(pageStr) || 1;
     const pageSize = parseInt(pageSizeStr) || 20;
     const skip = (page - 1) * pageSize;
+    const mediaWhere: { clan_id: bigint; uploader_id?: string } = { clan_id: clanId };
+    if (uploaderId?.trim()) mediaWhere.uploader_id = uploaderId.trim();
+    const where = {
+      media: mediaWhere,
+      status: status as ReviewStatus,
+    };
 
     const [reviews, total] = await Promise.all([
       this.prisma.mediaReview.findMany({
-        where: {
-          media: { clan_id: clanId },
-          status: status as ReviewStatus,
-        },
+        where,
         include: {
-          media: true,
+          media: {
+            include: {
+              uploader: { select: { id: true, nickname: true, phone: true } },
+            },
+          },
           reviewer: { select: { id: true, phone: true } },
         },
         orderBy: { created_at: 'desc' },
         skip,
         take: pageSize,
       }),
-      this.prisma.mediaReview.count({
-        where: {
-          media: { clan_id: clanId },
-          status: status as ReviewStatus,
-        },
-      }),
+      this.prisma.mediaReview.count({ where }),
     ]);
 
     return {
       data: reviews.map(r => ({
         id: r.id.toString(),
         media_id: r.media_id.toString(),
-        media_url: r.media.file_url,
-        thumbnail_url: r.media.file_url, // 可以用缩略图服务
+        media_url: r.media.display_url || r.media.file_url,
+        thumbnail_url: r.media.thumb_url || r.media.file_url,
         uploader_id: r.media.uploader_id,
+        uploader_name: r.media.uploader?.nickname || r.media.uploader?.phone || r.media.uploader_id,
+        category: r.media.category,
         taken_year: r.media.taken_year,
         taken_location: r.media.taken_location,
         description: r.media.description,
@@ -107,14 +112,26 @@ export class ReviewsController {
 
     await this.adminService.requireAdmin(review.media.clan_id, userId);
 
+    if (review.status !== ReviewStatus.PENDING) {
+      throw new BadRequestException('只有待审核的影像可以通过');
+    }
+
     const updated = await this.prisma.mediaReview.update({
       where: { id: reviewId },
       data: {
         status: ReviewStatus.APPROVED,
+        reject_reason: null,
         reviewer_id: userId,
         reviewed_at: new Date(),
       },
     });
+
+    await this.notificationService.notifyMediaReview({
+      uploaderId: review.media.uploader_id,
+      clanId: review.media.clan_id,
+      mediaId: review.media_id.toString(),
+      approved: true,
+    }).catch((err) => console.error('Failed to send notification:', err));
 
     await this.adminService.logAction({
       clanId: review.media.clan_id,

@@ -129,6 +129,13 @@ export class UpdateFamilyBookPageDto {
   body?: string;
 }
 
+export class ReplaceFamilyBookPhotoDto {
+  @ApiProperty({ description: '用于替换的影像 ID（本族已可见的图片）' })
+  @IsString()
+  @MaxLength(30)
+  media_id: string;
+}
+
 export class PlaceFamilyBookOrderDto {
   @ApiProperty({ description: '印刷规格，如 A4精装' })
   @IsString()

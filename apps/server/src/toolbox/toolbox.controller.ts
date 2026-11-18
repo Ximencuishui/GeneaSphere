@@ -8,6 +8,7 @@ import { ProcessImageDto } from './dto/process-image.dto';
 import { PurchasePackageDto, PACKAGE_PRICES } from './dto/purchase-package.dto';
 import { AllocateCreditsDto } from './dto/allocate-credits.dto';
 import { CapabilityService } from '../common/capability.service';
+import { PrismaService } from '@geneasphere/db';
 
 @ApiTags('工具箱')
 @ApiBearerAuth()
@@ -19,6 +20,7 @@ export class ToolboxController {
     private readonly packageService: PackageService,
     private readonly aiProcessor: AIProcessorService,
     private readonly capabilities: CapabilityService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get('credits')
@@ -86,6 +88,7 @@ export class ToolboxController {
 
     // 创建使用记录
     const { cost, estimatedCost } = this.creditService.getToolCost(dto.tool_type);
+    const clanId = await this.resolveProcessClan(userId, dto.clan_slug);
     const usageLog = await this.creditService.createUsageLog(
       userId,
       dto.tool_type,
@@ -93,6 +96,8 @@ export class ToolboxController {
       estimatedCost,
       'processing',
       dto.image_url,
+      undefined,
+      clanId,
     );
 
     // 安全解析 person_ids
@@ -153,6 +158,20 @@ export class ToolboxController {
   }
 
   // ========== 家族共享功能（需要管理员权限）==========
+  private async resolveProcessClan(userId: string, clanSlug?: string): Promise<bigint | null> {
+    const slug = clanSlug?.trim();
+    if (!slug) return null;
+    const clan = /^\d+$/.test(slug)
+      ? await this.prisma.clan.findUnique({ where: { id: BigInt(slug) }, select: { id: true } })
+      : await this.prisma.clan.findUnique({ where: { slug }, select: { id: true } });
+    if (!clan) return null;
+    const member = await this.prisma.clanMember.findUnique({
+      where: { clan_id_user_id: { clan_id: clan.id, user_id: userId } },
+      select: { user_id: true },
+    });
+    return member ? clan.id : null;
+  }
+
   private async checkAdminPermission(prisma: any, userId: string) {
     const member = await prisma.clanMember.findFirst({
       where: {

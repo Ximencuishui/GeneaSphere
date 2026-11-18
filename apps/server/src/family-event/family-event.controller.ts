@@ -8,10 +8,14 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Request,
   BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FamilyEventService } from './family-event.service';
 import { CreateFamilyEventDto } from './dto/create-family-event.dto';
@@ -19,6 +23,18 @@ import { UpdateFamilyEventDto } from './dto/update-family-event.dto';
 import { FamilyEventType } from '@prisma/client';
 import { AdminService } from '../admin/admin.service';
 import { ClanResolverService } from '../common/clan-resolver.service';
+import { parseFamilyEventCsv } from './family-event-csv';
+
+function readCsvText(file?: Express.Multer.File, body?: { csv?: string } | string): string {
+  if (file?.buffer && Buffer.isBuffer(file.buffer) && file.buffer.length > 0) {
+    return file.buffer.toString('utf8');
+  }
+  if (typeof body === 'string' && body.trim()) return body;
+  if (body && typeof body === 'object' && typeof body.csv === 'string' && body.csv.trim()) {
+    return body.csv;
+  }
+  throw new BadRequestException('请上传 CSV 文件');
+}
 
 @ApiTags('family-event')
 @ApiBearerAuth()
@@ -104,6 +120,48 @@ export class FamilyEventController {
       throw new BadRequestException('events 必须是数组');
     }
     return this.service.bulkCreate(clanId, req.user.userId, body.events);
+  }
+
+  @Post(':clanSlug/import-csv')
+  @ApiOperation({ summary: '从 CSV 导入家族事件' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        if (file.originalname && !/\.csv$/i.test(file.originalname)) {
+          cb(new BadRequestException('只允许上传 .csv 文件'), false);
+          return;
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async importCsv(
+    @Request() req,
+    @Param('clanSlug') clanSlug: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() body?: { csv?: string } | string,
+  ) {
+    const clanId = await this.admin.requireAdminBySlug(clanSlug, req.user.userId);
+    const parsed = parseFamilyEventCsv(readCsvText(file, body));
+    const bulk = parsed.events.length
+      ? await this.service.bulkCreate(clanId, req.user.userId, parsed.events)
+      : { success: 0, skipped: 0, failed: 0, errors: [] as Array<{ index: number; error: string }> };
+    const errors = [
+      ...parsed.errors,
+      ...bulk.errors.map((item) => ({
+        line: parsed.lineNumbers[item.index] ?? item.index + 1,
+        reason: item.error || '导入失败',
+      })),
+    ];
+    return {
+      success: bulk.success,
+      skipped: bulk.skipped,
+      failed: errors.length,
+      errors,
+    };
   }
 
   @Post(':clanSlug/generate-life-events')

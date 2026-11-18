@@ -22,7 +22,7 @@ const storageInfo = ref({
   used_bytes: 0,
   used_percentage: 0,
   max_bytes: 5 * 1024 * 1024 * 1024,
-  breakdown: { photos: 0, videos: 0, others: 0 },
+  breakdown: { photos: 0, videos: 0, others: 0, photos_bytes: 0, videos_bytes: 0, others_bytes: 0 },
 });
 
 /** 套餐列表 + 申请记录 */
@@ -78,6 +78,9 @@ const fetchStorage = async () => {
         photos: Number(res.data?.breakdown?.photos || 0),
         videos: Number(res.data?.breakdown?.videos || 0),
         others: Number(res.data?.breakdown?.others || 0),
+        photos_bytes: Number(res.data?.breakdown?.photos_bytes || 0),
+        videos_bytes: Number(res.data?.breakdown?.videos_bytes || 0),
+        others_bytes: Number(res.data?.breakdown?.others_bytes || 0),
       },
     };
   } catch (error) {
@@ -262,19 +265,19 @@ watch(
               <ElCol :span="8">
                 <div class="breakdown-item">
                   <div class="breakdown-icon" style="background-color: #409EFF;" />
-                  <span>照片：{{ storageInfo.breakdown.photos }} 张</span>
+                  <span>照片：{{ storageInfo.breakdown.photos }} 张（{{ formatGB(storageInfo.breakdown.photos_bytes) }} GB）</span>
                 </div>
               </ElCol>
               <ElCol :span="8">
                 <div class="breakdown-item">
                   <div class="breakdown-icon" style="background-color: #67C23A;" />
-                  <span>视频：{{ storageInfo.breakdown.videos }} 个</span>
+                  <span>视频：{{ storageInfo.breakdown.videos }} 个（{{ formatGB(storageInfo.breakdown.videos_bytes) }} GB）</span>
                 </div>
               </ElCol>
               <ElCol :span="8">
                 <div class="breakdown-item">
                   <div class="breakdown-icon" style="background-color: #E6A23C;" />
-                  <span>其他：{{ storageInfo.breakdown.others }} 个</span>
+                  <span>其他：{{ storageInfo.breakdown.others }} 个（{{ formatGB(storageInfo.breakdown.others_bytes) }} GB）</span>
                 </div>
               </ElCol>
             </ElRow>

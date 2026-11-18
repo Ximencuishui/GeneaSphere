@@ -346,7 +346,6 @@ async function handleSubmitPost() {
       origin_place: createForm.origin_place.trim(),
       xipai_keywords: createForm.xipai_keywords,
       contact_info: createForm.contact_info.trim(),
-      created_by: 'current-user', // TODO: 从 auth store 获取
     });
 
     ElMessage.success('发布成功！');

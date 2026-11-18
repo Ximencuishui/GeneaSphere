@@ -58,6 +58,7 @@ export interface ProcessRequest {
   image_url: string;
   mask_url?: string;
   person_ids?: string;
+  clan_slug?: string;
 }
 
 // 处理结果

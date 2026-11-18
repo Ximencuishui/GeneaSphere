@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/global-http-exception.filter';
 import { AlertService } from './common/alert.service';
 import { securityHeaders } from './common/security-headers.middleware';
+import { clientIp, runWithClientIp } from './common/client-ip';
 import {
   createBusinessMetricsRefresher,
   MetricsMiddleware,
@@ -72,6 +73,10 @@ async function bootstrap() {
       }
       callback(null, false);
     },
+  });
+
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    runWithClientIp(clientIp(req), () => next());
   });
 
   const metrics = new MetricsRegistry();

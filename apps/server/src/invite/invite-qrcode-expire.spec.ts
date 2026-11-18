@@ -16,6 +16,7 @@ describe('邀请二维码有效期上限', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   it('超过 30 天被拒绝，且不创建二维码', async () => {

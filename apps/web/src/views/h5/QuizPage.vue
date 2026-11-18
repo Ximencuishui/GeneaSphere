@@ -90,7 +90,11 @@ const loadQuestions = async () => {
   loading.value = true
   try {
     const res = (await axios.get(`/api/invite/h5/quiz/${sessionId}`)).data
-    questions.value = res.questions
+    if (res.skipped || res.required === false) {
+      router.replace({ path: '/h5/success', query: { session_id: sessionId } })
+      return
+    }
+    questions.value = res.questions || []
     total.value = res.total
     required.value = res.required_correct
     maxRetry.value = res.max_retry

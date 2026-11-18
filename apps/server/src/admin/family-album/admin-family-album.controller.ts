@@ -8,6 +8,8 @@ import {
   Body,
   UseGuards,
   Request,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
@@ -114,8 +116,8 @@ export class AdminFamilyAlbumController {
     const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
 
-    const album = await this.prisma.familyBookProject.findUnique({
-      where: { id: BigInt(id) },
+    const album = await this.prisma.familyBookProject.findFirst({
+      where: { id: BigInt(id), clan_id: clanId },
       include: {
         user: {
           select: { id: true, phone: true, nickname: true },
@@ -130,7 +132,7 @@ export class AdminFamilyAlbumController {
     });
 
     if (!album) {
-      throw new Error('Family album not found');
+      throw new NotFoundException('Family album not found');
     }
 
     return {
@@ -158,6 +160,7 @@ export class AdminFamilyAlbumController {
         page_type: p.page_type,
         title: p.title,
         subtitle: p.subtitle,
+        body: p.body,
         content: p.content,
       })),
       created_at: album.created_at,
@@ -166,18 +169,81 @@ export class AdminFamilyAlbumController {
   }
 
   /**
+   * 编辑页面标题、副标题、正文。
+   * 项目必须属于当前家族，页面必须属于该项目。不改 content。
+   * 写在项目更新路由之前，路径也比它多两段。
+   */
+  @Put(':clanSlug/:id/pages/:pageId')
+  @ApiOperation({ summary: '编辑图册页面正文' })
+  async updateFamilyAlbumPage(
+    @Request() req,
+    @Param('clanSlug') clanSlug: string,
+    @Param('id') id: string,
+    @Param('pageId') pageId: string,
+    @Body() body: any,
+  ) {
+    const userId = req.user.userId;
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
+
+    const project = await this.prisma.familyBookProject.findFirst({
+      where: { id: BigInt(id), clan_id: clanId },
+      select: { id: true },
+    });
+    if (!project) {
+      throw new NotFoundException('Family album not found');
+    }
+
+    const page = await this.prisma.familyBookPage.findFirst({
+      where: { id: BigInt(pageId), project_id: project.id },
+      select: { id: true },
+    });
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+
+    const data: { title?: string | null; subtitle?: string | null; body?: string | null } = {};
+    if (body?.title !== undefined) data.title = body.title;
+    if (body?.subtitle !== undefined) data.subtitle = body.subtitle;
+    if (body?.body !== undefined) data.body = body.body;
+
+    if (Object.keys(data).length > 0) {
+      const updated = await this.prisma.familyBookPage.updateMany({
+        where: { id: page.id, project_id: project.id },
+        data,
+      });
+      if (updated.count === 0) {
+        throw new NotFoundException('Page not found');
+      }
+
+      await this.adminService.logAction({
+        clanId,
+        userId,
+        action: 'UPDATE_FAMILY_ALBUM_PAGE',
+        targetType: 'FamilyBookPage',
+        targetId: pageId,
+        details: '更新图册页面',
+      });
+    }
+
+    return {
+      id: pageId,
+      updated_at: new Date(),
+    };
+  }
+
+  /**
    * 更新图册
    */
-  @Put(':id')
+  @Put(':clanSlug/:id')
   @ApiOperation({ summary: '更新图册' })
   async updateFamilyAlbum(
     @Request() req,
+    @Param('clanSlug') clanSlug: string,
     @Param('id') id: string,
     @Body() body: any,
   ) {
     const userId = req.user.userId;
-    const clanId = await this.adminService.requireAdminBySlug(body.clanSlug, userId);
-
+    const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
     const updateData: any = {};
 
@@ -185,10 +251,13 @@ export class AdminFamilyAlbumController {
     if (body.preface !== undefined) updateData.preface = body.preface;
     if (body.status !== undefined) updateData.status = body.status;
 
-    const album = await this.prisma.familyBookProject.update({
-      where: { id: BigInt(id) },
+    const updated = await this.prisma.familyBookProject.updateMany({
+      where: { id: BigInt(id), clan_id: clanId },
       data: updateData,
     });
+    if (updated.count === 0) {
+      throw new NotFoundException('Family album not found');
+    }
 
     await this.adminService.logAction({
       clanId,
@@ -200,8 +269,8 @@ export class AdminFamilyAlbumController {
     });
 
     return {
-      id: album.id.toString(),
-      updated_at: album.updated_at,
+      id,
+      updated_at: new Date(),
     };
   }
 
@@ -219,23 +288,30 @@ export class AdminFamilyAlbumController {
     const clanId = await this.adminService.requireAdminBySlug(clanSlug, userId);
 
 
-    const album = await this.prisma.familyBookProject.findUnique({
-      where: { id: BigInt(id) },
+    const album = await this.prisma.familyBookProject.findFirst({
+      where: { id: BigInt(id), clan_id: clanId },
     });
-
     if (!album) {
-      throw new Error('Family album not found');
+      throw new NotFoundException('Family album not found');
     }
 
-    // 删除关联的页面
+    const printOrderCount = await this.prisma.printOrder.count({
+      where: { family_book_project_id: album.id },
+    });
+    if (printOrderCount > 0) {
+      throw new BadRequestException('该项目已下单，无法删除');
+    }
+
     await this.prisma.familyBookPage.deleteMany({
       where: { project_id: BigInt(id) },
     });
 
-    // 删除图册项目
-    await this.prisma.familyBookProject.delete({
-      where: { id: BigInt(id) },
+    const deleted = await this.prisma.familyBookProject.deleteMany({
+      where: { id: BigInt(id), clan_id: clanId },
     });
+    if (deleted.count === 0) {
+      throw new NotFoundException('Family album not found');
+    }
 
     await this.adminService.logAction({
       clanId,

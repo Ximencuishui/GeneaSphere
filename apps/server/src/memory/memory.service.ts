@@ -113,7 +113,9 @@ export class MemoryService {
     decade: number;
     question: string;
     tags?: string;
+    clanSlug?: string;
   }) {
+    const clanId = await this.clanIdForCreator(userId, data.clanSlug);
     const quiz = await this.prisma.localMemoryQuiz.create({
       data: {
         location: data.location,
@@ -122,11 +124,31 @@ export class MemoryService {
         question: data.question,
         tags: data.tags,
         creator_id: userId,
+        clan_id: clanId,
         status: MemoryQuizStatus.PENDING,
       },
     });
 
     return quiz;
+  }
+
+  /** 带了家族就只记这一家；没带且只属于一个家族时记那一家。多家族且未指定则不归属，避免两边都能审。 */
+  private async clanIdForCreator(userId: string, clanSlug?: string): Promise<bigint | null> {
+    if (clanSlug) {
+      const clan = await this.prisma.clan.findUnique({ where: { slug: clanSlug }, select: { id: true } });
+      if (!clan) throw new NotFoundException('家族不存在');
+      const member = await this.prisma.clanMember.findUnique({
+        where: { clan_id_user_id: { clan_id: clan.id, user_id: userId } },
+        select: { user_id: true },
+      });
+      if (!member) throw new ForbiddenException('不是该家族成员');
+      return clan.id;
+    }
+    const memberships = await this.prisma.clanMember.findMany({
+      where: { user_id: userId },
+      select: { clan_id: true },
+    });
+    return memberships.length === 1 ? memberships[0].clan_id : null;
   }
 
   /**
@@ -329,10 +351,13 @@ export class MemoryService {
   /**
    * 获取待审核题目
    */
-  async getPendingQuizzes(page = 1, pageSize = 20) {
+  async getPendingQuizzes(clanId: bigint, page = 1, pageSize = 20, status?: MemoryQuizStatus | 'ALL') {
+    const where: any = this.quizVisibleToClan(clanId);
+    if (status && status !== 'ALL') where.status = status;
+    else if (!status) where.status = MemoryQuizStatus.PENDING;
     const [quizzes, total] = await Promise.all([
       this.prisma.localMemoryQuiz.findMany({
-        where: { status: MemoryQuizStatus.PENDING },
+        where,
         include: {
           creator: { select: { id: true, nickname: true, phone: true } },
         },
@@ -340,23 +365,33 @@ export class MemoryService {
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      this.prisma.localMemoryQuiz.count({ where: { status: MemoryQuizStatus.PENDING } }),
+      this.prisma.localMemoryQuiz.count({ where }),
     ]);
 
     return { quizzes, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   /**
-   * 审核题目
+   * 审核题目。创建者必须仍是该家族成员。
    */
-  async reviewQuiz(quizId: number, status: MemoryQuizStatus, answer?: string) {
+  async reviewQuiz(quizId: number, clanId: bigint, status: MemoryQuizStatus, answer?: string, rejectReason?: string) {
     const quiz = await this.prisma.localMemoryQuiz.findUnique({
       where: { id: quizId },
     });
     if (!quiz) throw new NotFoundException('题目不存在');
+    if (quiz.clan_id != null && quiz.clan_id !== clanId) throw new NotFoundException('题目不存在');
+    if (quiz.clan_id == null) {
+      const memberships = await this.prisma.clanMember.findMany({
+        where: { user_id: quiz.creator_id },
+        select: { clan_id: true },
+      });
+      const onlyThisClan = memberships.length === 1 && memberships[0].clan_id === clanId;
+      if (!onlyThisClan) throw new NotFoundException('题目不存在');
+    }
 
     const updateData: any = { status };
     if (answer) updateData.answer = answer;
+    if (status === MemoryQuizStatus.REJECTED) updateData.reject_reason = rejectReason?.trim() || null;
 
     await this.prisma.localMemoryQuiz.update({
       where: { id: quizId },
@@ -369,5 +404,18 @@ export class MemoryService {
     }
 
     return { success: true };
+  }
+
+  /** 已标明家族的只给该家族；没标明的只给创建者唯一所属的那个家族。 */
+  private quizVisibleToClan(clanId: bigint) {
+    return {
+      OR: [
+        { clan_id: clanId },
+        {
+          clan_id: null,
+          creator: { clans: { some: { clan_id: clanId }, every: { clan_id: clanId } } },
+        },
+      ],
+    };
   }
 }
