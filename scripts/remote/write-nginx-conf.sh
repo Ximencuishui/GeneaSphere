@@ -9,6 +9,11 @@ set -euo pipefail
 PROJECT_DIR="${PROJECT_DIR:-/opt/geneasphere}"
 WEB_PORT="${WEB_PORT:-80}"
 API_PORT="${API_PORT:-3101}"
+# 优先使用 certbot (Let's Encrypt) 签发的证书，支持自动续期；不存在时回退到手动安装的证书
+if [ -z "${SSL_CERT:-}" ] && [ -f /etc/letsencrypt/live/xungenlu.cn/fullchain.pem ]; then
+    SSL_CERT=/etc/letsencrypt/live/xungenlu.cn/fullchain.pem
+    SSL_KEY=/etc/letsencrypt/live/xungenlu.cn/privkey.pem
+fi
 SSL_CERT="${SSL_CERT:-/etc/nginx/ssl/xungenlu.crt}"
 SSL_KEY="${SSL_KEY:-/etc/nginx/ssl/xungenlu.key}"
 SERVER_NAME="${SERVER_NAME:-xungenlu.cn www.xungenlu.cn _}"
@@ -65,11 +70,19 @@ EOF
 
 if [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
     # 域名访问 80 → 301 跳转 HTTPS
+    # ACME HTTP-01 验证例外（certbot webroot 续期需要，必须优先于跳转）
     cat << EOF
 server {
     listen ${WEB_PORT};
     server_name ${SERVER_NAME% _};
-    return 301 https://\$host\$request_uri;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
 }
 
 # IP / 内部访问（deploy.sh 健康检查、curl localhost）仍走 80 明文
