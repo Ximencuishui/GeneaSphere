@@ -273,20 +273,24 @@ export class MemoryService {
    * 获取用户徽章
    */
   async getUserBadges(userId: string) {
-    return this.prisma.memoryBadge.findMany({
+    const rows = await this.prisma.memoryBadge.findMany({
       where: { user_id: userId },
       orderBy: { awarded_at: 'desc' },
     });
+    // BigInt 字段无法 JSON 序列化，统一转为 Number
+    return rows.map((row) => ({ ...row, id: Number(row.id) }));
   }
 
   /**
    * 获取用户已验证的地区
    */
   async getUserVerifiedLocations(userId: string) {
-    return this.prisma.userVerifiedLocation.findMany({
+    const rows = await this.prisma.userVerifiedLocation.findMany({
       where: { user_id: userId },
       orderBy: { verified_at: 'desc' },
     });
+    // BigInt 字段无法 JSON 序列化，统一转为 Number
+    return rows.map((row) => ({ ...row, id: Number(row.id) }));
   }
 
   /**
